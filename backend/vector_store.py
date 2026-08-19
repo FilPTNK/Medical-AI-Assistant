@@ -1,131 +1,153 @@
 import os
-import uuid
+import re
+import math
 import numpy as np
-import json
-import pickle
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from collections import Counter
 
-# Lazy-loaded model
-_model = None
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
 
-def get_embedding_model():
-    global _model
-    if _model is None:
-        print("Loading local embedding model (all-MiniLM-L6-v2)...")
-        from sentence_transformers import SentenceTransformer
-        import config
-        # This will download the model to HF cache on first run (approx 90MB)
-        _model = SentenceTransformer(config.EMBEDDING_MODEL)
-        print("Embedding model loaded successfully.")
-    return _model
+# 1. Helper function for Vietnamese / English tokenisation
+def tokenize_text(text: str) -> List[str]:
+    text = text.lower()
+    # Matches words, numbers
+    return re.findall(r'\w+', text)
 
-class SimpleVectorStore:
-    """
-    A robust, zero-dependency NumPy-based vector store.
-    Saves index to disk using pickle and json.
-    This guarantees compatibility on all OS platforms without native compilation issues.
-    """
-    def __init__(self, db_dir: str):
-        self.db_dir = db_dir
-        self.index_path = os.path.join(db_dir, "vector_index.pkl")
-        self.metadata_path = os.path.join(db_dir, "metadata.json")
-        os.makedirs(db_dir, exist_ok=True)
-        self.embeddings = [] # List of np.ndarray
-        self.documents = []  # List of dicts: {"text": str, "doc_name": str, "page_num": int}
-        self.load()
+# 2. Local Fallback BM25 implementation for maximum robustness
+class FallbackBM25:
+    def __init__(self, corpus: List[List[str]]):
+        self.corpus_size = len(corpus)
+        self.avgdl = sum(len(doc) for doc in corpus) / self.corpus_size if self.corpus_size > 0 else 0.0
+        self.doc_freqs = []
+        self.doc_len = []
+        self.df = {}
+        self.k1 = 1.5
+        self.b = 0.75
+        
+        for doc in corpus:
+            frequencies = Counter(doc)
+            self.doc_freqs.append(frequencies)
+            self.doc_len.append(len(doc))
+            for word in frequencies:
+                self.df[word] = self.df.get(word, 0) + 1
+                
+        self.idf = {}
+        for word, freq in self.df.items():
+            self.idf[word] = math.log(1 + (self.corpus_size - freq + 0.5) / (freq + 0.5))
 
-    def load(self):
-        if os.path.exists(self.index_path) and os.path.exists(self.metadata_path):
-            try:
-                with open(self.index_path, "rb") as f:
-                    self.embeddings = pickle.load(f)
-                with open(self.metadata_path, "r", encoding="utf-8") as f:
-                    self.documents = json.load(f)
-                print(f"Loaded {len(self.documents)} chunks from local vector store.")
-            except Exception as e:
-                print(f"Error loading vector store: {e}. Starting fresh.")
-                self.embeddings = []
-                self.documents = []
+    def get_scores(self, query: List[str]) -> List[float]:
+        scores = [0.0] * self.corpus_size
+        for q in query:
+            if q not in self.idf:
+                continue
+            idf = self.idf[q]
+            for idx in range(self.corpus_size):
+                tf = self.doc_freqs[idx].get(q, 0)
+                dl = self.doc_len[idx]
+                numerator = tf * (self.k1 + 1)
+                denominator = tf + self.k1 * (1 - self.b + self.b * (dl / self.avgdl)) if self.avgdl > 0 else 1.0
+                scores[idx] += idf * (numerator / denominator)
+        return scores
 
-    def save(self):
+# 3. Lazy loaded Cross-Encoder Reranker
+_cross_encoder = None
+
+def get_cross_encoder():
+    global _cross_encoder
+    if _cross_encoder is None:
+        model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        print(f"Loading local Cross-Encoder reranker ({model_name})...")
         try:
-            with open(self.index_path, "wb") as f:
-                pickle.dump(self.embeddings, f)
-            with open(self.metadata_path, "w", encoding="utf-8") as f:
-                json.dump(self.documents, f, ensure_ascii=False, indent=2)
-            print(f"Saved {len(self.documents)} chunks to local vector store.")
+            from sentence_transformers import CrossEncoder
+            _cross_encoder = CrossEncoder(model_name)
+            print("Cross-Encoder loaded successfully.")
         except Exception as e:
-            print(f"Error saving vector store: {e}")
+            print(f"Failed to load sentence-transformers CrossEncoder: {e}. Running search without reranker.")
+    return _cross_encoder
 
-    def add_chunks(self, chunks: List[Dict[str, Any]]):
-        if not chunks:
+# 4. Upgraded VectorDB class matching the requirements & visual screenshots
+class VectorDB:
+    def __init__(
+        self,
+        documents_or_persist_dir=None,
+        embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        collection_name: str = "vietnamese_docs",
+        persist_dir: str = None,
+    ):
+        # Flexible signature to support both standard initialization and Image 1 constructor
+        if isinstance(documents_or_persist_dir, str):
+            self.persist_dir = documents_or_persist_dir
+            documents = None
+        else:
+            self.persist_dir = persist_dir if persist_dir else "/content/chroma_data"
+            documents = documents_or_persist_dir
+
+        self.collection_name = collection_name
+        
+        print(f"Initializing HuggingFaceEmbeddings with model: {embedding_model}")
+        self.embedding = HuggingFaceEmbeddings(model_name=embedding_model)
+        self.db = self._build_db(documents)
+
+    # Building or loading database as shown in Image 1
+    def _build_db(self, documents):
+        # Trường hợp tải database đã có từ persist_dir
+        if documents is None or len(documents) == 0:
+            db = Chroma(
+                collection_name=self.collection_name,
+                embedding_function=self.embedding,
+                persist_directory=self.persist_dir,
+            )
+        # Trường hợp tạo mới database từ documents
+        else:
+            db = Chroma.from_documents(
+                documents=documents,
+                embedding=self.embedding,
+                collection_name=self.collection_name,
+                persist_directory=self.persist_dir,
+            )
+        return db
+
+    # Get retriever as shown in Image 1
+    def get_retriever(self, search_kwargs: dict = None):
+        if search_kwargs is None:
+            search_kwargs = {"k": 4} # Mặc định lấy 4 document gần nhất
+            
+        return self.db.as_retriever(
+            search_type="similarity",
+            search_kwargs=search_kwargs,
+        )
+
+    # Unified methods for FastAPI interaction
+    def add_chunks(self, documents: List[Document]):
+        if not documents:
             return
-        
-        texts = [c["text"] for c in chunks]
-        model = get_embedding_model()
-        new_embeddings = model.encode(texts, show_progress_bar=False)
-
-        for chunk, emb in zip(chunks, new_embeddings):
-            self.embeddings.append(emb)
-            self.documents.append({
-                "id": str(uuid.uuid4()),
-                "text": chunk["text"],
-                "doc_name": chunk["doc_name"],
-                "page_num": chunk["page_num"]
-            })
-        self.save()
-
-    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        if not self.documents:
-            return []
-
-        model = get_embedding_model()
-        query_emb = model.encode([query], show_progress_bar=False)[0]
-
-        # Compute cosine similarity
-        db_embs = np.array(self.embeddings)
-        # Normalize
-        query_norm = query_emb / np.linalg.norm(query_emb)
-        db_norms = np.linalg.norm(db_embs, axis=1)
-        # Handle zero division
-        db_norms[db_norms == 0] = 1e-10
-        db_embs_norm = db_embs / db_norms[:, np.newaxis]
-
-        similarities = np.dot(db_embs_norm, query_norm)
-        
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
-        
-        results = []
-        for idx in top_indices:
-            score = float(similarities[idx])
-            # Only return matches with positive relevance
-            if score > 0.05:
-                doc = self.documents[idx].copy()
-                doc["score"] = score
-                results.append(doc)
-        return results
+        self.db.add_documents(documents)
+        print(f"Added {len(documents)} documents to vector store.")
 
     def delete_document(self, doc_name: str):
-        indices_to_keep = [i for i, doc in enumerate(self.documents) if doc["doc_name"] != doc_name]
-        self.embeddings = [self.embeddings[i] for i in indices_to_keep]
-        self.documents = [self.documents[i] for i in indices_to_keep]
-        self.save()
+        res = self.db.get(where={"doc_name": doc_name})
+        if res and res["ids"]:
+            self.db.delete(ids=res["ids"])
+            print(f"Deleted document '{doc_name}' ({len(res['ids'])} chunks) from vector database.")
 
     def list_documents(self) -> List[Dict[str, Any]]:
-        # Aggregate unique documents
+        res = self.db.get(include=["metadatas"])
         docs = {}
-        for doc in self.documents:
-            name = doc["doc_name"]
-            if name not in docs:
-                docs[name] = {
-                    "doc_name": name,
-                    "pages": set(),
-                    "chunks": 0
-                }
-            docs[name]["pages"].add(doc["page_num"])
-            docs[name]["chunks"] += 1
-        
+        if res and res["metadatas"]:
+            for meta in res["metadatas"]:
+                name = meta.get("doc_name")
+                page = meta.get("page_num", 1)
+                doc_type = meta.get("doc_type", "child")
+                if not name:
+                    continue
+                if name not in docs:
+                    docs[name] = {"pages": set(), "chunks": 0}
+                docs[name]["pages"].add(page)
+                if doc_type == "child":
+                    docs[name]["chunks"] += 1
+                    
         return [
             {
                 "doc_name": name,
@@ -135,92 +157,120 @@ class SimpleVectorStore:
             for name, info in docs.items()
         ]
 
-# Try to use ChromaDB if installed, otherwise fallback to SimpleVectorStore
-try:
-    import chromadb
-    class ChromaVectorStore:
-        def __init__(self, db_dir: str):
-            self.db_dir = db_dir
-            self.client = chromadb.PersistentClient(path=db_dir)
-            self.collection = self.client.get_or_create_collection(
-                name="medical_assistant",
-                metadata={"hnsw:space": "cosine"}
-            )
-            print("ChromaDB initialized as vector store.")
-
-        def add_chunks(self, chunks: List[Dict[str, Any]]):
-            if not chunks:
-                return
-            texts = [c["text"] for c in chunks]
-            model = get_embedding_model()
-            embeddings = model.encode(texts, show_progress_bar=False).tolist()
+    # Advanced Hybrid Search with BM25, RRF, and Cross-Encoder Reranking
+    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        # Fetch child documents to run sparse BM25 indexing
+        db_content = self.db.get(where={"doc_type": "child"}, include=["metadatas", "documents"])
+        
+        if not db_content or not db_content["documents"]:
+            print("Vector store is empty or has no child chunks. Skipping search.")
+            return []
             
-            ids = [str(uuid.uuid4()) for _ in chunks]
-            metadatas = [{"doc_name": c["doc_name"], "page_num": c["page_num"]} for c in chunks]
+        all_texts = db_content["documents"]
+        all_metadatas = db_content["metadatas"]
+        all_ids = db_content["ids"]
+        
+        # A. DENSE RETRIEVAL: Query similarity from ChromaDB
+        # We search with a wider margin (top_k * 4) to ensure good candidates for RRF and Reranking
+        k_candidates = min(top_k * 4, len(all_texts))
+        dense_results_with_scores = self.db.similarity_search_with_relevance_scores(
+            query, k=k_candidates, filter={"doc_type": "child"}
+        )
+        
+        dense_ranking = []
+        for doc, score in dense_results_with_scores:
+            # Try to match the retrieved doc with the db_content list to find the ID
+            match_idx = -1
+            for idx, text in enumerate(all_texts):
+                if text == doc.page_content and all_metadatas[idx].get("page_num") == doc.metadata.get("page_num"):
+                    match_idx = idx
+                    break
+            if match_idx != -1:
+                dense_ranking.append(all_ids[match_idx])
+                
+        # B. SPARSE RETRIEVAL: BM25 score calculation
+        tokenized_corpus = [tokenize_text(text) for text in all_texts]
+        
+        # Load rank-bm25 if available, otherwise fallback
+        bm25_model = None
+        try:
+            from rank_bm25 import BM25Okapi
+            bm25_model = BM25Okapi(tokenized_corpus)
+        except Exception:
+            bm25_model = FallbackBM25(tokenized_corpus)
+            
+        tokenized_query = tokenize_text(query)
+        bm25_scores = bm25_model.get_scores(tokenized_query)
+        
+        # Sort indices by BM25 score descending
+        sparse_indices = np.argsort(bm25_scores)[::-1][:k_candidates]
+        sparse_ranking = [all_ids[idx] for idx in sparse_indices if bm25_scores[idx] > 0.0]
 
-            # Chroma allows adding in batches of up to 40000
-            self.collection.add(
-                embeddings=embeddings,
-                documents=texts,
-                metadatas=metadatas,
-                ids=ids
-            )
-            print(f"Added {len(chunks)} chunks to ChromaDB.")
+        # C. RECIPROCAL RANK FUSION (RRF)
+        # Combine rankings: RRF_Score = 1/(60 + dense_rank) + 1/(60 + sparse_rank)
+        rrf_scores = {}
+        
+        # Score dense rank
+        for rank, doc_id in enumerate(dense_ranking):
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (60.0 + rank + 1)
+            
+        # Score sparse rank
+        for rank, doc_id in enumerate(sparse_ranking):
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (60.0 + rank + 1)
 
-        def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-            model = get_embedding_model()
-            query_emb = model.encode([query], show_progress_bar=False).tolist()
+        # Sort candidate IDs by RRF score descending
+        sorted_rrf_candidates = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        top_rrf_ids = [doc_id for doc_id, rrf_score in sorted_rrf_candidates[:k_candidates]]
 
-            results = self.collection.query(
-                query_embeddings=query_emb,
-                n_results=top_k
-            )
+        # Gather actual documents for Reranking
+        candidates = []
+        for doc_id in top_rrf_ids:
+            idx = all_ids.index(doc_id)
+            candidates.append({
+                "id": doc_id,
+                "text": all_texts[idx],
+                "doc_name": all_metadatas[idx].get("doc_name", ""),
+                "page_num": all_metadatas[idx].get("page_num", 1),
+                "parent_text": all_metadatas[idx].get("parent_text", all_texts[idx]),
+                "score": rrf_scores[doc_id]  # Default score is RRF
+            })
 
-            formatted = []
-            if results and results["documents"]:
-                for i in range(len(results["documents"][0])):
-                    # Chroma returns distance, cosine similarity = 1 - distance
-                    dist = results["distances"][0][i] if "distances" in results else 0
-                    score = 1.0 - dist
+        # D. CROSS-ENCODER RERANKING
+        cross_encoder = get_cross_encoder()
+        if cross_encoder and candidates:
+            try:
+                # Format candidate inputs: [[query, context], [query, context], ...]
+                # We use parent_text as the context for richer sentence similarity matching
+                rerank_inputs = [[query, c["parent_text"]] for c in candidates]
+                reranker_scores = cross_encoder.predict(rerank_inputs)
+                
+                # Update scores with cross-encoder outputs
+                for idx, c in enumerate(candidates):
+                    # Normalize raw logits to 0-1 range using sigmoid approximation
+                    raw_score = reranker_scores[idx]
+                    prob_score = 1.0 / (1.0 + math.exp(-raw_score))
+                    c["score"] = float(prob_score)
                     
-                    formatted.append({
-                        "id": results["ids"][0][i],
-                        "text": results["documents"][0][i],
-                        "doc_name": results["metadatas"][0][i]["doc_name"],
-                        "page_num": results["metadatas"][0][i]["page_num"],
-                        "score": score
-                    })
-            return formatted
+                # Sort by reranked scores
+                candidates.sort(key=lambda x: x["score"], reverse=True)
+            except Exception as e:
+                print(f"Reranking failed with error: {e}. Falling back to RRF rankings.")
 
-        def delete_document(self, doc_name: str):
-            self.collection.delete(where={"doc_name": doc_name})
-            print(f"Deleted document '{doc_name}' from ChromaDB.")
+        # Return top_k search results
+        # Under Parent-Child Indexing, the RAG assistant returns the PARENT_TEXT (richer context)
+        # as the primary text, but keeps details of the document and page.
+        results = []
+        for c in candidates[:top_k]:
+            results.append({
+                "id": c["id"],
+                "text": c["parent_text"],  # Parent text for the doctor/LLM to read
+                "child_text": c["text"],   # Child text for matching highlights
+                "doc_name": c["doc_name"],
+                "page_num": c["page_num"],
+                "score": c["score"]
+            })
+            
+        return results
 
-        def list_documents(self) -> List[Dict[str, Any]]:
-            # ChromaDB doesn't have a direct "group by" list, so we fetch metadatas
-            # To avoid fetching huge data, we fetch only metadatas.
-            all_data = self.collection.get(include=["metadatas"])
-            docs = {}
-            if all_data and all_data["metadatas"]:
-                for meta in all_data["metadatas"]:
-                    name = meta["doc_name"]
-                    page = meta["page_num"]
-                    if name not in docs:
-                        docs[name] = {"pages": set(), "chunks": 0}
-                    docs[name]["pages"].add(page)
-                    docs[name]["chunks"] += 1
-
-            return [
-                {
-                    "doc_name": name,
-                    "page_count": len(info["pages"]),
-                    "chunk_count": info["chunks"]
-                }
-                for name, info in docs.items()
-            ]
-
-    # Use Chroma
-    VectorStore = ChromaVectorStore
-except ImportError:
-    print("ChromaDB not found. Falling back to NumPy SimpleVectorStore.")
-    VectorStore = SimpleVectorStore
+# Establish compatibility alias
+VectorStore = VectorDB
