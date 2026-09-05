@@ -600,6 +600,8 @@ class VectorDB:
                 "doc_name": all_metadatas[idx].get("doc_name", ""),
                 "page_num": all_metadatas[idx].get("page_num", 1),
                 "parent_text": all_metadatas[idx].get("parent_text", all_texts[idx]),
+                "generic_name": all_metadatas[idx].get("generic_name", ""),
+                "name_suspect": bool(all_metadatas[idx].get("name_suspect", False)),
                 "score": rrf_scores[doc_id]  # Default score is RRF
             })
 
@@ -616,6 +618,12 @@ class VectorDB:
                 "child_text": c["text"],   # Child text for matching highlights
                 "doc_name": c["doc_name"],
                 "page_num": c["page_num"],
+                "generic_name": c["generic_name"],
+                # Tên thuốc của chunk này do OCR đọc hỏng (xem drug_name.py).
+                # Nội dung vẫn dùng được, chỉ cái nhãn là không đáng tin — nơi
+                # nào hiển thị hoặc đưa cho LLM thì đừng khẳng định đó là tên
+                # thuốc. Chunk KHÔNG bị loại vì nội dung là dữ liệu thuốc thật.
+                "name_suspect": c["name_suspect"],
                 "score": c["score"]
             })
             

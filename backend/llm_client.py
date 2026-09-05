@@ -48,6 +48,15 @@ def generate_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api
         # để mô hình nhắc đúng tên sách và số quyển thay vì ID kỹ thuật.
         label = chunk.get("citation") or f"{chunk['doc_name']}, Page: {chunk['page_num']}"
         context_str += f"[{idx+1}] Source: {label}\n"
+        # Tên thuốc của đoạn này do OCR đọc hỏng. Nội dung vẫn dùng được, nhưng
+        # phải nói rõ cho model, nếu không nó sẽ trích dẫn chuỗi rác như
+        # "3AMBUTEROL" y hệt một tên thuốc có thật.
+        if chunk.get("name_suspect"):
+            context_str += (
+                "Warning: tên thuốc của đoạn này bị lỗi OCR, KHÔNG đáng tin. "
+                "Dùng nội dung nhưng tuyệt đối không nêu chuỗi đó như tên thuốc; "
+                "nếu cần thì nói rõ tên trong tài liệu không đọc được.\n"
+            )
         context_str += f"Content: {chunk['text']}\n\n"
 
     system_prompt = (
