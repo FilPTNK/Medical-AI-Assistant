@@ -81,16 +81,23 @@ def expand_rare_compounds(tokens: List[str], doc_freq: Dict[str, int]) -> List[s
 #
 # RRF_Score(d) = w_sparse/(k + rank_bm25) + w_dense/(k + rank_dense)
 #
-# Đo trên hai bộ truy vấn (xem eval/): BM25 đạt P@5 96%, dense chỉ 76%. Trộn
-# 1:1 nên kéo chất lượng xuống 90% — mỗi kết quả đúng của BM25 lại bị kèm một
-# kết quả sai từ nhánh dense. Truy vấn "thuốc hạ sốt" là ví dụ rõ nhất: BM25
-# đúng cả 5/5, dense trả 4/5 thuốc sốt rét, RRF 1:1 trộn ra 2/5.
+# Trọng số 1:1 — công thức RRF nguyên bản. Có một quãng đã đặt w_sparse = 1,5
+# để nghiêng về BM25, và ghi lại ở đây vì bài học đáng giá hơn con số:
 #
-# Nghiêng về BM25 thay vì bỏ hẳn dense: dense vẫn là nhánh duy nhất tìm được
-# chunk không trùng từ vựng với câu hỏi, và ở w=1.5 nó vẫn giữ khoảng 10% số
-# suất trong top-5.
+#   Hồi model embedding còn là paraphrase-multilingual-MiniLM-L12-v2, dense chỉ
+#   đạt P@5 78% so với 92% của BM25, nên trộn 1:1 kéo kết quả xuống dưới cả
+#   BM25 đứng một mình. Nghiêng về BM25 chữa được triệu chứng đó (bộ giữ riêng
+#   80% -> 92%).
+#
+#   Đổi sang multilingual-e5-small thì dense lên 90%/94% và VƯỢT BM25 trên bộ
+#   câu hỏi tự nhiên. Lúc này chính cái nghiêng ấy quay ra làm hỏng: đo lại
+#   trên bộ giữ riêng, w=1,0 cho 98% còn w>=1,2 chỉ còn 94%.
+#
+# Tức là trọng số kia là miếng vá cho một nhánh dense yếu, không phải một tính
+# chất của bài toán. Sửa đúng gốc rồi thì phải gỡ miếng vá ra. Ai đổi model lần
+# nữa thì quét lại: python eval/eval_run.py --sweep
 RRF_K = 60.0
-RRF_W_SPARSE = 1.5
+RRF_W_SPARSE = 1.0
 RRF_W_DENSE = 1.0
 
 # 2. Local Fallback BM25 implementation for maximum robustness

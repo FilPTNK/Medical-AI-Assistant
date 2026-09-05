@@ -359,7 +359,7 @@ def _dice(a: set, b: set) -> float:
 # 0,85 — nên ngưỡng 0,55 của model cũ sẽ coi gần như mọi câu hỏi là giống nhau.
 # Số đo ở eval/calibrate_similarity.py.
 _EMBEDDING_THRESHOLDS = {
-    "intfloat/multilingual-e5-small": 0.93,
+    "intfloat/multilingual-e5-small": 0.92,
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.55,
 }
 _DEFAULT_EMBEDDING_THRESHOLD = 0.90

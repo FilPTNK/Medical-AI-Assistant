@@ -171,7 +171,7 @@ def main():
         if args.sweep:
             print(f"\n  quét trọng số BM25 (w_dense=1.0, k={RRF_K}):")
             print(f"    {'w_bm25':>7} {'P@5':>7} {'bẫy':>6}")
-            for w in [1.0, 1.2, 1.5, 2.0, 3.0]:
+            for w in [0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0]:
                 p, t, _ = h.score(queries, "rrf", w_sparse=w)
                 print(f"    {w:7.2f} {p:6.1f}% {t:5.1f}%")
         print()
