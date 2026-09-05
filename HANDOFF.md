@@ -1,7 +1,9 @@
 # Bàn giao — Antigravity Medical Assistant
 
-Cập nhật: 2026-09-05. Nhánh: `fix/retrieval-and-stability`.
+Cập nhật: 2026-09-05 (đợt 2). Nhánh: `fix/retrieval-and-stability`.
 Toàn bộ số liệu dưới đây là **đo được**, không phải ước lượng, trừ chỗ ghi rõ.
+
+Đợt này làm xong **#4, #5, #2** và ý tưởng "cân RRF" của bàn giao trước.
 
 ---
 
@@ -12,204 +14,217 @@ FastAPI + React/Vite + Chroma + DeepSeek. RAG tiếng Việt cho phòng khám.
 - Kho: **25.852 child chunk**, **3.816 thuốc**, 2 nguồn:
   - `THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf` — tra theo *tên biệt dược*
   - `DTQGVN-2022-Q1` — Dược thư Quốc gia, **chỉ quyển 1, chữ A–H** (352 thuốc)
-- Truy xuất lai: dense (Chroma HNSW) + BM25 + hợp nhất RRF (k=60)
-- Embedding: `paraphrase-multilingual-MiniLM-L12-v2`, 384 chiều, `max_seq_length=128`
+- Truy xuất lai: dense (Chroma HNSW, **cosine**) + BM25 + hợp nhất RRF (k=60, 1:1)
+- Embedding: **`intfloat/multilingual-e5-small`**, 384 chiều, `max_seq_length=512`,
+  vector chuẩn hoá, tiền tố `query:` / `passage:`
 - Chạy: `python run.py` (backend 8000, Vite 3000). Backend riêng: `python backend/dev_server.py`
 
 ---
 
-## 2. Sự cố mất mã nguồn — ĐỌC TRƯỚC KHI ĐỘNG VÀO GIT
+## 2. Chất lượng truy xuất — trạng thái hiện tại
 
-Ngày 2026-09-05 lúc 12:18:47, một phiên Claude Code khác chạy `git filter-repo`
-để xoá khoá API khỏi lịch sử. Lệnh đó viết lại lịch sử, đưa cây làm việc về HEAD
-và **xoá sạch mọi thay đổi chưa commit**, đồng thời xoá reflog nên không lùi được.
+P@5 trên hai bộ truy vấn trong `eval/`. "Trước" = đầu đợt này, "sau" = hiện tại.
 
-Lúc đó 23/28 module backend và 27/27 component frontend **chưa từng được commit**.
-Khôi phục được nhờ `~/.claude/file-history/` và bản ghi hội thoại.
+| | bộ chính: trước | bộ chính: sau | bộ giữ riêng: trước | bộ giữ riêng: sau |
+|---|---|---|---|---|
+| BM25 | 92,0% | **100,0%** | 88,0% | 88,0% |
+| DENSE | 78,0% | **90,0%** | 72,0% | **94,0%** |
+| **RRF (kết quả thật)** | **90,0%** | **100,0%** | **80,0%** | **98,0%** |
+| bẫy-nhầm (RRF) | 4,0% | **0,0%** | 0,0% | 0,0% |
 
-**Quy tắc từ nay:**
+Truy vấn "thuốc hạ sốt" — bài toán gốc của cả hai đợt — nay **100%**, không còn
+thuốc sốt rét nào trong top-5.
 
-- Commit trước khi chạy bất kỳ lệnh nào viết lại lịch sử git
-- Không chạy hai phiên Claude Code cùng lúc trên cùng thư mục
-- Bản sao lưu sự cố: `C:\Users\HP\Desktop\Project\_RECOVERY_Antigravity_20260905_122647\`
-  (23 file `.pyc` + 44 bản ghi hội thoại + ảnh chụp mã nguồn, 135 MB) — xoá được
-  khi đã yên tâm
+**Điểm liên quan** (`similarity_search_with_relevance_scores`):
+`-1,897 … -2,211` kèm cảnh báo *"must be between 0 and 1"* → **`0,913 … 0,896`**,
+hết cảnh báo.
 
-Khoá API `sk-b877...` đã **không còn trong file nguồn lẫn lịch sử git**.
-Vẫn cần **thu hồi trên dashboard DeepSeek** — xoá lịch sử máy này không thu hồi
-được khoá nếu nó từng lọt ra ngoài. *(Việc này chưa làm.)*
-
----
-
-## 3. Đã sửa: backend treo vô hạn
-
-Triệu chứng: hỏi trong chat, spinner quay 10–15 phút. Cổng 8000 vẫn LISTENING,
-**CPU 0%**, `/docs` (trang tĩnh) cũng không trả lời.
-
-Chẩn đoán bằng `py-spy dump` — luồng chính kẹt trong `logging.emit`, luồng xử lý
-request kẹt trong `_showwarnmsg_impl`. Cả hai đều kẹt khi **ghi ra stdout**.
-
-Chuỗi nhân quả:
-
-1. `run.py` pipe stdout của backend. Khi bị pipe, Python con dùng **cp1252**,
-   không phải UTF-8 → mọi dòng log tiếng Việt ném `UnicodeEncodeError`
-2. Phía cha đọc bằng `encoding="utf-8"` → gặp byte cp1252 → lỗi giải mã
-3. `log_output` bọc `try/except: pass` quanh **cả vòng lặp** → luồng đọc chết im lặng
-4. Không ai rút pipe → pipe đầy (~64KB) → backend đứng hình giữa request
-
-Đã sửa: ép UTF-8 cả hai đầu (`PYTHONIOENCODING` + `reconfigure`), `errors="replace"`,
-bọc lỗi **từng dòng**, và nếu vẫn hỏng thì vẫn tiếp tục rút pipe.
-
-Các lỗi treo khác đã xử lý trong cùng đợt:
-
-- `llm_client.py`: 7 client OpenAI không đặt timeout (mặc định 600s × 2 lần thử
-  = treo tới 30 phút) → thêm `_llm_client()` có timeout + giới hạn retry
-- `main.py`: nạp model chặn lifespan 35s khiến Vite proxy trả ECONNREFUSED
-  → chuyển sang thread nền, uvicorn bind cổng ngay
-- `vector_store.py`: bỏ quét tuyến tính O(k×N) trong `search()`; thêm khoá dùng chung
-- `dev_server.py`: chạy uvicorn qua API Python vì Windows nở glob `--reload-exclude`
-
-**Kết quả đo trên ứng dụng thật (2026-09-05):**
-
-| | Trước | Sau |
-|---|---|---|
-| `/api/search` "thuốc hạ sốt" | treo 10–15 phút | **3,99 s** |
-| `/api/search` "thuốc giảm đau bụng" | treo | **3,31 s** |
-| Backend sẵn sàng phục vụ | — | 27,1 s |
-| Treo tệ nhất có thể | ~30 phút | ~4 phút |
-
-**Lưu ý về RAM:** backend chiếm ~1,3 GB trên máy 7,3 GB. Có lúc chẩn đoán nhầm
-là thiếu RAM — **sai**, nguyên nhân thật là pipe ở trên. RAM chật nhưng đủ.
+Backend sẵn sàng phục vụ sau **17,2s** (đợt trước 27,1s).
 
 ---
 
-## 4. Chất lượng truy xuất — chẩn đoán có bằng chứng
+## 3. Đã làm đợt này
 
-Truy vấn "thuốc hạ sốt" trả về **thuốc sốt rét**. Ba nguyên nhân riêng biệt:
+### Đính chính một con số của bàn giao trước
 
-**a) Tách từ tiếng Việt** — ĐÃ SỬA (mục 5)
+Bàn giao trước ghi BM25 = 96,0%. **Sai, số thật là 92,0%.** Bộ đo cũ chia điểm
+cho *số kết quả trả về* thay vì cho 5. BM25 chỉ trả nổi 1 chunk cho "thuốc ho"
+nên được chấm 1/1 = 100% — tức là **thưởng cho việc không tìm ra gì**. Bộ đo mới
+luôn chia cho 5.
 
-**b) Nhánh dense yếu.** Top-10 dense: 7/10 là thuốc sốt rét, 0 thuốc hạ sốt.
-Model nhầm "hạ sốt" với "sốt rét". Kho càng đẩy theo hướng đó:
-`"sốt rét"` 107 chunk vs `"hạ sốt"` 31 chunk.
+### Cân RRF + mở rộng từ ghép hiếm (không cần index lại)
 
-**c) Thiếu dữ liệu.** `generic_name` chứa "PARACETAMOL": **0 / 3.816 thuốc**.
-Sách biệt dược tra theo tên thương mại (paracetamol chỉ là thành phần của
-ACORALEN, ALAXAN…), còn Dược thư mới nạp tới chữ H.
+- pyvi gộp "thuốc ho" thành một token `thuốc_ho` có **df = 1** trên 25.852
+  chunk, nên cả truy vấn còn đúng một token hiếm và BM25 chỉ trả nổi 1 chunk.
+  Token ghép có `df < 10` nay được bổ sung thêm âm tiết, **chỉ ở phía truy vấn**
+  — corpus vẫn giữ token ghép nên không làm sống lại va chạm "sốt" mà #3 đã sửa.
+  Ngưỡng phải thấp hơn df của `hạ_sốt` (22): đo được ngưỡng ≥50 làm tụt về 96%.
+- Trọng số RRF: có đặt 1,5 nghiêng về BM25, **rồi gỡ ra**. Xem mục 4.
 
-### Đã kiểm tra và LOẠI TRỪ
+### #5 — tên thuốc: chuẩn hoá và gắn cờ, KHÔNG xoá, KHÔNG đoán
 
-`hnsw:space` không được đặt → Chroma dùng **L2** trên vector **không chuẩn hoá**
-(độ dài 1,77–4,14) trong khi model huấn luyện cho cosine. Là lỗi thật, nhưng
-đã tính lại toàn bộ xếp hạng bằng cosine: **gần như không đổi**, vẫn nguyên nhóm
-sốt rét. Nên sửa cho đúng chuẩn, **đừng kỳ vọng nó cứu chất lượng**.
+Bàn giao trước gọi việc này là "lọc rác parser". **Tiền đề đó sai** — đọc thẳng
+nội dung thì thấy:
 
-### Đính chính số liệu cũ
+- Chunk mang tên rác vẫn chứa **dữ liệu thuốc thật**: `- ALIMEMAZIN` đúng là
+  chuyên luận alimemazin, `AL 400` là albendazol 400mg, `566 C80` là atovaquon
+  (mã nghiên cứu của chính thuốc đó). **Xoá là mất thuốc thật khỏi kho.**
+- Ký tự đầu bị OCR thay (`3AMBUTEROL` = BAMBUTEROL) **không tự sửa được**. Đã
+  thử và đo hai cách:
+  - suy từ vần (sách xếp theo bảng chữ cái): đúng **91,5%** trên 3.522 tên lành
+  - đối chiếu từ điển tên thuốc: đo lần đầu ra 100%, nhưng phép đo đó **rò rỉ**
+    vì từ điển dựng từ chính tên đang thử. Loại tên đó ra rồi đo lại — đúng tình
+    huống thật, vì tên hỏng chỉ xuất hiện một lần ở dạng đã hỏng:
+    **đúng 0 · SAI 7 · không quyết 493** (mẫu 500). Bảy lần nó quyết thì sai cả
+    bảy: COCAIN→ROCAIN, CHIAMIN→THIAMIN, PHYTIN→THYTIN.
 
-Một phiên trước từng nói 77,9% chunk bị cắt / 50,7% token bị bỏ. **Sai.**
-Đo lại bằng chính tokenizer của model:
+Một trợ lý y khoa đổi tên COCAIN thành ROCAIN nguy hiểm hơn hẳn việc để nguyên
+một cái tên đọc không ra. Nên việc thật sự làm:
 
-```
-trung vị 89 token, p90 = 328, max = 1158
-chunk bị cắt (>128): 35,9%
-token bị bỏ qua:     35,1%
-```
+- `backend/drug_name.py` — cắt rác dấu câu ở rìa (giữ ngoặc đơn, vì
+  `ATROPIN (dùng toàn thân)` là tên thật) và `is_suspect_name()` gắn cờ.
+- Cắt rác ở **đầu** thì luôn gắn cờ: không phân biệt được `.AMEFLU` (tên nguyên)
+  với `-EFAZOLIN` (mất chữ C). Cắt cả hai thì cái sau thành `EFAZOLIN` — một cái
+  tên trông rất chỉnh mà lại sai, **tệ hơn** `-EFAZOLIN` vì nhìn không ra là hỏng.
+- Đo trên 25.852 chunk: chuẩn hoá **485 (1,9%)**, gắn cờ **1.152 (4,5%)**.
+- Cờ đi tới nơi dùng được: `search()` trả kèm `name_suspect`, và `llm_client`
+  chèn cảnh báo vào đúng đoạn ngữ cảnh đó — nếu không, model sẽ trích dẫn chuỗi
+  rác như `3AMBUTEROL` y hệt một tên thuốc có thật.
+
+> Chưa làm: hiện cảnh báo trên giao diện. `to_search_result()` dựng
+> `SearchResultItem` theo từng trường nên cờ chưa lọt ra API — thêm vào model đó
+> là xong.
+
+### #4 + #2 — cosine, vector chuẩn hoá, đổi embedding (một lần index lại)
+
+- `hnsw:space="cosine"` + `normalize_embeddings=True`. Chỉ mục cũ **không đặt
+  space** nên Chroma dùng L2 mặc định.
+- `paraphrase-multilingual-MiniLM-L12-v2` → `intfloat/multilingual-e5-small`.
+  Vẫn 384 chiều nên schema không đổi; `max_seq_length` 512 thay vì 128, xoá hẳn
+  chuyện 35,9% chunk bị cắt cụt.
+- Họ e5 **bắt buộc** tiền tố `query:` / `passage:`; `HuggingFaceEmbeddings` không
+  tự thêm nên có lớp bọc `PrefixedEmbeddings` (chỉ thêm khi tên model chứa "e5",
+  để đổi ngược về model cũ vẫn chạy được).
+- Index lại 25.852 chunk mất **25,6 phút**, dựng ở thư mục riêng rồi chấm điểm
+  xong mới thay chỉ mục đang chạy.
+
+**Ba việc kéo theo — không có thì đổi model xong là hỏng lặng lẽ:**
+
+1. Vector câu hỏi cũ (sinh bởi model cũ) vẫn bị đem tính cosine với vector mới →
+   ra một số vô nghĩa. Thêm cột `embedding_model`, chỉ so khi trùng model.
+2. **Ngưỡng** "câu hỏi tương tự": e5 nén điểm lên cao — hai câu *khác chủ đề* vẫn
+   ở 0,84–0,92 — nên ngưỡng 0,55 cũ sẽ coi mọi câu hỏi là gần nghĩa. Nay 0,92,
+   đo bằng `eval/calibrate_similarity.py`.
+3. Cache token BM25 khoá theo **id** chunk, mà id dẫn xuất từ content chứ không
+   từ tên thuốc. Chuẩn hoá tên (#5) làm text đổi trong khi id giữ nguyên ⇒ cache
+   báo "còn khớp" và trả token của corpus cũ. Khoá nay phủ cả nội dung.
+
+Ngoài ra `config.EMBEDDING_MODEL` trước mặc định `all-MiniLM-L6-v2` — model
+**thuần tiếng Anh** mà không chỗ nào đọc tới, vì `vector_store` tự hard-code model
+riêng; đặt `EMBEDDING_MODEL` trong `.env` vì thế không có tác dụng gì. Nay là
+nguồn duy nhất.
 
 ---
 
-## 5. Đã làm: #3 — tách từ tiếng Việt cho BM25
+## 4. Bài học đáng giữ: miếng vá và cái gốc
 
-`re.findall(r'\w+')` xé từ ghép: `"hạ sốt"` thành `["hạ","sốt"]`, `"sốt rét"`
-thành `["sốt","rét"]`. Hai khái niệm khác hẳn nhau dùng chung token `"sốt"`.
+Giữa đợt có đặt `RRF_W_SPARSE = 1,5` để nghiêng về BM25. Lúc đó dense mới đạt
+78% so với 92% của BM25 nên trộn 1:1 kéo kết quả xuống dưới cả BM25 đứng một
+mình; nghiêng về BM25 nâng bộ giữ riêng từ 80% lên 92%. **Số liệu ủng hộ.**
 
-Dùng **pyvi** (`ViTokenizer`): nối từ ghép bằng dấu gạch dưới, cho `"hạ_sốt"` và
-`"sốt_rét"` thành hai token riêng. `\w+` coi `_` là ký tự chữ nên không cần đổi regex.
+Đổi sang e5 xong thì dense lên 94% và **vượt** BM25 trên bộ câu hỏi tự nhiên.
+Đo lại: `w=1,0` cho **98%**, còn `w≥1,2` chỉ còn 94%. Tức là trọng số kia là
+**miếng vá cho một nhánh dense yếu, không phải tính chất của bài toán** — sửa
+đúng gốc rồi thì phải gỡ vá ra, nếu không nó quay lại làm hỏng.
 
-> Đã thử **underthesea** và loại: nó vẫn tách `"hạ sốt"` thành hai âm tiết —
-> tức không sửa được đúng lỗi này — và chậm hơn 2,7 lần (11,4 vs 4,2 ms/chunk).
+Đổi model lần nữa thì quét lại: `python eval/eval_run.py --sweep`.
 
-Tách từ tốn ~51s cho 25.852 chunk nên cache ra
-`backend/data/vector_db/bm25_tokens.pkl`, khoá theo phiên bản bộ tách từ +
-danh sách id. Đổi `SEGMENTER_VERSION` trong `vector_store.py` để buộc dựng lại.
+---
 
-**Kết quả (10 truy vấn y khoa, P@5):**
+## 5. Cách đo
 
-| | Trước | Sau |
-|---|---|---|
-| BM25 | 94,0% | **96,0%** |
-| DENSE | 76,0% | 76,0% (không đổi — đúng như thiết kế) |
-| RRF | 88,0% | **90,0%** |
-| RRF bẫy-nhầm | 6,0% | **4,0%** |
-| "thuốc kháng sinh" | 80% | **100%** |
-| Nạp corpus | 24,6 s | **19,3 s** (có cache) |
-
-**Vấn đề còn lại — quan trọng cho bước sau.** Riêng "thuốc hạ sốt" vẫn 40%:
+Bộ đo nay **nằm trong kho** (`eval/`), không còn ở scratchpad của phiên.
 
 ```
-BM25  top-5:  PARASORB, DEXIBUPROFEN, AMSACRIN, ALKA-SELTZER, KETOPROFEN  <- đúng cả 5
-DENSE top-5:  ARTEFLEN, SALGYDAL, MALAREX, MALARIA, CLORHEXIDIN           <- 4/5 sốt rét
-RRF   top-5:  ARTEFLEN, PARASORB, SALGYDAL, DEXIBUPROFEN, MALAREX         <- trộn 1:1
+python eval/eval_run.py                            # cả hai bộ, chỉ mục đang chạy
+python eval/eval_run.py --sweep                    # quét trọng số RRF
+python eval/eval_run.py --persist-dir <thư mục>    # chấm một chỉ mục dựng thử
+python eval/calibrate_similarity.py                # chọn ngưỡng "câu hỏi tương tự"
 ```
 
-BM25 đã hoàn hảo cho truy vấn này. **RRF trộn 1:1 nên mỗi kết quả đúng lại kèm
-một thuốc sốt rét từ nhánh dense.** Nút thắt giờ nằm ở dense.
+- `eval/eval_set.py` — 10 truy vấn từ khoá, giữ nguyên từ đợt trước để số liệu
+  còn so sánh được.
+- `eval/eval_set_holdout.py` — 10 câu hỏi đặt theo **lời người bệnh**, viết
+  *trước* khi chọn tham số. Đây là chỗ dense lẽ ra phải giỏi hơn BM25, nên nó là
+  phép thử thật cho mọi thay đổi nghiêng về một nhánh.
+- Luôn đọc cả **ba** nhánh: một thay đổi có thể nâng nhánh này mà hạ nhánh kia.
+- **P@5 chia cho 5**, không chia cho số kết quả trả về (xem mục 3).
+- Kết quả `db.search()` dùng khoá **`child_text`** (chunk khớp), không phải
+  `content` (không tồn tại) hay `text` (là parent text).
 
 ---
 
 ## 6. Còn phải làm
 
-Thứ tự người dùng đã chốt: **#4 → #5 → #2**. (#1 hoãn: chưa có Dược thư quyển 2.)
+### Quan trọng nhất: nạp nốt Dược thư quyển 2 trở đi
 
-### #4 — cosine + chuẩn hoá vector
+Đang thiếu monograph của **Paracetamol, Ibuprofen, Omeprazol…** — Dược thư mới
+có chữ A–H. `generic_name` chứa "PARACETAMOL": **0 / 3.816 thuốc**. Không thuật
+toán nào tìm được tài liệu không tồn tại; đây giờ là trần chất lượng thật sự,
+không còn nằm ở khâu truy xuất.
 
-Đặt `hnsw:space="cosine"` khi tạo collection và
-`encode_kwargs={'normalize_embeddings': True}`. **Phải index lại toàn bộ.**
-Đã đo: lợi ích chất lượng khoảng 0. Làm vì đúng chuẩn và vì
-`similarity_search_with_relevance_scores` đang trả điểm âm (−3,9 … −6,3) kèm cảnh báo.
+### Nhỏ hơn
 
-### #5 — lọc rác parser
-
-Có "thuốc" mang tên là chuỗi ký tự vô nghĩa (`LEP i NIAAUN`, `Ỉ`, và cả câu văn
-bị coi là tên thuốc). Sửa ở `drug_parser.py` / `dtqg_parser.py`.
-Cũng có lỗi OCR: "Giảm dau", "Ha nhiệt", "Thdn trong" — một mẫu dò thận trọng
-bắt được 3,9% chunk, **soi tay cho thấy tỉ lệ thật cao hơn, chưa đo chính xác**.
-
-### #2 — đổi embedding sang `multilingual-e5-small`
-
-384 chiều (giữ nguyên schema), `max_seq_length=512` (hết 35,9% bị cắt).
-Đây là việc **quan trọng nhất còn lại** — dense đang là nhánh yếu kéo tụt RRF.
-Nhớ tiền tố `query:` / `passage:` mà họ e5 yêu cầu. **Phải index lại.**
-
-> Gộp #4 và #2 vào **một lần index lại** để khỏi chạy hai lượt.
-
-### Ý tưởng rẻ, chưa làm
-
-BM25 đang 96% còn dense 76%. **Cân RRF lệch về BM25** (hoặc giảm số ứng viên dense)
-có thể cải thiện ngay mà không cần index lại. Nên đo thử trước khi làm #2.
-
-### Khi có Dược thư quyển 2 trở đi
-
-Nạp nốt I–Z. Đang thiếu monograph của Paracetamol, Ibuprofen, Omeprazol…
-Không thuật toán nào tìm được tài liệu không tồn tại.
+- Hiện cờ `name_suspect` trên giao diện (thêm trường vào `SearchResultItem`).
+- Chất lượng OCR trong **nội dung** (không phải tên): "Giảm dau", "Ha nhiệt",
+  "Thdn trong". Một mẫu dò thận trọng bắt được 3,9% chunk, **soi tay cho thấy tỉ
+  lệ thật cao hơn, chưa đo chính xác.** Chưa đụng tới đợt này.
+- Hai truy vấn còn dưới 100% ở bộ giữ riêng: "bị đau đầu thì uống thuốc gì"
+  (60%) và "trẻ em bị tiêu chảy dùng thuốc nào" (80%).
+- Bộ đo mới có 20 truy vấn — đủ để bắt hồi quy, **quá nhỏ để tin vào chênh lệch
+  1–2 điểm**. Muốn tinh chỉnh tiếp thì phải mở rộng bộ đo trước.
 
 ---
 
-## 7. Cách đo (bắt buộc dùng trước/sau mỗi thay đổi)
+## 7. Trạng thái git & dữ liệu
 
-Bộ đo nằm ở scratchpad của phiên cũ; nếu mất thì dựng lại theo mô tả này:
+```
+f0cc98c  Đo sau khi index lại: gỡ trọng số RRF, chốt ngưỡng tương tự 0,92
+a48afe9  Đưa cờ name_suspect ra tới kết quả tìm kiếm và ngữ cảnh LLM
+f519615  #4+#2 Chuyển sang multilingual-e5-small, cosine và vector chuẩn hoá
+cf7c6d0  #5 Chuẩn hoá tên thuốc và gắn cờ tên hỏng OCR — không xoá, không đoán
+3c15c82  Nghiêng RRF về BM25 và mở rộng từ ghép hiếm; đưa bộ đo vào kho
+2780ef4  Thêm HANDOFF.md — báo cáo bàn giao        <- đầu đợt này
+```
 
-- `eval_set.py` — 10 truy vấn, mỗi truy vấn có `expect` (dấu hiệu chunk đúng chủ đề)
-  và `trap` (chủ đề bị nhầm sang). Ví dụ: `"thuốc hạ sốt"` có expect
-  `["hạ sốt","hạ nhiệt","giảm sốt","cảm sốt","paracetamol","ibuprofen","aspirin"]`,
-  trap `["sốt rét","sốt xuất huyết"]`
-- `eval_run.py` — chấm P@5 riêng cho **BM25**, **DENSE**, **RRF**. Đo cả ba, vì
-  một thay đổi có thể cải thiện nhánh này mà làm hỏng nhánh kia
-- Kết quả `db.search()` dùng khoá **`child_text`** (chunk khớp), không phải
-  `content` (không tồn tại) hay `text` (là parent text)
+Nhánh `fix/retrieval-and-stability`, **chưa merge vào `master`**.
+
+**Chỉ mục cũ giữ lại để lùi được:**
+`backend/data/vector_db_minilm_backup_20260905_154559/` (304 MB). Xoá được khi
+đã yên tâm — nhưng muốn lùi thì phải đổi **cả** `config.EMBEDDING_MODEL` về
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, vì chỉ mục đó
+sinh bằng model cũ.
 
 ---
 
-## 8. Cạm bẫy đã gặp trên máy này
+## 8. Việc còn treo từ đợt trước
+
+**Khoá API `sk-b877...` vẫn chưa thu hồi trên dashboard DeepSeek.** Khoá đã
+không còn trong mã nguồn lẫn lịch sử git, nhưng xoá lịch sử trên máy này **không
+thu hồi được khoá** nếu nó từng lọt ra ngoài. *(Vẫn chưa làm.)*
+
+Bản sao lưu sự cố mất mã nguồn:
+`C:\Users\HP\Desktop\Project\_RECOVERY_Antigravity_20260905_122647\` (135 MB) —
+xoá được khi đã yên tâm.
+
+Quy tắc git giữ nguyên:
+
+- Commit trước khi chạy bất kỳ lệnh nào viết lại lịch sử git
+- Không chạy hai phiên Claude Code cùng lúc trên cùng thư mục
+
+---
+
+## 9. Cạm bẫy đã gặp trên máy này
 
 | Bẫy | Cách tránh |
 |---|---|
@@ -217,21 +232,8 @@ Bộ đo nằm ở scratchpad của phiên cũ; nếu mất thì dựng lại th
 | Git Bash đổi `/api/x` thành đường dẫn Windows | `export MSYS_NO_PATHCONV=1` trước khi `curl` |
 | Python đọc heredoc bash theo cp1252 | ghi script ra file UTF-8 rồi chạy |
 | `\w`, `\d` trong docstring gây `SyntaxWarning` | dùng `r"""..."""` |
-| Import module backend ghi đè `.pyc` | đừng chạy app khi đang cần `.pyc` để cứu dữ liệu |
-| RAM chỉ còn ~0,5 GB khi app chạy | đóng bớt IDE trước khi index lại |
+| Ký tự thoát qua nhiều lớp heredoc bị diễn giải sớm, hỏng chuỗi | ghi đoạn chèn ra file rồi mới ghép |
+| RAM chỉ còn ~0,8 GB khi app chạy | đóng bớt IDE trước khi index lại |
 | `git rm -r --cached a b c` huỷ toàn bộ nếu một path sai | chạy tách riêng từng path |
-
----
-
-## 9. Trạng thái git
-
-```
-3615561  #3 Tách từ tiếng Việt cho BM25 bằng pyvi
-2590015  Đưa toàn bộ mã nguồn vào kho và sửa các lỗi treo backend
-449b823  2                          (sau khi filter-repo viết lại)
-```
-
-Nhánh `fix/retrieval-and-stability`, **chưa merge vào `master`**.
-Đã gỡ `frontend/node_modules` và `frontend/dist` khỏi theo dõi (5.358 file).
-Dữ liệu (`backend/data/`, 1,2 GB) không nằm trong kho và **không bị ảnh hưởng**
-bởi bất kỳ việc nào ở trên.
+| tqdm ghi bằng ký tự về đầu dòng, `tail -c` đọc ra tiến độ cũ | đổi CR thành LF rồi mới `tail` |
+| `/api/*` cần đăng nhập, curl trần trả 401 | kiểm tra thẳng bằng Python trong tiến trình |
