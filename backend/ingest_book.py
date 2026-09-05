@@ -30,6 +30,7 @@ from langchain_core.documents import Document
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import documents
+from drug_name import is_suspect_name, normalize_drug_name
 from vector_store import VectorStore
 import config
 
@@ -89,8 +90,15 @@ def build_documents(
     docs: List[Document] = []
     ids: List[str] = []
 
+    suspect_count = 0
     for c in raw_chunks:
-        generic_name = c.get("generic_name", "UNKNOWN")
+        # Chuẩn hoá tên ở đây chứ không ở parser: chỗ này chạy cho MỌI cuốn sách
+        # và cho cả những tệp chunk đã bóc từ trước, nên không phải OCR lại sách
+        # chỉ để sửa cái nhãn. Hàm này idempotent nên parser có gọi sẵn cũng
+        # không sao.
+        raw_name = c.get("generic_name", "UNKNOWN")
+        generic_name = normalize_drug_name(raw_name) or "UNKNOWN"
+        suspect, suspect_reason = is_suspect_name(raw_name)
         field_name = c.get("field_name", "Thông tin")
         content = c.get("content", "")
         if not content.strip():
@@ -159,6 +167,13 @@ def build_documents(
         # Chroma chỉ nhận str/int/float/bool nên list phải nối thành chuỗi.
         if syn_str:
             metadata["synonyms"] = syn_str
+        # Cờ cảnh báo tên hỏng do OCR. Chỉ để giao diện và LLM biết đường không
+        # khẳng định chuỗi này là tên thuốc — KHÔNG dùng để lọc bỏ chunk: nội
+        # dung của chúng là dữ liệu thuốc thật (xem backend/drug_name.py).
+        if suspect:
+            metadata["name_suspect"] = True
+            metadata["name_suspect_reason"] = suspect_reason
+            suspect_count += 1
 
         docs.append(Document(page_content=parent_text, metadata=metadata))
         ids.append(uid)
@@ -166,6 +181,10 @@ def build_documents(
     collapsed = sum(v - 1 for v in seen.values() if v > 1)
     if collapsed:
         print(f"  [i] Gộp {collapsed} entry trùng khít trong file chunk nguồn.")
+    if suspect_count:
+        pct = suspect_count / max(len(docs), 1) * 100
+        print(f"  [i] {suspect_count} chunk ({pct:.1f}%) có tên thuốc đáng ngờ — "
+              f"đã gắn cờ name_suspect, KHÔNG loại bỏ.")
 
     return docs, ids
 

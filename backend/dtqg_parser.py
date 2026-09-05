@@ -28,6 +28,8 @@ import difflib
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
+from drug_name import normalize_drug_name
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import documents
@@ -329,7 +331,7 @@ def parse(doc_name: str) -> List[Dict[str, Any]]:
                 pdf_page = sec["pdf_page"]
                 chunks.append({
                     "chunk_id": f"{slug}_{sec['code']}_{counters[sec['code']]:02d}",
-                    "generic_name": mono["name"],
+                    "generic_name": normalize_drug_name(mono["name"]) or mono["name"],
                     "synonyms": mono.get("synonyms") or [],
                     "intl_name": head.get("intl_name", ""),
                     "atc_code": normalize_atc(head.get("atc_code", "")),

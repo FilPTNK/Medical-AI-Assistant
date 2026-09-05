@@ -2,6 +2,8 @@ import re
 import json
 from typing import List, Dict, Any, Optional, Tuple
 
+from drug_name import normalize_drug_name
+
 
 class DrugChunkParser:
     """
@@ -346,7 +348,10 @@ class DrugChunkParser:
 
                     chunk_obj: Dict[str, Any] = {
                         "chunk_id": chunk_id,
-                        "generic_name": generic_name,
+                        # Cắt rác dấu câu OCR bám ở rìa tên ('.AMEFLU',
+                        # '- ALIMEMAZIN'). Không sửa ký tự bên trong — lý do đo
+                        # được ghi trong backend/drug_name.py.
+                        "generic_name": normalize_drug_name(generic_name) or generic_name,
                         "brand_names": brand_names,
                         "field_type": field_type,
                         "field_name": field_name,
