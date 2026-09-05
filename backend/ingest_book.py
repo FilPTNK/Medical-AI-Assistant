@@ -57,12 +57,12 @@ def chunk_uid(doc_name: str, chunk: Dict[str, Any]) -> str:
     return f"{doc_name}::{chunk.get('chunk_id', 'CHUNK')}::{digest}"
 
 
-def count_indexed_chunks(doc_name: str) -> int:
+def count_indexed_chunks(doc_name: str, persist_dir: str = None) -> int:
     """Số chunk của một tài liệu đang có trong ChromaDB.
 
     Đọc trực tiếp bằng SQL để không phải nạp lại mô hình embedding chỉ để đếm.
     """
-    db_file = os.path.join(config.VECTOR_DB_DIR, "chroma.sqlite3")
+    db_file = os.path.join(persist_dir or config.VECTOR_DB_DIR, "chroma.sqlite3")
     if not os.path.exists(db_file):
         return 0
     try:
@@ -189,7 +189,13 @@ def build_documents(
     return docs, ids
 
 
-def ingest(doc_name: str, chunks_file: str, replace: bool, batch_size: int) -> None:
+def ingest(
+    doc_name: str,
+    chunks_file: str,
+    replace: bool,
+    batch_size: int,
+    persist_dir: str = None,
+) -> None:
     manifest = documents.load_manifest(doc_name)
     if not manifest:
         print(f"[!] Chưa có manifest cho '{doc_name}'. Chạy migrate_phase0.py trước.")
@@ -199,10 +205,13 @@ def ingest(doc_name: str, chunks_file: str, replace: bool, batch_size: int) -> N
         print(f"[!] Không thấy file chunk: {chunks_file}")
         return
 
+    persist_dir = persist_dir or config.VECTOR_DB_DIR
+
     print("=" * 66)
     print("   NẠP CHUNK VÀO VECTOR DATABASE")
     print(f"   Tài liệu : {manifest.get('doc_title')}  [{doc_name}]")
     print(f"   Nguồn    : {chunks_file}")
+    print(f"   Chỉ mục  : {persist_dir}")
     print("=" * 66)
 
     with open(chunks_file, "r", encoding="utf-8") as f:
@@ -216,7 +225,7 @@ def ingest(doc_name: str, chunks_file: str, replace: bool, batch_size: int) -> N
         print("  [!] Id bị trùng — dừng để tránh mất dữ liệu.")
         return
 
-    db = VectorStore(config.VECTOR_DB_DIR)
+    db = VectorStore(persist_dir)
 
     if replace:
         print(f"[3/4] Xoá toàn bộ chunk cũ của '{doc_name}' khỏi index...")
@@ -239,7 +248,7 @@ def ingest(doc_name: str, chunks_file: str, replace: bool, batch_size: int) -> N
     # .list_documents() đọc đúng trường này để hiện ra giao diện.
     documents.update_manifest(
         doc_name,
-        chunk_count=count_indexed_chunks(doc_name),
+        chunk_count=count_indexed_chunks(doc_name, persist_dir),
         ingested_at=datetime.datetime.now().isoformat(timespec="seconds"),
     )
 
@@ -255,10 +264,16 @@ def main() -> None:
     p.add_argument("--chunks", default=None, help="File chunk JSON (mặc định: data/chunks/<doc-name>.json)")
     p.add_argument("--replace", action="store_true", help="Xoá sạch chunk cũ của tài liệu trước khi nạp")
     p.add_argument("--batch-size", type=int, default=500)
+    p.add_argument(
+        "--persist-dir",
+        default=None,
+        help="Thư mục chỉ mục (mặc định: config.VECTOR_DB_DIR). Dựng chỉ mục thử "
+             "ở thư mục khác để đối chiếu trước khi thay chỉ mục đang chạy.",
+    )
     args = p.parse_args()
 
     chunks_file = args.chunks or documents.chunks_path(args.doc_name)
-    ingest(args.doc_name, chunks_file, args.replace, args.batch_size)
+    ingest(args.doc_name, chunks_file, args.replace, args.batch_size, args.persist_dir)
 
 
 if __name__ == "__main__":

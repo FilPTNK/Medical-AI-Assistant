@@ -59,8 +59,10 @@ class Harness:
     gọi lại Chroma — quét 40 cấu hình mất vài giây thay vì vài phút.
     """
 
-    def __init__(self):
-        self.db = VectorStore(config.VECTOR_DB_DIR)
+    def __init__(self, persist_dir=None):
+        self.db = VectorStore(persist_dir or config.VECTOR_DB_DIR)
+        print(f"chỉ mục: {self.db.persist_dir}")
+        print(f"model  : {self.db.embedding_model}")
         t0 = time.perf_counter()
         self.texts, self.metas, self.ids, self.bm25 = self.db._get_corpus_and_bm25()
         print(f"nạp corpus: {time.perf_counter() - t0:.1f}s | {len(self.texts)} chunk\n")
@@ -141,9 +143,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--set", choices=["main", "holdout", "both"], default="both")
     ap.add_argument("--sweep", action="store_true", help="quét trọng số RRF")
+    ap.add_argument(
+        "--persist-dir",
+        default=None,
+        help="Chỉ mục cần chấm (mặc định: chỉ mục đang chạy). Dùng để đối chiếu "
+             "một chỉ mục dựng thử với chỉ mục hiện hành.",
+    )
     args = ap.parse_args()
 
-    h = Harness()
+    h = Harness(args.persist_dir)
 
     for name, queries in load_sets(args.set):
         print("=" * 64)

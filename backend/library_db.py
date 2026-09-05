@@ -72,6 +72,13 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_history_created ON search_history(created_at DESC);
             """
         )
+        # Vector câu hỏi chỉ so sánh được với vector do CÙNG một model sinh ra.
+        # Trước đây không ghi lại model, nên khi đổi embedding thì các vector cũ
+        # vẫn được đem ra tính cosine với vector mới — ra một con số vô nghĩa,
+        # không phải lỗi mà cũng không phải kết quả đúng. Cột này để lọc chúng.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(search_history)")}
+        if "embedding_model" not in cols:
+            conn.execute("ALTER TABLE search_history ADD COLUMN embedding_model TEXT")
 
 
 # ---------------------------------------------------------------- highlights
@@ -225,7 +232,11 @@ def _history_row_to_dict(row: sqlite3.Row, include_embedding: bool = False) -> D
     except (TypeError, ValueError):
         d["sources"] = []
     embedding = d.pop("embedding", None)
+    # embedding_model là chi tiết nội bộ để lọc vector cũ, không phải thứ API
+    # cần trả ra; chỉ giữ lại cho đúng nhánh đang so vector.
+    model_name = d.pop("embedding_model", None)
     if include_embedding:
+        d["embedding_model"] = model_name
         try:
             d["embedding"] = json.loads(embedding) if embedding else None
         except (TypeError, ValueError):
@@ -239,20 +250,23 @@ def add_history(
     sources: List[Dict[str, Any]],
     embedding: Optional[List[float]] = None,
     created_by: Optional[str] = None,
+    embedding_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     now = datetime.now().isoformat()
     record_id = str(uuid.uuid4())
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO search_history (id, query, answer, sources, embedding, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO search_history
+                (id, query, answer, sources, embedding, created_by, created_at, embedding_model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record_id, query, answer,
                 json.dumps(sources, ensure_ascii=False),
                 json.dumps(embedding) if embedding else None,
                 created_by, now,
+                embedding_model if embedding else None,
             ),
         )
         row = conn.execute("SELECT * FROM search_history WHERE id = ?", (record_id,)).fetchone()
@@ -338,12 +352,27 @@ def _dice(a: set, b: set) -> float:
     return 2 * len(a & b) / (len(a) + len(b))
 
 
+# Ngưỡng cosine để coi hai câu hỏi là gần nghĩa, RIÊNG cho từng model.
+#
+# Không dùng chung một con số được: mỗi model trải điểm cosine trên một khoảng
+# khác nhau. Họ e5 nén điểm lên rất cao — hai câu KHÔNG liên quan vẫn quanh
+# 0,85 — nên ngưỡng 0,55 của model cũ sẽ coi gần như mọi câu hỏi là giống nhau.
+# Số đo ở eval/calibrate_similarity.py.
+_EMBEDDING_THRESHOLDS = {
+    "intfloat/multilingual-e5-small": 0.93,
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 0.55,
+}
+_DEFAULT_EMBEDDING_THRESHOLD = 0.90
+
+
 def find_similar_questions(
     query: str,
     query_embedding: Optional[List[float]] = None,
     limit: int = 4,
     min_score: float = 0.55,
     scan_limit: int = 500,
+    embedding_model: Optional[str] = None,
+    min_embedding_score: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Tìm các câu hỏi đã tra cứu trước đây gần nghĩa với `query`.
 
@@ -352,11 +381,24 @@ def find_similar_questions(
     * trùng từ khóa không dấu (hệ số Dice) — bắt được trường hợp bác sĩ gõ
       không dấu, thứ mà embedding tiếng Việt xử lý khá kém, và cũng là phương án
       dự phòng khi không nạp được model embedding.
+
+    Hai tín hiệu này có thang điểm KHÁC NHAU nên mỗi cái một ngưỡng: `min_score`
+    cho từ khoá, `min_embedding_score` cho cosine. Trước đây dùng chung 0,55 —
+    chấp nhận được với model cũ, nhưng với e5 thì cosine hai câu bất kỳ đã quanh
+    0,85 nên mọi câu hỏi cũ đều vượt ngưỡng.
+
+    Vector chỉ được đem ra so khi sinh bởi ĐÚNG model đang chạy; bản ghi cũ mang
+    model khác (hoặc không ghi model) chỉ còn khớp bằng từ khoá.
     """
     q_norm = _strip_accents(query).strip()
     q_tokens = _tokenize(query)
     if not q_norm:
         return []
+
+    if min_embedding_score is None:
+        min_embedding_score = _EMBEDDING_THRESHOLDS.get(
+            embedding_model, _DEFAULT_EMBEDDING_THRESHOLD
+        )
 
     with _connect() as conn:
         rows = conn.execute(
@@ -369,19 +411,28 @@ def find_similar_questions(
         past_query = record["query"]
         if _strip_accents(past_query).strip() == q_norm:
             # Câu hỏi trùng khít (kể cả khác dấu): luôn xếp trên cùng.
-            score = 1.0
-            method = "exact"
+            score, method, passed = 1.0, "exact", True
         else:
             keyword_score = _dice(q_tokens, _tokenize(past_query))
             emb = record.get("embedding")
-            embedding_score = _cosine(query_embedding, emb) if (query_embedding and emb) else 0.0
-            if embedding_score >= keyword_score:
-                score, method = embedding_score, "embedding"
-            else:
-                score, method = keyword_score, "keyword"
+            row_model = record.get("embedding_model")
+            comparable = bool(query_embedding and emb and embedding_model
+                              and row_model == embedding_model)
+            embedding_score = _cosine(query_embedding, emb) if comparable else 0.0
 
-        if score >= min_score:
+            # So từng tín hiệu với ngưỡng của chính nó, rồi mới chọn cái mạnh hơn.
+            emb_ok = comparable and embedding_score >= min_embedding_score
+            kw_ok = keyword_score >= min_score
+            if emb_ok and (not kw_ok or embedding_score >= keyword_score):
+                score, method, passed = embedding_score, "embedding", True
+            elif kw_ok:
+                score, method, passed = keyword_score, "keyword", True
+            else:
+                score, method, passed = max(keyword_score, embedding_score), "", False
+
+        if passed:
             record.pop("embedding", None)
+            record.pop("embedding_model", None)
             record["similarity"] = round(float(score), 4)
             record["match_method"] = method
             scored.append(record)

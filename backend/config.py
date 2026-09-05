@@ -11,7 +11,14 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL") or "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
 
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+# Model embedding của vector store. Giá trị mặc định cũ ở đây là
+# "all-MiniLM-L6-v2" — một model THUẦN TIẾNG ANH mà không chỗ nào đọc tới, vì
+# vector_store.py tự hard-code model riêng. Đặt EMBEDDING_MODEL trong .env vì
+# thế không có tác dụng gì. Nay đây là nguồn duy nhất.
+#
+# ĐỔI GIÁ TRỊ NÀY LÀ PHẢI INDEX LẠI: vector cũ sinh bởi model khác không so
+# sánh được với vector mới, và số chiều cũng có thể khác.
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
 
 # Directories relative to workspace or specified
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

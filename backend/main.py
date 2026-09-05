@@ -1476,6 +1476,7 @@ def search_and_answer(request: QueryRequest, x_deepseek_key: Optional[str] = Hea
                 answer=answer,
                 sources=[s.dict() for s in formatted_sources],
                 embedding=db.embed_text(query),
+                embedding_model=db.embedding_model,
                 created_by=request.created_by,
             )
         except Exception as e:
@@ -1606,7 +1607,12 @@ def find_similar_questions(request: SimilarQuestionsRequest):
     if len(query) < 4:
         return []
     embedding = db.embed_text(query)
-    return library_db.find_similar_questions(query, embedding, limit=max(1, min(request.limit, 10)))
+    return library_db.find_similar_questions(
+        query,
+        embedding,
+        limit=max(1, min(request.limit, 10)),
+        embedding_model=db.embedding_model,
+    )
 
 class CompareRequest(BaseModel):
     query: str

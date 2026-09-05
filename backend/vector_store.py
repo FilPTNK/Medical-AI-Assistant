@@ -11,6 +11,7 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
+import config
 import documents
 
 # 1. Tách token cho BM25 (dùng chung cho corpus và truy vấn)
@@ -138,12 +139,58 @@ class FallbackBM25:
 # kết quả nay lấy thẳng theo điểm RRF. Muốn rerank lại thì dùng model đa
 # ngữ (mmarco-mMiniLMv2) hoặc reranker qua API, đừng quay lại model Anh.
 
+# 3b. Model embedding: multilingual-e5-small, cosine, vector đã chuẩn hoá
+#
+# Thay cho paraphrase-multilingual-MiniLM-L12-v2. Vẫn 384 chiều nên schema và
+# kích thước chỉ mục không đổi, nhưng max_seq_length 512 thay vì 128 — đo trên
+# chính tokenizer của model cũ thì 35,9% chunk bị cắt và 35,1% token bị bỏ.
+#
+# Họ e5 BẮT BUỘC có tiền tố: "query: " cho câu hỏi và "passage: " cho tài liệu.
+# Thiếu tiền tố thì chất lượng tụt hẳn — model được huấn luyện bất đối xứng, hai
+# vế nằm ở hai vùng khác nhau của không gian vector. HuggingFaceEmbeddings không
+# tự thêm, nên phải bọc lại.
+DEFAULT_EMBEDDING_MODEL = config.EMBEDDING_MODEL
+E5_QUERY_PREFIX = "query: "
+E5_PASSAGE_PREFIX = "passage: "
+MAX_SEQ_LENGTH = 512
+
+
+class PrefixedEmbeddings(HuggingFaceEmbeddings):
+    """HuggingFaceEmbeddings có thêm tiền tố bất đối xứng của họ e5.
+
+    Chỉ thêm tiền tố cho model thật sự cần (tên có "e5"), để đổi ngược về model
+    cũ vẫn chạy đúng mà không phải sửa gì thêm.
+    """
+
+    _needs_prefix: bool = False
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        object.__setattr__(self, "_needs_prefix", "e5" in self.model_name.lower())
+        # Ép độ dài chuỗi tối đa: bản cấu hình sẵn của model có thể thấp hơn, mà
+        # cắt ngắn ở đây thì mất hẳn phần đuôi của chunk chứ không báo lỗi gì.
+        try:
+            self._client.max_seq_length = MAX_SEQ_LENGTH
+        except Exception as e:
+            print(f"Warning: không đặt được max_seq_length: {e}")
+
+    def embed_documents(self, texts):
+        if self._needs_prefix:
+            texts = [E5_PASSAGE_PREFIX + t for t in texts]
+        return super().embed_documents(texts)
+
+    def embed_query(self, text):
+        if self._needs_prefix:
+            text = E5_QUERY_PREFIX + text
+        return super().embed_query(text)
+
+
 # 4. Upgraded VectorDB class matching the requirements & visual screenshots
 class VectorDB:
     def __init__(
         self,
         documents_or_persist_dir=None,
-        embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         collection_name: str = "vietnamese_docs",
         persist_dir: str = None,
     ):
@@ -184,7 +231,14 @@ class VectorDB:
                 if self._embedding is None:
                     print(f"Lazy loading HuggingFaceEmbeddings with model: {self.embedding_model}")
                     try:
-                        self._embedding = HuggingFaceEmbeddings(model_name=self.embedding_model, model_kwargs={'device': 'cpu'})
+                        # normalize_embeddings: vector chuẩn hoá về độ dài 1 thì
+                        # khoảng cách L2 và cosine xếp hạng như nhau — không còn
+                        # phụ thuộc vào chuyện chỉ mục được tạo với space nào.
+                        self._embedding = PrefixedEmbeddings(
+                            model_name=self.embedding_model,
+                            model_kwargs={'device': 'cpu'},
+                            encode_kwargs={'normalize_embeddings': True},
+                        )
                     except Exception as e:
                         print(f"Warning: HuggingFaceEmbeddings init error: {e}. Falling back to keyword search.")
                         self._embedding = None
@@ -199,6 +253,13 @@ class VectorDB:
                         collection_name=self.collection_name,
                         embedding_function=self.embedding,
                         persist_directory=self.persist_dir,
+                        # Không đặt thì Chroma mặc định L2. Model huấn luyện cho
+                        # cosine, và similarity_search_with_relevance_scores quy
+                        # đổi điểm theo giả định cosine — với L2 nó trả điểm âm
+                        # (đo được -3,9 … -6,3) kèm cảnh báo.
+                        # Chỉ có tác dụng khi TẠO collection; đổi giá trị này
+                        # trên chỉ mục đã có thì phải index lại.
+                        collection_metadata={"hnsw:space": "cosine"},
                     )
                 except Exception as e:
                     print(f"Warning: Chroma init error: {e}")
@@ -261,10 +322,21 @@ class VectorDB:
         """
         import hashlib, pickle
 
-        key = hashlib.sha1(
-            (SEGMENTER_VERSION + "|" + str(len(all_ids)) + "|" + "".join(all_ids))
-            .encode("utf-8", "replace")
-        ).hexdigest()
+        # Khoá cache phải phủ cả NỘI DUNG, không chỉ danh sách id. Id của chunk
+        # dẫn xuất từ chunk_id/field/trang/content — KHÔNG từ tên thuốc. Nên khi
+        # chuẩn hoá tên (#5) thì parent_text đổi mà id giữ nguyên: khoá chỉ theo
+        # id sẽ báo "còn khớp" và trả về token của corpus cũ, im lặng và sai.
+        digest = hashlib.sha1()
+        digest.update(SEGMENTER_VERSION.encode("utf-8"))
+        for doc_id, text in zip(all_ids, all_texts):
+            # Kèm độ dài trước mỗi phần: không cần ký tự ngăn cách, mà cũng
+            # không có cách nào ghép hai bộ (id, text) khác nhau ra cùng chuỗi.
+            for part in (str(doc_id), text):
+                raw = part.encode("utf-8", "replace")
+                digest.update(str(len(raw)).encode("ascii"))
+                digest.update(b":")
+                digest.update(raw)
+        key = digest.hexdigest()
         cache_path = os.path.join(self.persist_dir, "bm25_tokens.pkl")
 
         try:
