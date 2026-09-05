@@ -1,0 +1,400 @@
+/* Trình đọc tài liệu có tô sáng & ghi chú cá nhân */
+
+.annot-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.annot-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background-color: var(--bg-card);
+}
+
+.annot-page-text {
+  position: relative;
+  padding: 20px 24px 40px;
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+
+.annot-empty-page {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---- highlight marks ---- */
+
+.annot-mark {
+  border-radius: 3px;
+  padding: 1px 0;
+  cursor: pointer;
+  color: inherit;
+  background-color: var(--annot-hl, rgba(250, 204, 21, 0.4));
+  box-shadow: inset 0 -1.5px 0 var(--annot-hl-strong, rgba(202, 138, 4, 0.55));
+  transition: background-color var(--transition-fast);
+}
+
+.annot-mark:hover {
+  background-color: var(--annot-hl-strong, rgba(202, 138, 4, 0.55));
+}
+
+.annot-mark.active {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.annot-mark-yellow { --annot-hl: rgba(250, 204, 21, 0.42); --annot-hl-strong: rgba(202, 138, 4, 0.55); }
+.annot-mark-green  { --annot-hl: rgba(34, 197, 94, 0.32);  --annot-hl-strong: rgba(21, 128, 61, 0.45); }
+.annot-mark-blue   { --annot-hl: rgba(59, 130, 246, 0.3);  --annot-hl-strong: rgba(29, 78, 216, 0.45); }
+.annot-mark-pink   { --annot-hl: rgba(236, 72, 153, 0.28); --annot-hl-strong: rgba(190, 24, 93, 0.42); }
+.annot-mark-purple { --annot-hl: rgba(168, 85, 247, 0.28); --annot-hl-strong: rgba(126, 34, 206, 0.42); }
+
+/* Nền tối: giảm độ đậm của nền tô sáng để chữ sáng vẫn đọc rõ, bù lại bằng gạch chân đậm hơn */
+html.dark .annot-mark, .dark .annot-mark { padding: 1px 2px; }
+html.dark .annot-mark-yellow, .dark .annot-mark-yellow { --annot-hl: rgba(250, 204, 21, 0.22); --annot-hl-strong: rgba(250, 204, 21, 0.75); }
+html.dark .annot-mark-green,  .dark .annot-mark-green  { --annot-hl: rgba(34, 197, 94, 0.22);  --annot-hl-strong: rgba(74, 222, 128, 0.75); }
+html.dark .annot-mark-blue,   .dark .annot-mark-blue   { --annot-hl: rgba(59, 130, 246, 0.24); --annot-hl-strong: rgba(96, 165, 250, 0.75); }
+html.dark .annot-mark-pink,   .dark .annot-mark-pink   { --annot-hl: rgba(236, 72, 153, 0.22); --annot-hl-strong: rgba(244, 114, 182, 0.75); }
+html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 85, 247, 0.22); --annot-hl-strong: rgba(192, 132, 252, 0.75); }
+
+/* ---- floating selection toolbar ---- */
+
+.annot-selection-toolbar {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  z-index: 20;
+  animation: fadeIn 0.12s ease-out;
+}
+
+.annot-color-dot {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--transition-fast);
+}
+
+.annot-color-dot:hover { transform: scale(1.15); }
+.annot-color-dot.selected { outline: 2px solid var(--primary); outline-offset: 1.5px; }
+
+.annot-color-yellow { background-color: #facc15; }
+.annot-color-green  { background-color: #22c55e; }
+.annot-color-blue   { background-color: #3b82f6; }
+.annot-color-pink   { background-color: #ec4899; }
+.annot-color-purple { background-color: #a855f7; }
+
+.annot-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border);
+}
+
+.annot-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.annot-toolbar-btn:hover { background-color: var(--bg-hover); }
+
+/* ---- right rail ---- */
+
+.annot-rail {
+  width: 296px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background-color: var(--bg-right-panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.annot-rail-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.annot-rail-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.annot-rail-tabs button:hover { color: var(--text-primary); }
+
+.annot-rail-tabs button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.annot-rail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  min-height: 0;
+}
+
+.annot-rail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.annot-group + .annot-group { margin-top: 14px; }
+
+.annot-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.annot-current-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background-color: var(--pp-badge-blue-bg);
+  color: var(--pp-badge-blue-text);
+}
+
+.annot-item {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--annot-accent, #facc15);
+  border-radius: 8px;
+  background-color: var(--bg-card);
+  padding: 9px 10px;
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.annot-item + .annot-item { margin-top: 7px; }
+.annot-item:hover { box-shadow: var(--shadow-sm); }
+.annot-item.active { box-shadow: 0 0 0 2px var(--primary-glow); border-color: var(--border-active); }
+
+.annot-item-yellow { --annot-accent: #facc15; }
+.annot-item-green  { --annot-accent: #22c55e; }
+.annot-item-blue   { --annot-accent: #3b82f6; }
+.annot-item-pink   { --annot-accent: #ec4899; }
+.annot-item-purple { --annot-accent: #a855f7; }
+
+.annot-item-quote {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.annot-item-note {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.annot-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.annot-item-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.annot-item-actions button:hover { background-color: var(--bg-hover); color: var(--text-primary); }
+.annot-item-actions button.danger:hover { color: var(--danger); border-color: var(--danger); background: none; }
+
+.annot-item-editor { margin-top: 8px; }
+
+.annot-note-input {
+  width: 100%;
+  min-height: 62px;
+  resize: vertical;
+  padding: 7px 9px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.annot-note-input:focus { border-color: var(--border-active); }
+
+.annot-item-colors {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.annot-item-editor-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.annot-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.annot-mini-btn:hover { background-color: var(--bg-hover); color: var(--text-primary); }
+
+.annot-mini-btn.primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.annot-mini-btn.primary:hover { background-color: var(--secondary); color: #fff; }
+
+/* ---- document-level note ---- */
+
+.annot-docnote-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.annot-docnote-hint {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.annot-docnote-input {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  padding: 10px 11px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.annot-docnote-input:focus { border-color: var(--border-active); }
+
+.annot-docnote-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.annot-docnote-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.annot-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--primary);
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.annot-save-btn:hover:not(:disabled) { background-color: var(--secondary); }
+.annot-save-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .annot-layout { flex-direction: column; }
+  .annot-rail {
+    width: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    max-height: 42%;
+  }
+}

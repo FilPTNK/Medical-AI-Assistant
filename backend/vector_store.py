@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import threading
 import numpy as np
 from typing import List, Dict, Any, Optional
 from collections import Counter
@@ -8,6 +9,8 @@ from collections import Counter
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+
+import documents
 
 # 1. Helper function for Vietnamese / English tokenisation
 def tokenize_text(text: str) -> List[str]:
@@ -51,21 +54,15 @@ class FallbackBM25:
                 scores[idx] += idf * (numerator / denominator)
         return scores
 
-# 3. Lazy loaded Cross-Encoder Reranker
-_cross_encoder = None
-
-def get_cross_encoder():
-    global _cross_encoder
-    if _cross_encoder is None:
-        model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-        print(f"Loading local Cross-Encoder reranker ({model_name})...")
-        try:
-            from sentence_transformers import CrossEncoder
-            _cross_encoder = CrossEncoder(model_name)
-            print("Cross-Encoder loaded successfully.")
-        except Exception as e:
-            print(f"Failed to load sentence-transformers CrossEncoder: {e}. Running search without reranker.")
-    return _cross_encoder
+# 3. Không còn Cross-Encoder reranker.
+#
+# Trước đây bước xếp hạng cuối dùng cross-encoder/ms-marco-MiniLM-L-6-v2 —
+# model huấn luyện trên MS MARCO thuần tiếng Anh, chấm điểm ngữ liệu tiếng
+# Việt. Giá phải trả đo được: 11,7s nạp model ở truy vấn đầu và 0,93s mỗi
+# truy vấn (4,48s khi lọc theo doc_names vì k_candidates lên 60). Không có
+# bằng chứng định lượng nào cho thấy nó cải thiện thứ hạng tiếng Việt, nên
+# kết quả nay lấy thẳng theo điểm RRF. Muốn rerank lại thì dùng model đa
+# ngữ (mmarco-mMiniLMv2) hoặc reranker qua API, đừng quay lại model Anh.
 
 # 4. Upgraded VectorDB class matching the requirements & visual screenshots
 class VectorDB:
@@ -85,126 +82,297 @@ class VectorDB:
             documents = documents_or_persist_dir
 
         self.collection_name = collection_name
-        
-        print(f"Initializing HuggingFaceEmbeddings with model: {embedding_model}")
-        self.embedding = HuggingFaceEmbeddings(model_name=embedding_model)
-        self.db = self._build_db(documents)
+        self.embedding_model = embedding_model
+        self._embedding = None
+        self._db = None
+        self._corpus_cache = None
+        self._bm25_model = None
+        self._lookup = None
+        # Nạp model và dựng BM25 đều tốn kém và đều có thể bị gọi từ nhiều
+        # thread cùng lúc (preload chạy nền + request của người dùng). Khoá lại
+        # để chỉ làm một lần, thay vì nạp hai bản model 470MB trên máy 7,3GB.
+        self._build_lock = threading.RLock()
 
-    # Building or loading database as shown in Image 1
-    def _build_db(self, documents):
-        # Trường hợp tải database đã có từ persist_dir
-        if documents is None or len(documents) == 0:
-            db = Chroma(
-                collection_name=self.collection_name,
-                embedding_function=self.embedding,
-                persist_directory=self.persist_dir,
-            )
-        # Trường hợp tạo mới database từ documents
-        else:
-            db = Chroma.from_documents(
-                documents=documents,
-                embedding=self.embedding,
-                collection_name=self.collection_name,
-                persist_directory=self.persist_dir,
-            )
-        return db
+    @property
+    def embedding(self):
+        if self._embedding is None:
+            with self._build_lock:
+                if self._embedding is None:
+                    print(f"Lazy loading HuggingFaceEmbeddings with model: {self.embedding_model}")
+                    try:
+                        self._embedding = HuggingFaceEmbeddings(model_name=self.embedding_model, model_kwargs={'device': 'cpu'})
+                    except Exception as e:
+                        print(f"Warning: HuggingFaceEmbeddings init error: {e}. Falling back to keyword search.")
+                        self._embedding = None
+        return self._embedding
+
+    @property
+    def db(self):
+        if self._db is None:
+            if self.embedding:
+                try:
+                    self._db = Chroma(
+                        collection_name=self.collection_name,
+                        embedding_function=self.embedding,
+                        persist_directory=self.persist_dir,
+                    )
+                except Exception as e:
+                    print(f"Warning: Chroma init error: {e}")
+                    self._db = None
+        return self._db
 
     # Get retriever as shown in Image 1
     def get_retriever(self, search_kwargs: dict = None):
         if search_kwargs is None:
             search_kwargs = {"k": 4} # Mặc định lấy 4 document gần nhất
+        if not self.db:
+            return None
             
         return self.db.as_retriever(
             search_type="similarity",
             search_kwargs=search_kwargs,
         )
 
-    # Unified methods for FastAPI interaction
-    def add_chunks(self, documents: List[Document]):
+    def embed_text(self, text: str) -> Optional[List[float]]:
+        """Embeds a free-text string with the same model the index uses.
+
+        Used to store a vector alongside each logged question so "câu hỏi tương
+        tự đã hỏi trước đây" can match by meaning, not just by keyword. Returns
+        None whenever the embedding model is unavailable — callers fall back to
+        keyword matching.
+        """
+        if not (text or "").strip():
+            return None
+        try:
+            embedding = self.embedding
+            if embedding is None:
+                return None
+            return [float(x) for x in embedding.embed_query(text)]
+        except Exception as e:
+            print(f"Warning: embed_text failed: {e}")
+            return None
+
+    def _get_corpus_and_bm25(self):
+        if not self.db:
+            return None, None, None, None
+
+        if self._corpus_cache is None:
+            # Khoá: preload lúc khởi động chạy ở thread nền, nên một request
+            # đến đúng lúc đó sẽ gọi vào đây song song. Không khoá thì cả hai
+            # cùng kéo 25.861 chunk ra RAM và cùng dựng BM25.
+            with self._build_lock:
+                if self._corpus_cache is None:
+                    self._build_corpus_cache()
+
+        if self._corpus_cache is None:
+            return None, None, None, None
+        return self._corpus_cache[0], self._corpus_cache[1], self._corpus_cache[2], self._bm25_model
+
+    def _build_corpus_cache(self):
+        """Kéo toàn bộ child chunk ra RAM, dựng BM25 và các bảng tra ngược.
+
+        Luôn gọi bên trong `self._build_lock`.
+        """
+        try:
+            db_content = self.db.get(where={"doc_type": "child"}, include=["metadatas", "documents"])
+        except Exception:
+            db_content = None
+        if not db_content or not db_content["documents"]:
+            return
+
+        all_texts = db_content["documents"]
+        all_metadatas = db_content["metadatas"]
+        all_ids = db_content["ids"]
+
+        tokenized_corpus = [tokenize_text(text) for text in all_texts]
+        try:
+            from rank_bm25 import BM25Okapi
+            bm25_model = BM25Okapi(tokenized_corpus)
+        except Exception:
+            bm25_model = FallbackBM25(tokenized_corpus)
+
+        self._bm25_model = bm25_model
+        # Bảng tra ngược dựng một lần. Trước đây search() quét tuyến tính toàn
+        # bộ metadata cho MỖI kết quả dense, rồi gọi all_ids.index() thêm một
+        # lần nữa cho mỗi ứng viên — O(k×N) thuần Python, đo được ~1,5s mỗi
+        # truy vấn trên 25.861 chunk.
+        self._lookup = {
+            "by_chunk_id": {
+                meta.get("chunk_id"): idx
+                for idx, meta in enumerate(all_metadatas)
+                if meta.get("chunk_id")
+            },
+            "by_text": {text: idx for idx, text in enumerate(all_texts)},
+            "by_id": {doc_id: idx for idx, doc_id in enumerate(all_ids)},
+        }
+        # Gán cuối cùng: các thread khác dùng biến này làm cờ "đã xong", nên
+        # nó chỉ được set khi mọi thứ ở trên đã dựng đủ.
+        self._corpus_cache = (all_texts, all_metadatas, all_ids)
+
+    def add_chunks(self, documents: List[Document], ids: Optional[List[str]] = None):
+        """
+        Thêm chunk vào vector store.
+
+        Truyền `ids` tất định để lần nạp lại ghi đè thay vì nhân bản: Chroma
+        dùng upsert theo id, còn nếu để trống thì mỗi lần chạy sinh UUID mới và
+        cùng một nội dung sẽ nằm nhiều lần trong index.
+        """
         if not documents:
             return
-        self.db.add_documents(documents)
+        if ids is not None:
+            if len(ids) != len(documents):
+                raise ValueError(
+                    f"Số ids ({len(ids)}) không khớp số documents ({len(documents)})."
+                )
+            self.db.add_documents(documents, ids=ids)
+        else:
+            self.db.add_documents(documents)
+        self._corpus_cache = None
+        self._bm25_model = None
+        self._lookup = None
         print(f"Added {len(documents)} documents to vector store.")
 
     def delete_document(self, doc_name: str):
         res = self.db.get(where={"doc_name": doc_name})
         if res and res["ids"]:
             self.db.delete(ids=res["ids"])
+            self._corpus_cache = None
+            self._bm25_model = None
+            self._lookup = None
             print(f"Deleted document '{doc_name}' ({len(res['ids'])} chunks) from vector database.")
 
     def list_documents(self) -> List[Dict[str, Any]]:
-        res = self.db.get(include=["metadatas"])
+        all_texts, all_metadatas, all_ids, _ = self._get_corpus_and_bm25()
+        if not all_metadatas:
+            res = self.db.get(include=["metadatas"])
+            all_metadatas = res.get("metadatas", [])
+
         docs = {}
-        if res and res["metadatas"]:
-            for meta in res["metadatas"]:
+        if all_metadatas:
+            for meta in all_metadatas:
                 name = meta.get("doc_name")
                 page = meta.get("page_num", 1)
                 doc_type = meta.get("doc_type", "child")
                 if not name:
                     continue
                 if name not in docs:
-                    docs[name] = {"pages": set(), "chunks": 0}
+                    docs[name] = {"pages": set(), "max_page": 0, "chunks": 0}
                 docs[name]["pages"].add(page)
+                if isinstance(page, int) and page > docs[name]["max_page"]:
+                    docs[name]["max_page"] = page
                 if doc_type == "child":
                     docs[name]["chunks"] += 1
                     
-        return [
-            {
+        # Số trang lấy từ manifest của tài liệu. Trước đây giá trị này được
+        # hard-code theo tên sách, nên mọi tài liệu khác đều báo 1 trang và làm
+        # hỏng nút chuyển trang trong reader.
+        results = []
+        for name, info in docs.items():
+            manifest = documents.load_manifest(name) or {}
+            page_count = manifest.get("pdf_pages") or max(
+                len(info["pages"]), info["max_page"], 1
+            )
+            results.append({
                 "doc_name": name,
-                "page_count": len(info["pages"]),
-                "chunk_count": info["chunks"]
-            }
-            for name, info in docs.items()
-        ]
+                "doc_title": manifest.get("doc_title") or name,
+                "doc_series": manifest.get("doc_series"),
+                "volume": manifest.get("volume"),
+                "coverage": manifest.get("coverage"),
+                "body_page_range": manifest.get("body_page_range"),
+                "page_count": page_count,
+                "chunk_count": info["chunks"],
+            })
+        return results
+
+    def _reload_db(self):
+        try:
+            self._db = None
+            self._corpus_cache = None
+            self._bm25_model = None
+            self._lookup = None
+        except Exception as e:
+            print(f"Error reloading db: {e}")
 
     # Advanced Hybrid Search with BM25, RRF, and Cross-Encoder Reranking
-    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        # Fetch child documents to run sparse BM25 indexing
-        db_content = self.db.get(where={"doc_type": "child"}, include=["metadatas", "documents"])
-        
-        if not db_content or not db_content["documents"]:
-            print("Vector store is empty or has no child chunks. Skipping search.")
-            return []
-            
-        all_texts = db_content["documents"]
-        all_metadatas = db_content["metadatas"]
-        all_ids = db_content["ids"]
-        
+    def search(self, query: str, top_k: int = 5, doc_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Hybrid search over the indexed chunks.
+
+        `doc_names` restricts the search to a subset of documents — used by the
+        multi-source comparison feature, which needs the best passages *per
+        document* rather than the globally best passages.
+        """
+        all_texts, all_metadatas, all_ids, bm25_model = self._get_corpus_and_bm25()
+
+        if not all_texts or not bm25_model:
+            self._reload_db()
+            all_texts, all_metadatas, all_ids, bm25_model = self._get_corpus_and_bm25()
+            if not all_texts or not bm25_model:
+                print("Vector store is empty or has no child chunks. Skipping search.")
+                return []
+
+        allowed_ids = None
+        if doc_names:
+            allowed_ids = {
+                all_ids[idx] for idx, meta in enumerate(all_metadatas)
+                if meta.get("doc_name") in set(doc_names)
+            }
+            if not allowed_ids:
+                return []
+
         # A. DENSE RETRIEVAL: Query similarity from ChromaDB
-        # We search with a wider margin (top_k * 4) to ensure good candidates for RRF and Reranking
-        k_candidates = min(top_k * 4, len(all_texts))
-        dense_results_with_scores = self.db.similarity_search_with_relevance_scores(
-            query, k=k_candidates, filter={"doc_type": "child"}
-        )
+        # Widen the candidate pool when filtering so enough of them survive the filter.
+        k_candidates = min(top_k * (12 if doc_names else 4), len(all_texts))
+        dense_filter = None
+        if doc_names:
+            dense_filter = (
+                {"doc_name": doc_names[0]} if len(doc_names) == 1
+                else {"doc_name": {"$in": list(doc_names)}}
+            )
+        try:
+            dense_results_with_scores = self.db.similarity_search_with_relevance_scores(
+                query, k=k_candidates, filter=dense_filter
+            )
+        except Exception as e:
+            print(f"Dense search error ({e}). Reloading Chroma and retrying...")
+            self._reload_db()
+            all_texts, all_metadatas, all_ids, bm25_model = self._get_corpus_and_bm25()
+            try:
+                dense_results_with_scores = self.db.similarity_search_with_relevance_scores(
+                    query, k=k_candidates, filter=dense_filter
+                )
+            except Exception as e2:
+                print(f"Dense search fallback failed: {e2}")
+                dense_results_with_scores = []
         
+        lookup = self._lookup or {}
+        by_chunk_id = lookup.get("by_chunk_id", {})
+        by_text = lookup.get("by_text", {})
+        by_id = lookup.get("by_id", {})
+
         dense_ranking = []
         for doc, score in dense_results_with_scores:
-            # Try to match the retrieved doc with the db_content list to find the ID
-            match_idx = -1
-            for idx, text in enumerate(all_texts):
-                if text == doc.page_content and all_metadatas[idx].get("page_num") == doc.metadata.get("page_num"):
-                    match_idx = idx
-                    break
-            if match_idx != -1:
+            cid = doc.metadata.get("chunk_id") if doc.metadata else None
+            match_idx = by_chunk_id.get(cid, -1) if cid else -1
+            if match_idx == -1:
+                match_idx = by_text.get(doc.page_content, -1)
+            if match_idx != -1 and (allowed_ids is None or all_ids[match_idx] in allowed_ids):
                 dense_ranking.append(all_ids[match_idx])
-                
+
         # B. SPARSE RETRIEVAL: BM25 score calculation
-        tokenized_corpus = [tokenize_text(text) for text in all_texts]
-        
-        # Load rank-bm25 if available, otherwise fallback
-        bm25_model = None
-        try:
-            from rank_bm25 import BM25Okapi
-            bm25_model = BM25Okapi(tokenized_corpus)
-        except Exception:
-            bm25_model = FallbackBM25(tokenized_corpus)
-            
         tokenized_query = tokenize_text(query)
         bm25_scores = bm25_model.get_scores(tokenized_query)
-        
-        # Sort indices by BM25 score descending
-        sparse_indices = np.argsort(bm25_scores)[::-1][:k_candidates]
-        sparse_ranking = [all_ids[idx] for idx in sparse_indices if bm25_scores[idx] > 0.0]
+
+        # Sort indices by BM25 score descending, dropping filtered-out documents
+        # *before* trimming to k_candidates so a small document still gets its hits.
+        sparse_ranking = []
+        for idx in np.argsort(bm25_scores)[::-1]:
+            if bm25_scores[idx] <= 0.0:
+                break
+            if allowed_ids is not None and all_ids[idx] not in allowed_ids:
+                continue
+            sparse_ranking.append(all_ids[idx])
+            if len(sparse_ranking) >= k_candidates:
+                break
 
         # C. RECIPROCAL RANK FUSION (RRF)
         # Combine rankings: RRF_Score = 1/(60 + dense_rank) + 1/(60 + sparse_rank)
@@ -225,7 +393,9 @@ class VectorDB:
         # Gather actual documents for Reranking
         candidates = []
         for doc_id in top_rrf_ids:
-            idx = all_ids.index(doc_id)
+            idx = by_id.get(doc_id, -1)
+            if idx == -1:
+                continue
             candidates.append({
                 "id": doc_id,
                 "text": all_texts[idx],
@@ -235,26 +405,7 @@ class VectorDB:
                 "score": rrf_scores[doc_id]  # Default score is RRF
             })
 
-        # D. CROSS-ENCODER RERANKING
-        cross_encoder = get_cross_encoder()
-        if cross_encoder and candidates:
-            try:
-                # Format candidate inputs: [[query, context], [query, context], ...]
-                # We use parent_text as the context for richer sentence similarity matching
-                rerank_inputs = [[query, c["parent_text"]] for c in candidates]
-                reranker_scores = cross_encoder.predict(rerank_inputs)
-                
-                # Update scores with cross-encoder outputs
-                for idx, c in enumerate(candidates):
-                    # Normalize raw logits to 0-1 range using sigmoid approximation
-                    raw_score = reranker_scores[idx]
-                    prob_score = 1.0 / (1.0 + math.exp(-raw_score))
-                    c["score"] = float(prob_score)
-                    
-                # Sort by reranked scores
-                candidates.sort(key=lambda x: x["score"], reverse=True)
-            except Exception as e:
-                print(f"Reranking failed with error: {e}. Falling back to RRF rankings.")
+        # D. Không rerank nữa — candidates đã theo thứ tự RRF giảm dần.
 
         # Return top_k search results
         # Under Parent-Child Indexing, the RAG assistant returns the PARENT_TEXT (richer context)

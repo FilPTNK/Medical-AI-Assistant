@@ -4,9 +4,14 @@ import glob
 import unicodedata
 from typing import List, Dict, Any
 from tqdm import tqdm
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+
+try:
+    from langchain_community.document_loaders import PyPDFLoader
+except ImportError:  # bố cục package cũ
+    from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 
 # 1. Clean Vietnamese text as shown in Image 2
 def clean_vietnamese_text(text: str) -> str:

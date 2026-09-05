@@ -1,0 +1,390 @@
+"""SQLite-backed storage for the document-research features (tra cứu tài liệu).
+
+Three related stores share one database file:
+
+* ``highlights``     — đoạn tô sáng + ghi chú của bác sĩ trên từng trang tài liệu.
+* ``doc_notes``      — ghi chú cá nhân ở cấp tài liệu (mỗi tài liệu một bản ghi).
+* ``search_history`` — lịch sử câu hỏi tra cứu kèm câu trả lời, nguồn và vector
+  embedding của câu hỏi, dùng để gợi ý "câu hỏi tương tự đã hỏi trước đây" và
+  tái sử dụng lại kết quả cũ mà không cần gọi lại LLM.
+"""
+import json
+import math
+import os
+import re
+import sqlite3
+import unicodedata
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import config
+
+DB_PATH = os.path.join(config.DATA_DIR, "library.db")
+
+# Bảng màu tô sáng được phép (khớp với bảng màu ở frontend)
+HIGHLIGHT_COLORS = {"yellow", "green", "blue", "pink", "purple"}
+DEFAULT_COLOR = "yellow"
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with _connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS highlights (
+                id TEXT PRIMARY KEY,
+                doc_name TEXT NOT NULL,
+                page_num INTEGER NOT NULL,
+                quote TEXT NOT NULL,
+                start_offset INTEGER NOT NULL,
+                end_offset INTEGER NOT NULL,
+                color TEXT NOT NULL,
+                note TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS doc_notes (
+                doc_name TEXT PRIMARY KEY,
+                content TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS search_history (
+                id TEXT PRIMARY KEY,
+                query TEXT NOT NULL,
+                answer TEXT,
+                sources TEXT,
+                embedding TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_highlights_doc ON highlights(doc_name, page_num);
+            CREATE INDEX IF NOT EXISTS idx_history_created ON search_history(created_at DESC);
+            """
+        )
+
+
+# ---------------------------------------------------------------- highlights
+
+def _highlight_row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    return dict(row)
+
+
+def list_highlights(doc_name: Optional[str] = None, page_num: Optional[int] = None) -> List[Dict[str, Any]]:
+    sql = "SELECT * FROM highlights"
+    params: List[Any] = []
+    clauses = []
+    if doc_name:
+        clauses.append("doc_name = ?")
+        params.append(doc_name)
+    if page_num is not None:
+        clauses.append("page_num = ?")
+        params.append(page_num)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    # Trong cùng một trang, sắp theo vị trí để frontend dựng lớp tô sáng tuần tự.
+    sql += " ORDER BY page_num ASC, start_offset ASC, created_at ASC"
+    with _connect() as conn:
+        return [_highlight_row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def search_highlights(keyword: str, limit: int = 200) -> List[Dict[str, Any]]:
+    like = f"%{keyword.strip()}%"
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM highlights
+            WHERE quote LIKE ? OR note LIKE ? OR doc_name LIKE ?
+            ORDER BY updated_at DESC LIMIT ?
+            """,
+            (like, like, like, limit),
+        ).fetchall()
+        return [_highlight_row_to_dict(r) for r in rows]
+
+
+def create_highlight(doc_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    now = datetime.now().isoformat()
+    highlight_id = str(uuid.uuid4())
+    color = str(data.get("color") or DEFAULT_COLOR)
+    if color not in HIGHLIGHT_COLORS:
+        color = DEFAULT_COLOR
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO highlights (
+                id, doc_name, page_num, quote, start_offset, end_offset,
+                color, note, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                highlight_id, doc_name, int(data.get("page_num") or 1),
+                str(data.get("quote") or ""),
+                int(data.get("start_offset") or 0), int(data.get("end_offset") or 0),
+                color, (data.get("note") or None), (data.get("created_by") or None),
+                now, now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
+        return _highlight_row_to_dict(row)
+
+
+def update_highlight(highlight_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    fields = []
+    params: List[Any] = []
+    if "note" in data:
+        fields.append("note = ?")
+        params.append(data.get("note") or None)
+    if "color" in data:
+        color = str(data.get("color") or DEFAULT_COLOR)
+        fields.append("color = ?")
+        params.append(color if color in HIGHLIGHT_COLORS else DEFAULT_COLOR)
+    if not fields:
+        return get_highlight(highlight_id)
+
+    fields.append("updated_at = ?")
+    params.append(datetime.now().isoformat())
+    params.append(highlight_id)
+    with _connect() as conn:
+        conn.execute(f"UPDATE highlights SET {', '.join(fields)} WHERE id = ?", params)
+        row = conn.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
+        return _highlight_row_to_dict(row) if row else None
+
+
+def get_highlight(highlight_id: str) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM highlights WHERE id = ?", (highlight_id,)).fetchone()
+        return _highlight_row_to_dict(row) if row else None
+
+
+def delete_highlight(highlight_id: str) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM highlights WHERE id = ?", (highlight_id,))
+        return cur.rowcount > 0
+
+
+def delete_highlights_for_document(doc_name: str):
+    """Dọn ghi chú khi tài liệu bị xóa khỏi thư viện."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM highlights WHERE doc_name = ?", (doc_name,))
+        conn.execute("DELETE FROM doc_notes WHERE doc_name = ?", (doc_name,))
+
+
+def count_highlights_by_document() -> Dict[str, int]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT doc_name, COUNT(*) AS n FROM highlights GROUP BY doc_name"
+        ).fetchall()
+        return {r["doc_name"]: r["n"] for r in rows}
+
+
+# ---------------------------------------------------------------- doc notes
+
+def get_doc_note(doc_name: str) -> Dict[str, Any]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM doc_notes WHERE doc_name = ?", (doc_name,)).fetchone()
+        if not row:
+            return {"doc_name": doc_name, "content": "", "updated_by": None, "updated_at": None}
+        return dict(row)
+
+
+def save_doc_note(doc_name: str, content: str, updated_by: Optional[str] = None) -> Dict[str, Any]:
+    now = datetime.now().isoformat()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO doc_notes (doc_name, content, updated_by, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(doc_name) DO UPDATE SET
+                content = excluded.content,
+                updated_by = excluded.updated_by,
+                updated_at = excluded.updated_at
+            """,
+            (doc_name, content, updated_by, now),
+        )
+        row = conn.execute("SELECT * FROM doc_notes WHERE doc_name = ?", (doc_name,)).fetchone()
+        return dict(row)
+
+
+# ---------------------------------------------------------------- history
+
+def _history_row_to_dict(row: sqlite3.Row, include_embedding: bool = False) -> Dict[str, Any]:
+    d = dict(row)
+    raw_sources = d.pop("sources", None)
+    try:
+        d["sources"] = json.loads(raw_sources) if raw_sources else []
+    except (TypeError, ValueError):
+        d["sources"] = []
+    embedding = d.pop("embedding", None)
+    if include_embedding:
+        try:
+            d["embedding"] = json.loads(embedding) if embedding else None
+        except (TypeError, ValueError):
+            d["embedding"] = None
+    return d
+
+
+def add_history(
+    query: str,
+    answer: str,
+    sources: List[Dict[str, Any]],
+    embedding: Optional[List[float]] = None,
+    created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    now = datetime.now().isoformat()
+    record_id = str(uuid.uuid4())
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO search_history (id, query, answer, sources, embedding, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record_id, query, answer,
+                json.dumps(sources, ensure_ascii=False),
+                json.dumps(embedding) if embedding else None,
+                created_by, now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM search_history WHERE id = ?", (record_id,)).fetchone()
+        return _history_row_to_dict(row)
+
+
+def list_history(keyword: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        if keyword and keyword.strip():
+            like = f"%{keyword.strip()}%"
+            rows = conn.execute(
+                """
+                SELECT * FROM search_history
+                WHERE query LIKE ? OR answer LIKE ?
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (like, like, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM search_history ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_history_row_to_dict(r) for r in rows]
+
+
+def get_history(record_id: str) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM search_history WHERE id = ?", (record_id,)).fetchone()
+        return _history_row_to_dict(row) if row else None
+
+
+def delete_history(record_id: str) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM search_history WHERE id = ?", (record_id,))
+        return cur.rowcount > 0
+
+
+def clear_history():
+    with _connect() as conn:
+        conn.execute("DELETE FROM search_history")
+
+
+# ------------------------------------------------- similar question matching
+
+# Từ nối/hư từ tiếng Việt không mang thông tin phân biệt câu hỏi
+_STOPWORDS = {
+    "la", "cua", "cho", "va", "voi", "khi", "nao", "the", "duoc", "co", "khong",
+    "bi", "trong", "tren", "duoi", "bao", "nhieu", "gi", "nhu", "mot", "cac",
+    "nhung", "hay", "thi", "ra", "sao", "can", "phai", "de", "tai", "tu", "den",
+}
+
+
+def _strip_accents(text: str) -> str:
+    """Bỏ dấu tiếng Việt để so khớp được cả khi bác sĩ gõ không dấu."""
+    text = (text or "").lower().replace("đ", "d")
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", text)
+        if not unicodedata.combining(ch)
+    )
+
+
+def _tokenize(text: str) -> set:
+    """Token không dấu, bỏ hư từ — dùng cho so khớp từ khóa."""
+    words = re.findall(r"\w+", _strip_accents(text))
+    return {w for w in words if len(w) > 1 and w not in _STOPWORDS}
+
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _dice(a: set, b: set) -> float:
+    """Hệ số Dice giữa hai tập từ khóa (rộng tay hơn Jaccard với câu ngắn)."""
+    if not a or not b:
+        return 0.0
+    return 2 * len(a & b) / (len(a) + len(b))
+
+
+def find_similar_questions(
+    query: str,
+    query_embedding: Optional[List[float]] = None,
+    limit: int = 4,
+    min_score: float = 0.55,
+    scan_limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Tìm các câu hỏi đã tra cứu trước đây gần nghĩa với `query`.
+
+    Kết hợp hai tín hiệu và lấy điểm cao hơn:
+    * embedding (cùng model với vector store) — bắt được câu hỏi diễn đạt khác;
+    * trùng từ khóa không dấu (hệ số Dice) — bắt được trường hợp bác sĩ gõ
+      không dấu, thứ mà embedding tiếng Việt xử lý khá kém, và cũng là phương án
+      dự phòng khi không nạp được model embedding.
+    """
+    q_norm = _strip_accents(query).strip()
+    q_tokens = _tokenize(query)
+    if not q_norm:
+        return []
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM search_history ORDER BY created_at DESC LIMIT ?", (scan_limit,)
+        ).fetchall()
+
+    scored: List[Dict[str, Any]] = []
+    for row in rows:
+        record = _history_row_to_dict(row, include_embedding=True)
+        past_query = record["query"]
+        if _strip_accents(past_query).strip() == q_norm:
+            # Câu hỏi trùng khít (kể cả khác dấu): luôn xếp trên cùng.
+            score = 1.0
+            method = "exact"
+        else:
+            keyword_score = _dice(q_tokens, _tokenize(past_query))
+            emb = record.get("embedding")
+            embedding_score = _cosine(query_embedding, emb) if (query_embedding and emb) else 0.0
+            if embedding_score >= keyword_score:
+                score, method = embedding_score, "embedding"
+            else:
+                score, method = keyword_score, "keyword"
+
+        if score >= min_score:
+            record.pop("embedding", None)
+            record["similarity"] = round(float(score), 4)
+            record["match_method"] = method
+            scored.append(record)
+
+    scored.sort(key=lambda r: r["similarity"], reverse=True)
+    return scored[:limit]

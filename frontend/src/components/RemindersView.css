@@ -1,0 +1,549 @@
+/* Nhắc lịch tái khám & theo dõi bệnh mãn tính. */
+
+.rm-view {
+  /* Tự cuộn: .workspace-body đặt overflow:hidden — xem ghi chú ở DashboardView.css. */
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 48px;
+  max-width: 980px;
+  margin: 0 auto;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+}
+
+/* --- Thanh tiêu đề --- */
+.rm-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.rm-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.rm-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.rm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rm-segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-sidebar);
+}
+
+.rm-segmented button {
+  padding: 5px 11px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.rm-segmented button:hover { color: var(--text-primary); }
+
+.rm-segmented button.active {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.rm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.rm-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.rm-btn:disabled { opacity: 0.6; cursor: default; }
+
+.rm-btn-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.rm-btn-primary:hover:not(:disabled) { background: var(--secondary); color: #fff; }
+
+.rm-spin { animation: rm-rotate 0.9s linear infinite; }
+@keyframes rm-rotate { to { transform: rotate(360deg); } }
+
+/* --- Thẻ tổng hợp --- */
+.rm-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.rm-sum {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-card);
+}
+
+.rm-sum-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+.rm-sum strong {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.rm-sum-overdue.is-alert {
+  border-color: var(--pp-red-border);
+  background: var(--pp-red-bg);
+}
+
+.rm-sum-overdue.is-alert .rm-sum-label,
+.rm-sum-overdue.is-alert strong { color: var(--pp-red-text); }
+
+/* --- Bộ lọc --- */
+.rm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.rm-select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* --- Nhóm & danh sách --- */
+.rm-group { margin-bottom: 22px; }
+
+.rm-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.rm-group-title span {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+
+.rm-group-overdue { color: var(--pp-red-text); }
+
+.rm-group-overdue span {
+  background: var(--pp-red-icon-bg);
+  color: var(--pp-red-icon);
+}
+
+.rm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* --- Thẻ lời nhắc --- */
+.rm-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-card);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.rm-card:hover { box-shadow: var(--shadow-sm); }
+
+.rm-card-overdue { border-left-color: var(--danger); }
+.rm-card-today { border-left-color: var(--warning); }
+.rm-card-upcoming { border-left-color: var(--primary); }
+.rm-card-done { border-left-color: var(--border); opacity: 0.78; }
+
+.rm-card-main { flex: 1; min-width: 240px; }
+
+.rm-card-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.rm-patient {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 7px 3px 4px;
+  margin-left: -4px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.rm-patient:hover { background: var(--bg-hover); }
+
+.rm-patient-avatar {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--pp-blue-icon-bg);
+  color: var(--pp-blue-icon);
+  flex-shrink: 0;
+}
+
+.rm-patient-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.rm-patient-code { font-size: 11.5px; color: var(--text-muted); }
+.rm-patient-chevron { color: var(--text-muted); }
+
+.rm-kind {
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--pp-pill-gray-bg);
+  color: var(--pp-pill-gray-text);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.rm-kind-followup { background: var(--pp-badge-blue-bg); color: var(--pp-badge-blue-text); }
+.rm-kind-chronic { background: var(--pp-purple-icon-bg); color: var(--pp-purple-icon); }
+.rm-kind-lab { background: var(--pp-orange-icon-bg); color: var(--pp-orange-icon); }
+.rm-kind-medication { background: var(--pp-pill-green-bg); color: var(--pp-pill-green-text); }
+
+.rm-card-body { margin-bottom: 6px; }
+
+.rm-card-title { font-size: 13.5px; font-weight: 600; }
+
+.rm-card-note {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.rm-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.rm-meta-item { display: inline-flex; align-items: center; gap: 4px; }
+.rm-meta-muted { color: var(--text-muted); }
+
+.rm-due { font-weight: 600; }
+.rm-due-overdue { color: var(--pp-red-text); }
+.rm-due-today { color: var(--pp-orange-icon); }
+.rm-due-upcoming { color: var(--text-secondary); }
+
+/* --- Nút thao tác --- */
+.rm-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rm-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.rm-act:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.rm-act:disabled { opacity: 0.5; cursor: default; }
+
+.rm-act-primary {
+  border-color: var(--pp-green-border);
+  background: var(--pp-green-bg);
+  color: var(--pp-green-text);
+}
+
+.rm-act-primary:hover:not(:disabled) {
+  background: var(--pp-pill-green-bg);
+  color: var(--pp-green-text-strong);
+}
+
+.rm-act-danger:hover:not(:disabled) {
+  border-color: var(--pp-red-border);
+  background: var(--pp-red-bg);
+  color: var(--pp-red-text);
+}
+
+.rm-snooze {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 7px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.rm-act-mini {
+  padding: 3px 5px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.rm-act-mini:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.rm-act-mini:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Trạng thái --- */
+.rm-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 56px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+}
+
+.rm-state-empty h3 {
+  margin: 4px 0 0;
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rm-state-empty p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.rm-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--pp-blue-icon-bg);
+  color: var(--pp-blue-icon);
+}
+
+.rm-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--pp-red-text);
+}
+
+.rm-error-block {
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--pp-red-border);
+  border-radius: 9px;
+  background: var(--pp-red-bg);
+}
+
+/* --- Hộp thoại tạo lời nhắc --- */
+.rm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 60;
+}
+
+.rm-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(94vw, 460px);
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  z-index: 61;
+}
+
+.rm-dialog h3 {
+  margin: 0 0 5px;
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.rm-dialog-sub {
+  margin: 0 0 18px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.rm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 13px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rm-field-row { display: flex; gap: 12px; }
+
+.rm-field label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+.rm-field input,
+.rm-field select,
+.rm-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.rm-field input:focus,
+.rm-field select:focus,
+.rm-field textarea:focus {
+  outline: none;
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.rm-field-hint { font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+
+.rm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.rm-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.rm-dialog-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+@media (max-width: 720px) {
+  .rm-view { padding: 18px 16px 40px; }
+  .rm-card-actions { width: 100%; justify-content: flex-end; }
+  .rm-field-row { flex-direction: column; gap: 0; }
+}

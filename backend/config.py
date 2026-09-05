@@ -4,9 +4,12 @@ from dotenv import load_dotenv
 # Load env variables from a .env file if it exists
 load_dotenv()
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "***REMOVED-DEEPSEEK-KEY***")
-DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+# Không đặt khoá mặc định trong mã nguồn. Bản trước hard-code một khoá thật
+# ở đây, và khoá đó đã bị commit vào lịch sử git — phải thu hồi trên dashboard
+# DeepSeek, xoá dòng code không gỡ được nó khỏi history.
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL") or "https://api.deepseek.com/v1"
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 

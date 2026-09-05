@@ -1,0 +1,57 @@
+/* Trạng thái chờ / lỗi của AuthedImage.
+ *
+ * Ô giữ chỗ lấp kín phần tử cha chứ không tự đặt kích thước: cùng một component
+ * dùng cho avatar 44px và cho ảnh scan cả trang A4, nên nơi gọi mới là chỗ biết
+ * kích thước đúng. Hai nơi gọi cần bù thêm kích thước tự khai báo bằng selector
+ * hai class (thắng bất kể thứ tự bundle CSS):
+ *   .st-avatar > .authed-image-state         — components/SettingsDialog.css
+ *   .reader-scan-image.authed-image-state    — index.css
+ */
+
+.authed-image-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-align: center;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.authed-image-loading {
+  background: linear-gradient(
+    100deg,
+    var(--bg-hover, #f3f4f6) 30%,
+    var(--bg-card, #fafafa) 50%,
+    var(--bg-hover, #f3f4f6) 70%
+  );
+  background-size: 220% 100%;
+  animation: authed-image-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes authed-image-shimmer {
+  from { background-position: 180% 0; }
+  to   { background-position: -40% 0; }
+}
+
+.authed-image-error {
+  padding: 16px;
+  background: var(--bg-hover, #f3f4f6);
+  border: 1px dashed var(--border, #d1d5db);
+}
+
+/* Ảnh trang trước vẫn hiển thị trong lúc trang mới đang tải — làm mờ để không ai
+   đối chiếu nhầm với trang chưa về. */
+img[data-loading='true'] {
+  opacity: 0.55;
+  transition: opacity 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .authed-image-loading { animation: none; }
+  img[data-loading='true'] { transition: none; }
+}
