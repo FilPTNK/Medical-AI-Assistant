@@ -47,6 +47,51 @@ def tokenize_text(text: str) -> List[str]:
             pass
     return re.findall(r'\w+', text.lower())
 
+# Ngưỡng "từ ghép hiếm": token ghép xuất hiện ở ít hơn ngần này chunk thì
+# truy vấn được bổ sung thêm các âm tiết của nó.
+#
+# Phải thấp hơn hẳn df của những từ ghép mà #3 cần giữ nguyên — "hạ_sốt" có
+# df=22, "sốt_rét" df=107. Đo được: ngưỡng 5–20 đều cho P@5 100% trên bộ chính;
+# từ 50 trở lên thì "hạ_sốt" cũng bị tách và va chạm "sốt" quay lại, tụt còn 96%.
+RARE_COMPOUND_MIN_DF = 10
+
+
+def expand_rare_compounds(tokens: List[str], doc_freq: Dict[str, int]) -> List[str]:
+    """Bổ sung âm tiết cho những token ghép gần như không khớp chunk nào.
+
+    pyvi gộp từ ghép để "hạ_sốt" và "sốt_rét" không dùng chung token "sốt" — đó
+    là điều #3 cần. Nhưng nó cũng gộp cả những cụm mà sách không bao giờ viết
+    liền: "thuốc ho" thành "thuốc_ho", df = 1 trên 25.852 chunk. Cả truy vấn thu
+    về đúng một token hiếm, nên BM25 chỉ trả nổi 1 chunk thay vì 5 — đo được
+    P@5 của riêng truy vấn đó là 20%.
+
+    Chỉ mở rộng phía TRUY VẤN, và chỉ với token đã hiếm sẵn: corpus vẫn giữ token
+    ghép nên các cặp dễ nhầm vẫn tách bạch. Token hiếm thì idf cao, nên bản ghép
+    (nếu khớp được chunk nào) vẫn xếp trên các âm tiết vừa thêm.
+    """
+    expanded = list(tokens)
+    for token in tokens:
+        if "_" in token and doc_freq.get(token, 0) < RARE_COMPOUND_MIN_DF:
+            expanded.extend(part for part in token.split("_") if part)
+    return expanded
+
+
+# 1b. Tham số hợp nhất RRF
+#
+# RRF_Score(d) = w_sparse/(k + rank_bm25) + w_dense/(k + rank_dense)
+#
+# Đo trên hai bộ truy vấn (xem eval/): BM25 đạt P@5 96%, dense chỉ 76%. Trộn
+# 1:1 nên kéo chất lượng xuống 90% — mỗi kết quả đúng của BM25 lại bị kèm một
+# kết quả sai từ nhánh dense. Truy vấn "thuốc hạ sốt" là ví dụ rõ nhất: BM25
+# đúng cả 5/5, dense trả 4/5 thuốc sốt rét, RRF 1:1 trộn ra 2/5.
+#
+# Nghiêng về BM25 thay vì bỏ hẳn dense: dense vẫn là nhánh duy nhất tìm được
+# chunk không trùng từ vựng với câu hỏi, và ở w=1.5 nó vẫn giữ khoảng 10% số
+# suất trong top-5.
+RRF_K = 60.0
+RRF_W_SPARSE = 1.5
+RRF_W_DENSE = 1.0
+
 # 2. Local Fallback BM25 implementation for maximum robustness
 class FallbackBM25:
     def __init__(self, corpus: List[List[str]]):
@@ -114,13 +159,23 @@ class VectorDB:
         self.embedding_model = embedding_model
         self._embedding = None
         self._db = None
-        self._corpus_cache = None
-        self._bm25_model = None
-        self._lookup = None
+        self._invalidate_caches()
         # Nạp model và dựng BM25 đều tốn kém và đều có thể bị gọi từ nhiều
         # thread cùng lúc (preload chạy nền + request của người dùng). Khoá lại
         # để chỉ làm một lần, thay vì nạp hai bản model 470MB trên máy 7,3GB.
         self._build_lock = threading.RLock()
+
+    def _invalidate_caches(self):
+        """Xoá mọi thứ dẫn xuất từ nội dung index.
+
+        Gom lại một chỗ vì bốn nơi cần reset (khởi tạo, add, delete, reload) và
+        chúng đã từng lệch nhau — thêm một cache mới mà quên một nhánh thì nó
+        sống sót qua lần nạp lại và trả kết quả theo corpus cũ.
+        """
+        self._corpus_cache = None
+        self._bm25_model = None
+        self._lookup = None
+        self._doc_freq = None
 
     @property
     def embedding(self):
@@ -259,6 +314,15 @@ class VectorDB:
         except Exception:
             bm25_model = FallbackBM25(tokenized_corpus)
 
+        # Document frequency dùng cho expand_rare_compounds(). Tự đếm thay vì
+        # đọc thuộc tính nội bộ của BM25Okapi — hai lớp BM25 ở trên không có
+        # chung API, còn đếm lại chỉ tốn dưới một giây.
+        doc_freq: Dict[str, int] = {}
+        for tokens in tokenized_corpus:
+            for token in set(tokens):
+                doc_freq[token] = doc_freq.get(token, 0) + 1
+        self._doc_freq = doc_freq
+
         self._bm25_model = bm25_model
         # Bảng tra ngược dựng một lần. Trước đây search() quét tuyến tính toàn
         # bộ metadata cho MỖI kết quả dense, rồi gọi all_ids.index() thêm một
@@ -295,18 +359,14 @@ class VectorDB:
             self.db.add_documents(documents, ids=ids)
         else:
             self.db.add_documents(documents)
-        self._corpus_cache = None
-        self._bm25_model = None
-        self._lookup = None
+        self._invalidate_caches()
         print(f"Added {len(documents)} documents to vector store.")
 
     def delete_document(self, doc_name: str):
         res = self.db.get(where={"doc_name": doc_name})
         if res and res["ids"]:
             self.db.delete(ids=res["ids"])
-            self._corpus_cache = None
-            self._bm25_model = None
-            self._lookup = None
+            self._invalidate_caches()
             print(f"Deleted document '{doc_name}' ({len(res['ids'])} chunks) from vector database.")
 
     def list_documents(self) -> List[Dict[str, Any]]:
@@ -355,9 +415,7 @@ class VectorDB:
     def _reload_db(self):
         try:
             self._db = None
-            self._corpus_cache = None
-            self._bm25_model = None
-            self._lookup = None
+            self._invalidate_caches()
         except Exception as e:
             print(f"Error reloading db: {e}")
 
@@ -427,7 +485,7 @@ class VectorDB:
                 dense_ranking.append(all_ids[match_idx])
 
         # B. SPARSE RETRIEVAL: BM25 score calculation
-        tokenized_query = tokenize_text(query)
+        tokenized_query = expand_rare_compounds(tokenize_text(query), self._doc_freq or {})
         bm25_scores = bm25_model.get_scores(tokenized_query)
 
         # Sort indices by BM25 score descending, dropping filtered-out documents
@@ -443,16 +501,16 @@ class VectorDB:
                 break
 
         # C. RECIPROCAL RANK FUSION (RRF)
-        # Combine rankings: RRF_Score = 1/(60 + dense_rank) + 1/(60 + sparse_rank)
+        # Combine rankings — công thức và lý do chọn trọng số ở đầu file.
         rrf_scores = {}
-        
+
         # Score dense rank
         for rank, doc_id in enumerate(dense_ranking):
-            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (60.0 + rank + 1)
-            
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + RRF_W_DENSE / (RRF_K + rank + 1)
+
         # Score sparse rank
         for rank, doc_id in enumerate(sparse_ranking):
-            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + 1.0 / (60.0 + rank + 1)
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + RRF_W_SPARSE / (RRF_K + rank + 1)
 
         # Sort candidate IDs by RRF score descending
         sorted_rrf_candidates = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
