@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import time
 import threading
 import numpy as np
 from typing import List, Dict, Any, Optional
@@ -12,11 +13,39 @@ from langchain_core.documents import Document
 
 import documents
 
-# 1. Helper function for Vietnamese / English tokenisation
+# 1. Tách token cho BM25 (dùng chung cho corpus và truy vấn)
+
+# Đổi chuỗi này khi thay cách tách từ — cache token trên đĩa sẽ tự dựng lại.
+SEGMENTER_VERSION = "pyvi-1"
+
+try:
+    from pyvi import ViTokenizer as _ViTokenizer
+except Exception:  # pyvi chưa cài -> vẫn chạy được, chỉ kém chính xác hơn
+    _ViTokenizer = None
+
+
 def tokenize_text(text: str) -> List[str]:
-    text = text.lower()
-    # Matches words, numbers
-    return re.findall(r'\w+', text)
+    r"""Tách văn bản thành token cho BM25, có gộp từ ghép tiếng Việt.
+
+    Tiếng Việt phân tách theo âm tiết, nên cắt theo khoảng trắng sẽ xé từ ghép:
+    "hạ sốt" -> ["hạ", "sốt"] và "sốt rét" -> ["sốt", "rét"]. Hai khái niệm
+    khác hẳn nhau lại dùng chung token "sốt", nên truy vấn "thuốc hạ sốt" kéo
+    lên toàn thuốc sốt rét — đo được P@5 chỉ 40% cho truy vấn đó.
+
+    pyvi nối từ ghép bằng dấu gạch dưới ("hạ_sốt", "sốt_rét"), mà `\w+` coi
+    "_" là ký tự chữ nên hai từ thành hai token riêng biệt, không còn trùng.
+
+    Chọn pyvi thay vì underthesea vì underthesea vẫn tách "hạ sốt" thành hai
+    âm tiết — tức là không sửa được đúng lỗi này — và chậm hơn 2,7 lần.
+    """
+    if _ViTokenizer is not None:
+        try:
+            text = _ViTokenizer.tokenize(text)
+        except Exception:
+            # Văn bản OCR lỗi có thể làm model tách từ ngã; thà mất phần gộp
+            # từ ghép của một chunk còn hơn hỏng cả lần dựng chỉ mục.
+            pass
+    return re.findall(r'\w+', text.lower())
 
 # 2. Local Fallback BM25 implementation for maximum robustness
 class FallbackBM25:
@@ -168,6 +197,45 @@ class VectorDB:
             return None, None, None, None
         return self._corpus_cache[0], self._corpus_cache[1], self._corpus_cache[2], self._bm25_model
 
+    def _tokenized_corpus(self, all_texts, all_ids):
+        """Token của toàn corpus, đọc từ cache đĩa nếu còn khớp.
+
+        Tách từ bằng pyvi tốn ~4ms/chunk, tức khoảng 110s cho 25.852 chunk —
+        quá lâu để làm lại mỗi lần khởi động (trước đây chỉ mất ~11s). Cache
+        lại và chỉ dựng lại khi corpus hoặc cách tách từ thay đổi.
+        """
+        import hashlib, pickle
+
+        key = hashlib.sha1(
+            (SEGMENTER_VERSION + "|" + str(len(all_ids)) + "|" + "".join(all_ids))
+            .encode("utf-8", "replace")
+        ).hexdigest()
+        cache_path = os.path.join(self.persist_dir, "bm25_tokens.pkl")
+
+        try:
+            with open(cache_path, "rb") as f:
+                blob = pickle.load(f)
+            if blob.get("key") == key:
+                return blob["tokens"]
+        except Exception:
+            pass  # không có cache, hỏng, hoặc lệch phiên bản -> dựng lại
+
+        print(f"[BM25] Đang tách từ {len(all_texts)} chunk (chỉ chạy lại khi corpus đổi)...")
+        t0 = time.perf_counter()
+        tokens = [tokenize_text(text) for text in all_texts]
+        print(f"[BM25] Tách từ xong sau {time.perf_counter() - t0:.0f}s.")
+
+        try:
+            os.makedirs(self.persist_dir, exist_ok=True)
+            tmp = cache_path + ".tmp"
+            with open(tmp, "wb") as f:
+                pickle.dump({"key": key, "tokens": tokens}, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, cache_path)   # thay nguyên tử: không để lại file dở
+        except Exception as e:
+            print(f"[BM25] Không ghi được cache token ({e}); lần sau sẽ tách lại.")
+
+        return tokens
+
     def _build_corpus_cache(self):
         """Kéo toàn bộ child chunk ra RAM, dựng BM25 và các bảng tra ngược.
 
@@ -184,7 +252,7 @@ class VectorDB:
         all_metadatas = db_content["metadatas"]
         all_ids = db_content["ids"]
 
-        tokenized_corpus = [tokenize_text(text) for text in all_texts]
+        tokenized_corpus = self._tokenized_corpus(all_texts, all_ids)
         try:
             from rank_bm25 import BM25Okapi
             bm25_model = BM25Okapi(tokenized_corpus)
