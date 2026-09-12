@@ -1,13 +1,161 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🩺</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trợ lý Fil - Medical RAG Assistant</title>
+
+    <!--
+      Màn hình khởi động nằm THẲNG trong index.html, không phải trong React.
+
+      Trước đây #root rỗng và không có một dòng CSS nào cho tới khi gói JS tải
+      xong và React gắn vào. Trên máy này backend mất 34 giây mới nạp xong mô
+      hình, nên bác sĩ mở máy buổi sáng nhìn một màn hình trắng trơn khoảng 11
+      giây, không có gì báo hiệu máy còn sống. Khối dưới đây hiện ngay từ byte
+      đầu tiên của trang.
+
+      Lớp `dark` phải đặt TRƯỚC khi vẽ, nếu không màn hình loé trắng một nhịp
+      rồi mới chuyển sang nền tối.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {
+          /* Chế độ riêng tư chặn localStorage — cứ để nền sáng, không chặn khởi động. */
+        }
+      })();
+    </script>
+
+    <style>
+      :root {
+        --boot-bg: #f2f7f8;
+        --boot-card: #ffffff;
+        --boot-ink: #0b2a31;
+        --boot-muted: #5e797e;
+        --boot-track: #dbe7e9;
+        --boot-grad: linear-gradient(100deg, #064b5c 0%, #0b7a94 55%, #12a0b8 100%);
+      }
+      html.dark {
+        --boot-bg: #0b1a1e;
+        --boot-card: #12262b;
+        --boot-ink: #e6f0f0;
+        --boot-muted: #7e979b;
+        --boot-track: #234047;
+        --boot-grad: linear-gradient(100deg, #8fd9e8 0%, #4cbbd4 55%, #6bc79a 100%);
+      }
+      html, body { margin: 0; height: 100%; background: var(--boot-bg); }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 24px;
+        background: var(--boot-bg);
+        color: var(--boot-ink);
+        font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+        text-align: center;
+      }
+      #boot[hidden] { display: none; }
+
+      .boot-mark {
+        width: 52px;
+        height: 52px;
+        border-radius: 15px;
+        background: var(--boot-grad);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        line-height: 1;
+      }
+
+      .boot-name {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.3px;
+        background: var(--boot-grad);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      /* Thanh tiến trình KHÔNG giả vờ biết còn bao nhiêu phần trăm. Nó là một
+         vệt chạy qua lại, chỉ nói đúng một điều: hệ thống còn sống. Một thanh
+         phần trăm bịa ra sẽ đứng ở 90% rồi treo, tệ hơn là không có gì. */
+      .boot-track {
+        width: min(260px, 70vw);
+        height: 4px;
+        border-radius: 99px;
+        background: var(--boot-track);
+        overflow: hidden;
+      }
+      .boot-bar {
+        width: 40%;
+        height: 100%;
+        border-radius: 99px;
+        background: var(--boot-grad);
+        animation: boot-slide 1.5s ease-in-out infinite;
+      }
+      @keyframes boot-slide {
+        0%   { transform: translateX(-110%); }
+        100% { transform: translateX(260%); }
+      }
+
+      .boot-status { font-size: 14px; color: var(--boot-muted); max-width: 42ch; }
+      .boot-hint { font-size: 12.5px; color: var(--boot-muted); opacity: .85; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot-bar { animation: none; width: 100%; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <div id="boot" role="status" aria-live="polite">
+      <div class="boot-mark" aria-hidden="true">🩺</div>
+      <div class="boot-name">Trợ lý Fil</div>
+      <div class="boot-track" aria-hidden="true"><div class="boot-bar"></div></div>
+      <p class="boot-status" id="boot-status">Đang nạp giao diện…</p>
+      <p class="boot-hint" id="boot-hint"></p>
+    </div>
+
+    <script>
+      // Nói thật bác sĩ đang chờ cái gì, thay vì một vòng xoay câm. Backend phải
+      // nạp mô hình nhúng trước khi phục vụ được, và đó là phần lâu nhất.
+      (function () {
+        var status = document.getElementById('boot-status');
+        var hint = document.getElementById('boot-hint');
+        var t0 = Date.now();
+        var timer = setInterval(function () {
+          var s = Math.round((Date.now() - t0) / 1000);
+          if (s >= 6) {
+            status.textContent = 'Đang nạp mô hình tra cứu y văn…';
+            hint.textContent = 'Lần mở đầu tiên trong ngày thường mất 30 tới 45 giây.';
+          }
+          if (s >= 75) {
+            status.textContent = 'Máy chủ lâu hơn bình thường.';
+            hint.textContent = 'Nếu quá hai phút, hãy đóng ứng dụng và chạy lại python run.py.';
+          }
+        }, 1000);
+        window.__bootDone = function () {
+          clearInterval(timer);
+          var el = document.getElementById('boot');
+          if (el) el.parentNode.removeChild(el);
+        };
+      })();
+    </script>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

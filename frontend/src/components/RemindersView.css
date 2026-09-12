@@ -93,10 +93,10 @@
 .rm-btn-primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
 }
 
-.rm-btn-primary:hover:not(:disabled) { background: var(--secondary); color: #fff; }
+.rm-btn-primary:hover:not(:disabled) { background: var(--secondary); color: var(--text-on-fill); }
 
 .rm-spin { animation: rm-rotate 0.9s linear infinite; }
 @keyframes rm-rotate { to { transform: rotate(360deg); } }

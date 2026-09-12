@@ -1,153 +1,234 @@
 :root {
-  /* System font stack, matching chatgpt.com's actual approach (no webfonts) */
-  --font-heading: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  /* Be Vietnam Pro — phông thiết kế riêng cho tiếng Việt, nhúng thẳng vào bản
+     dựng qua @fontsource (xem main.jsx), không gọi ra Google Fonts. Ngăn xếp
+     phông hệ thống vẫn giữ nguyên phía sau làm dự phòng. */
+  --font-heading: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-body: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
 
-  /* Color Palette - Light Mode Default (ChatGPT-inspired neutral canvas, clinical blue accent) */
-  --bg-app: #ffffff;
-  --bg-workspace: #ffffff;
-  --bg-sidebar: #f9f9f9;
+  /* Color Palette — Light Mode Default.
+     Nền vùng làm việc CỐ Ý khác sắc độ với nền thẻ. Bản trước để cả hai cùng
+     #ffffff nên thẻ chỉ còn phân biệt được nhờ một đường viền 1px, và toàn màn
+     hình đọc ra như một tấm phẳng. Ngả xanh mòng két rất nhẹ để nền xám không
+     đọc ra như xám mặc định.
+
+     Mọi màu chữ dưới đây đều đã đo tương phản >= 4,5:1 trên nền đứng sau nó.
+     Xanh mòng két gốc của ui-ux-pro-max là #0891B2, chỉ đạt 3,68:1 trên nền
+     trắng nên KHÔNG dùng được cho chữ; bản dùng ở đây tối hơn, đạt 5,03:1. */
+  --bg-app: #f2f7f8;
+  --bg-workspace: #f2f7f8;
+  --bg-sidebar: #e8f1f2;
   --bg-card: #ffffff;
-  --bg-right-panel: #fbfbfa;
-  --bg-hover: #f0f0f0;
-  --bg-chat-user: #f4f4f4;
-  --text-chat-user: #0d0d0d;
+  --bg-right-panel: #f7fbfb;
+  --bg-hover: #e2eef0;
+  --bg-sunk: #eaf3f4;
+  --bg-chat-user: #e6f2f4;
+  --text-chat-user: #0b2a31;
 
-  --primary: #2563eb;        /* Professional Doctor Blue */
-  --primary-glow: rgba(37, 99, 235, 0.08);
-  --secondary: #1d4ed8;
-  --accent: #10b981;         /* Verified green */
-  --danger: #ef4444;
-  --warning: #f59e0b;
+  --primary: #0b7a94;        /* Xanh mòng két lâm sàng — 5,03:1 trên nền trắng */
+  --primary-glow: rgba(11, 122, 148, 0.10);
+  --secondary: #064b5c;
+  --accent: #1f7a54;         /* Xanh xác nhận — 5,36:1 */
+  --danger: #b3261e;         /* 4,98:1 */
+  --warning: #8a5300;        /* 4,85:1 */
 
-  --border: #e5e5e5;
-  --border-active: #2563eb;
+  --violet: #5b41a8;         /* nhánh thứ tư của thang mức độ, 6,1:1 */
 
-  --text-primary: #0d0d0d;
-  --text-secondary: #6e6e80;
-  --text-muted: #8e8ea0;
+  /* Màu chữ đặt TRÊN một mảng màu đặc (nút primary, huy hiệu danh, chip cảnh
+     báo). Phải là token chứ không phải #fff viết cứng: ở chế độ tối các mảng
+     màu kia đều SÁNG, nên chữ trắng trên đó chỉ còn 2,26:1 — không đọc được. */
+  --text-on-fill: #ffffff;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 10px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 12px 28px -6px rgba(0, 0, 0, 0.12), 0 4px 8px -4px rgba(0, 0, 0, 0.04);
+  --border: #cfe0e2;
+  --border-soft: #e0ecee;
+  --border-active: #0b7a94;
+
+  --text-primary: #0b2a31;
+  --text-secondary: #4a6469; /* 4,88:1 */
+  --text-muted: #556e73;     /* 5,03:1 trên nền app · 5,43:1 trên thẻ.
+                                Bản trước #8e8ea0 chỉ đạt 3,0:1, và bản
+                                #5e797e đạt trên thẻ nhưng tụt 4,31:1 trên
+                                nền app — đo mới bắt được. */
+
+  /* Chữ chuyển màu: CHỈ dùng cho tên app, tiêu đề tab, số lớn, màn đăng nhập và
+     màn khởi động. KHÔNG dùng cho tên thuốc, liều dùng, chẩn đoán, chống chỉ
+     định, sinh hiệu hay trích dẫn sách — một đầu của dải luôn nhạt hơn đầu kia
+     nên nửa sau của chữ tụt xuống dưới ngưỡng đọc được. */
+  --display-gradient: linear-gradient(100deg, #064b5c 0%, #0b7a94 55%, #12a0b8 100%);
+
+  /* Nền không phẳng. Chế độ sáng dùng chuyển sắc rất nhẹ; hoa văn chấm nối để
+     dành cho chế độ tối, trên nền trắng nó chỉ ra vệt bẩn. */
+  --ground-wash:
+    radial-gradient(900px 520px at 12% -8%, rgba(11, 122, 148, 0.07), transparent 70%),
+    radial-gradient(760px 460px at 92% 4%, rgba(31, 122, 84, 0.05), transparent 72%);
+  --ground-pattern: none;
+
+  /* Thang chữ. Bản trước mọi tiêu đề trong tab Bệnh nhân đều 15px/700, nên
+     "Thông tin y tế quan trọng" và "Tài liệu đính kèm" nặng ngang nhau và mắt
+     không biết đọc cái nào trước. Ba bậc dưới đây là toàn bộ thứ bậc cần có. */
+  --title-page: 28px;      /* tên tab, dùng dải chuyển màu */
+  --title-section: 17px;   /* tiêu đề khối ở CỘT CHÍNH */
+  --title-rail: 12.5px;    /* tiêu đề khối ở CỘT PHỤ — in hoa, giãn chữ */
+
+  --shadow-sm: 0 1px 2px rgba(11, 42, 49, 0.05);
+  --shadow-md: 0 4px 10px -2px rgba(11, 42, 49, 0.08), 0 2px 4px -2px rgba(11, 42, 49, 0.04);
+  --shadow-lg: 0 12px 28px -6px rgba(11, 42, 49, 0.14), 0 4px 8px -4px rgba(11, 42, 49, 0.05);
 
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Patient profile — tinted status colors (light mode) */
-  --pp-green-bg: #f0fdf4;
-  --pp-green-border: #bbf7d0;
-  --pp-green-text-strong: #14532d;
-  --pp-green-text: #15803d;
-  --pp-green-text-muted: #4b7c59;
+  /* Patient profile — tinted status colors (light mode).
+     Màu ở đây PHẢI mang nghĩa: đỏ chỉ xuất hiện khi thật sự có dị ứng, vàng khi
+     thật sự có cảnh báo. Ô chưa có dữ liệu dùng biến thể "neutral" bên dưới —
+     một ô Dị ứng đang trống mà tô đỏ thì màu đỏ mất hết sức cảnh báo. */
+  --pp-green-bg: #ecf7f1;
+  --pp-green-border: #bfe0ce;
+  --pp-green-text-strong: #14492f;
+  --pp-green-text: #1f7a54;
+  --pp-green-text-muted: #4a6f5d;
 
-  --pp-red-bg: #fef2f2;
-  --pp-red-border: #fecaca;
-  --pp-red-icon-bg: #fee2e2;
-  --pp-red-icon: #dc2626;
-  --pp-red-text-strong: #991b1b;
-  --pp-red-text: #b91c1c;
+  --pp-red-bg: #fcefee;
+  --pp-red-border: #f2ccc9;
+  --pp-red-icon-bg: #f8dedb;
+  --pp-red-icon: #b3261e;
+  --pp-red-text-strong: #7d1a15;
+  --pp-red-text: #b3261e;
 
-  --pp-orange-bg: #fff7ed;
-  --pp-orange-border: #fed7aa;
-  --pp-orange-icon-bg: #ffedd5;
-  --pp-orange-icon: #ea580c;
+  --pp-orange-bg: #fdf4e6;
+  --pp-orange-border: #ecd5ab;
+  --pp-orange-icon-bg: #f7e6c7;
+  --pp-orange-icon: #8a5300;
 
-  --pp-blue-bg: #eff6ff;
-  --pp-blue-border: #bfdbfe;
-  --pp-blue-icon-bg: #dbeafe;
-  --pp-blue-icon: #2563eb;
+  --pp-blue-bg: #f0f8fa;   /* sáng thêm để biểu tượng đạt 4,62:1 */
+  --pp-blue-border: #b9d9e1;
+  --pp-blue-icon-bg: #d3e9ef;
+  --pp-blue-icon: #0b7a94;
 
-  --pp-purple-bg: #faf5ff;
-  --pp-purple-border: #e9d5ff;
-  --pp-purple-icon-bg: #f3e8ff;
-  --pp-purple-icon: #9333ea;
+  --pp-purple-bg: #f1eff8;
+  --pp-purple-border: #d4cde9;
+  --pp-purple-icon-bg: #e4dff2;
+  --pp-purple-icon: #5b41a8;
 
-  --pp-pill-green-bg: #dcfce7;
-  --pp-pill-green-text: #166534;
-  --pp-pill-gray-bg: #f3f4f6;
-  --pp-pill-gray-text: #4b5563;
+  /* Biến thể trung tính cho ô CHƯA có dữ liệu */
+  --pp-neutral-bg: #f0f5f6;
+  --pp-neutral-border: #dbe7e9;
+  --pp-neutral-icon-bg: #e4eef0;
+  --pp-neutral-icon: #556e73;  /* 4,94:1 */
 
-  --pp-badge-blue-bg: #dbeafe;
-  --pp-badge-blue-text: #1d4ed8;
+  --pp-pill-green-bg: #d8efe3;
+  --pp-pill-green-text: #14492f;
+  --pp-pill-gray-bg: #e8f0f1;
+  --pp-pill-gray-text: #40585c;
 
-  --pp-dot-green: #22c55e;
-  --pp-blood-red: #dc2626;
-  --pp-gender-male: #2563eb;
-  --pp-gender-female: #ec4899;
+  --pp-badge-blue-bg: #d3e9ef;
+  --pp-badge-blue-text: #064b5c;
+
+  --pp-dot-green: #1f7a54;
+  --pp-blood-red: #b3261e;
+  --pp-gender-male: #0b7a94;
+  --pp-gender-female: #a8386f;
 }
 
-/* Color Palette - Dark Mode overrides (ChatGPT dark canvas) */
+/* Color Palette — Dark Mode overrides.
+   Đây là chế độ MẶC ĐỊNH của tài khoản bác sĩ, không phải mã chết: đăng nhập vào
+   là app mở ra ở đây. Nên nó được chăm ngang chế độ sáng, không phải đảo ngược
+   máy móc. Nền ngả xanh mòng két thay vì xám trung tính để cùng một họ với chế
+   độ sáng. */
 html.dark, .dark {
-  --bg-app: #212121;
-  --bg-workspace: #212121;
-  --bg-sidebar: #171717;
-  --bg-card: #2a2a2a;
-  --bg-right-panel: #1a1a1a;
-  --bg-hover: #2f2f2f;
-  --bg-chat-user: #2f2f2f;
-  --text-chat-user: #ececec;
+  --bg-app: #0b1a1e;
+  --bg-workspace: #0b1a1e;
+  --bg-sidebar: #071316;
+  --bg-card: #12262b;
+  --bg-right-panel: #0e1f24;
+  --bg-hover: #1a353c;
+  --bg-sunk: #0e1f24;
+  --bg-chat-user: #1a353c;
+  --text-chat-user: #e4efef;
 
-  --primary: #3b82f6;        /* Clinical blue, brightened for dark canvas */
-  --primary-glow: rgba(59, 130, 246, 0.16);
-  --secondary: #60a5fa;
-  --accent: #34d399;
-  --danger: #f87171;
-  --warning: #fbbf24;
+  --primary: #4cbbd4;        /* 7,87:1 trên nền app */
+  --primary-glow: rgba(76, 187, 212, 0.18);
+  --secondary: #8fd9e8;
+  --accent: #5fc48e;
+  --danger: #f1938c;
+  --warning: #e0a75c;
 
-  --border: #3a3a3a;
-  --border-active: #3b82f6;
+  --violet: #a996e8;
 
-  --text-primary: #ececec;
-  --text-secondary: #b4b4b4;
-  --text-muted: #8e8ea0;
+  /* Chế độ tối: mọi mảng màu đặc đều sáng, nên chữ đặt lên phải TỐI.
+     Một giá trị dùng chung được cho cả bốn: primary 7,97:1 · danger 7,97:1 ·
+     accent 8,4:1 · warning 8,4:1. */
+  --text-on-fill: #07191d;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --border: #234047;
+  --border-soft: #1a3238;
+  --border-active: #4cbbd4;
 
-  /* Patient profile — tinted status colors (dark mode: low-opacity tints instead of bright pastels) */
-  --pp-green-bg: rgba(34, 197, 94, 0.12);
-  --pp-green-border: rgba(34, 197, 94, 0.3);
-  --pp-green-text-strong: #86efac;
-  --pp-green-text: #86efac;
-  --pp-green-text-muted: #9cbfae;
+  --text-primary: #e6f0f0;
+  --text-secondary: #a9c0c3;
+  --text-muted: #7e979b;
 
-  --pp-red-bg: rgba(248, 113, 113, 0.12);
-  --pp-red-border: rgba(248, 113, 113, 0.3);
-  --pp-red-icon-bg: rgba(248, 113, 113, 0.18);
-  --pp-red-icon: #f87171;
-  --pp-red-text-strong: #fca5a5;
-  --pp-red-text: #fca5a5;
+  --display-gradient: linear-gradient(100deg, #8fd9e8 0%, #4cbbd4 55%, #6bc79a 100%);
 
-  --pp-orange-bg: rgba(251, 146, 60, 0.12);
-  --pp-orange-border: rgba(251, 146, 60, 0.3);
-  --pp-orange-icon-bg: rgba(251, 146, 60, 0.18);
-  --pp-orange-icon: #fb923c;
+  /* Chế độ tối là nơi hoa văn chấm nối sống được. Hoàn toàn TĨNH — thứ nhấp nháy
+     trong tầm mắt lúc đang khám là thứ gây phân tâm. Chỉ nằm ở vùng nền, không
+     bao giờ dưới bảng số liệu hay danh sách thuốc. */
+  --ground-wash:
+    radial-gradient(900px 520px at 12% -8%, rgba(76, 187, 212, 0.10), transparent 70%),
+    radial-gradient(760px 460px at 92% 4%, rgba(107, 199, 154, 0.06), transparent 72%);
+  --ground-pattern:
+    radial-gradient(circle at center, rgba(140, 200, 214, 0.16) 1px, transparent 1.6px);
 
-  --pp-blue-bg: rgba(96, 165, 250, 0.12);
-  --pp-blue-border: rgba(96, 165, 250, 0.3);
-  --pp-blue-icon-bg: rgba(96, 165, 250, 0.18);
-  --pp-blue-icon: #60a5fa;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
 
-  --pp-purple-bg: rgba(192, 132, 252, 0.12);
-  --pp-purple-border: rgba(192, 132, 252, 0.3);
-  --pp-purple-icon-bg: rgba(192, 132, 252, 0.18);
-  --pp-purple-icon: #c084fc;
+  /* Patient profile — tinted status colors (dark mode: nền pha rất nhạt thay cho
+     màu pastel sáng chói). Cùng quy tắc với chế độ sáng: màu phải mang nghĩa. */
+  --pp-green-bg: rgba(95, 196, 142, 0.12);
+  --pp-green-border: rgba(95, 196, 142, 0.3);
+  --pp-green-text-strong: #9ddcb9;
+  --pp-green-text: #6bc79a;
+  --pp-green-text-muted: #93b3a2;
 
-  --pp-pill-green-bg: rgba(34, 197, 94, 0.18);
-  --pp-pill-green-text: #86efac;
-  --pp-pill-gray-bg: rgba(255, 255, 255, 0.08);
-  --pp-pill-gray-text: #d1d5db;
+  --pp-red-bg: rgba(241, 147, 140, 0.12);
+  --pp-red-border: rgba(241, 147, 140, 0.3);
+  --pp-red-icon-bg: rgba(241, 147, 140, 0.18);
+  --pp-red-icon: #f1938c;
+  --pp-red-text-strong: #f7bbb6;
+  --pp-red-text: #f1938c;
 
-  --pp-badge-blue-bg: rgba(96, 165, 250, 0.18);
-  --pp-badge-blue-text: #93c5fd;
+  --pp-orange-bg: rgba(224, 167, 92, 0.12);
+  --pp-orange-border: rgba(224, 167, 92, 0.3);
+  --pp-orange-icon-bg: rgba(224, 167, 92, 0.18);
+  --pp-orange-icon: #e0a75c;
 
-  --pp-dot-green: #4ade80;
-  --pp-blood-red: #f87171;
-  --pp-gender-male: #60a5fa;
-  --pp-gender-female: #f472b6;
+  --pp-blue-bg: rgba(76, 187, 212, 0.12);
+  --pp-blue-border: rgba(76, 187, 212, 0.3);
+  --pp-blue-icon-bg: rgba(76, 187, 212, 0.18);
+  --pp-blue-icon: #4cbbd4;
+
+  --pp-purple-bg: rgba(169, 150, 232, 0.12);
+  --pp-purple-border: rgba(169, 150, 232, 0.3);
+  --pp-purple-icon-bg: rgba(169, 150, 232, 0.18);
+  --pp-purple-icon: #a996e8;
+
+  --pp-neutral-bg: rgba(169, 192, 195, 0.07);
+  --pp-neutral-border: rgba(169, 192, 195, 0.2);
+  --pp-neutral-icon-bg: rgba(169, 192, 195, 0.12);
+  --pp-neutral-icon: #90a6aa;  /* 5,32:1 trên nền pha đã chồng */
+
+  --pp-pill-green-bg: rgba(95, 196, 142, 0.18);
+  --pp-pill-green-text: #9ddcb9;
+  --pp-pill-gray-bg: rgba(230, 240, 240, 0.08);
+  --pp-pill-gray-text: #c6d6d8;
+
+  --pp-badge-blue-bg: rgba(76, 187, 212, 0.18);
+  --pp-badge-blue-text: #8fd9e8;
+
+  --pp-dot-green: #5fc48e;
+  --pp-blood-red: #f1938c;
+  --pp-gender-male: #4cbbd4;
+  --pp-gender-female: #e78bb4;
 }
 
 * {
@@ -171,6 +252,56 @@ body {
   height: 100%;
   width: 100%;
   display: flex;
+}
+
+/* =============================================================================
+   Tiện ích thị giác dùng chung
+   ========================================================================== */
+
+/* Chữ chuyển màu. Chỉ đặt lên tên app, tiêu đề tab, số lớn, màn đăng nhập và
+   màn khởi động. Không bao giờ đặt lên dữ liệu lâm sàng: dải màu luôn có một
+   đầu nhạt hơn, và "500 mg mỗi 4 đến 6 giờ" là chỗ đọc nhầm gây hại.
+   `color` đặt trước làm nền dự phòng cho trình duyệt không cắt được nền theo
+   chữ — nếu không, chữ sẽ trong suốt hoàn toàn. */
+.text-display-gradient {
+  color: var(--secondary);
+  background: var(--display-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .text-display-gradient {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* Nhãn nhỏ in hoa dẫn đường cho một khối, kèm gạch ngắn màu nhấn. */
+.eyebrow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+.eyebrow-label::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  flex: none;
+  border-radius: 1px;
+}
+
+/* Người dùng đã xin bớt hiệu ứng thị giác thì bỏ luôn hoa văn nền. */
+@media (prefers-reduced-motion: reduce) {
+  .main-workspace::before { background-image: var(--ground-wash); }
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
 /* Scrollbars */
@@ -249,11 +380,12 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: var(--display-gradient);
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 2px 8px var(--primary-glow);
   flex-shrink: 0;
 }
 
@@ -268,7 +400,11 @@ body {
 .brand-wordmark strong {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--secondary);
+  background: var(--display-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .brand-wordmark span {
@@ -645,7 +781,7 @@ body {
   border-radius: 8px;
   border: none;
   background-color: var(--danger);
-  color: #ffffff;
+  color: var(--text-on-fill);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -689,7 +825,7 @@ body {
   border-radius: 8px;
   border: none;
   background-color: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -714,6 +850,23 @@ body {
   flex-direction: column;
   overflow: hidden;
   background-color: var(--bg-workspace);
+  position: relative;
+  isolation: isolate;
+}
+
+/* Nền không phẳng, đặt trên một lớp giả nằm SAU toàn bộ nội dung.
+   Lý do dùng ::before thay vì background nhiều lớp ngay trên .main-workspace:
+   các panel con bên trong đều tự tô nền của mình, nên hoa văn không bao giờ
+   lọt xuống dưới bảng số liệu hay danh sách thuốc — đúng ràng buộc đã chốt. */
+.main-workspace::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--ground-pattern), var(--ground-wash);
+  background-size: 26px 26px, auto;
+  background-repeat: repeat, no-repeat;
 }
 
 /* Workspace Header (slim ChatGPT-style top bar) */
@@ -750,7 +903,7 @@ body {
 
 .badge-beta {
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 700;
@@ -948,7 +1101,7 @@ body {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  background: linear-gradient(135deg, var(--secondary), var(--primary));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -958,7 +1111,7 @@ body {
 }
 
 .avatar-spark {
-  color: #ffffff;
+  color: var(--text-on-fill);
 }
 
 .message-bubble {
@@ -1186,6 +1339,9 @@ body {
   margin: 0 0 10px 0;
   padding: 14px 16px;
   border-radius: 10px;
+  /* CỐ Ý viết cứng, không dùng token: khối mã luôn tối ở cả hai chế độ vì bộ
+     tô màu cú pháp (highlight.js) chỉ có một bảng màu dành cho nền tối. Đổi nền
+     này theo chế độ sáng sẽ làm mọi từ khoá biến mất. */
   background-color: #0d1117;
   overflow-x: auto;
 }
@@ -1214,7 +1370,7 @@ body {
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
-  color: #ffffff;
+  color: var(--text-on-fill);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1227,10 +1383,10 @@ body {
   transform: scale(1.15);
 }
 
-.citation-badge-1 { background-color: #3b82f6; }
-.citation-badge-2 { background-color: #10b981; }
-.citation-badge-3 { background-color: #8b5cf6; }
-.citation-badge-4 { background-color: #f97316; }
+.citation-badge-1 { background-color: var(--primary); }
+.citation-badge-2 { background-color: var(--accent); }
+.citation-badge-3 { background-color: var(--violet); }
+.citation-badge-4 { background-color: var(--warning); }
 
 /* Suggestions chips container */
 .chat-suggestions-container {
@@ -1344,7 +1500,7 @@ body {
 
 .btn-mic.recording {
   background-color: var(--danger);
-  color: #ffffff;
+  color: var(--text-on-fill);
 }
 
 .btn-mic.recording::before {
@@ -1367,7 +1523,7 @@ body {
   border-radius: 50%;
   border: none;
   background-color: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1490,7 +1646,7 @@ body {
 
 .citation-count-badge {
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 700;
@@ -1550,7 +1706,7 @@ body {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  color: #ffffff;
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1662,6 +1818,9 @@ body {
   width: 100%;
   height: auto;
   border-radius: 6px;
+  /* CỐ Ý trắng ở cả hai chế độ: đây là nền giấy phía sau ảnh scan một trang
+     sách. Trang sách in trên giấy trắng, nên nền tối sẽ làm mép ảnh trông như
+     bị cắt hụt. */
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
 }
@@ -1781,7 +1940,7 @@ body {
 
 .med-result-rank {
   background-color: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   font-size: 11px;
   font-weight: 700;
   padding: 2px 7px;
@@ -2055,7 +2214,7 @@ body {
   border-radius: 9px;
   border: none;
   background-color: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -2110,8 +2269,8 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background-color: #ef4444;
-  color: #ffffff;
+  background-color: var(--danger);
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2166,7 +2325,7 @@ body {
   border: none;
   border-radius: 7px;
   background-color: rgba(0, 0, 0, 0.45);
-  color: #ffffff;
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2214,8 +2373,8 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background-color: #ef4444;
-  color: #ffffff;
+  background-color: var(--danger);
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2575,7 +2734,7 @@ body {
 }
 
 .library-doc-item.selected {
-  border-color: #2563eb !important;
+  border-color: var(--primary) !important;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
 }
 
@@ -2583,39 +2742,41 @@ body {
 
 /* Symptom Chips & Node Tree Diagram styling */
 :root {
-  --node-high-border: #22c55e;
-  --node-high-bg: #f0fdf4;
-  --node-high-text: #166534;
-  
-  --node-med-border: #f97316;
-  --node-med-bg: #fff7ed;
-  --node-med-text: #9a3412;
-  
-  --node-low-border: #a855f7;
-  --node-low-bg: #faf5ff;
-  --node-low-text: #6b21a8;
-  
-  --node-root-border: #2563eb;
-  --node-root-bg: #f0f6ff;
-  --node-root-text: #1e40af;
+  --node-high-border: var(--accent);
+  --node-high-bg: var(--pp-green-bg);
+  --node-high-text: var(--pp-green-text-strong);
+
+  --node-med-border: var(--warning);
+  --node-med-bg: var(--pp-orange-bg);
+  --node-med-text: #6d4100;
+
+  --node-low-border: var(--violet);
+  --node-low-bg: var(--pp-purple-bg);
+  --node-low-text: #46318a;
+
+  --node-root-border: var(--primary);
+  --node-root-bg: var(--pp-blue-bg);
+  --node-root-text: var(--secondary);
 }
 
 html.dark, .dark {
-  --node-high-border: #22c55e;
-  --node-high-bg: rgba(34, 197, 94, 0.06);
-  --node-high-text: #4ade80;
-  
-  --node-med-border: #f97316;
-  --node-med-bg: rgba(249, 115, 22, 0.06);
-  --node-med-text: #fb923c;
-  
-  --node-low-border: #a855f7;
-  --node-low-bg: rgba(168, 85, 247, 0.06);
-  --node-low-text: #c084fc;
-  
-  --node-root-border: #00f2fe;
-  --node-root-bg: rgba(0, 242, 254, 0.06);
-  --node-root-text: #00f2fe;
+  --node-high-border: var(--accent);
+  --node-high-bg: rgba(95, 196, 142, 0.08);
+  --node-high-text: var(--accent);
+
+  --node-med-border: var(--warning);
+  --node-med-bg: rgba(224, 167, 92, 0.08);
+  --node-med-text: var(--warning);
+
+  --node-low-border: var(--violet);
+  --node-low-bg: rgba(169, 150, 232, 0.08);
+  --node-low-text: var(--violet);
+
+  /* Trước đây nút gốc dùng #00f2fe, một màu lơ neon không nằm trong bảng màu
+     nào của app. Nay nó là chính màu nhấn của hệ. */
+  --node-root-border: var(--primary);
+  --node-root-bg: rgba(76, 187, 212, 0.08);
+  --node-root-text: var(--primary);
 }
 
 /* 3-Column Layout Container */
@@ -2683,7 +2844,7 @@ html.dark, .dark {
   height: 24px;
   border-radius: 6px;
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2728,7 +2889,7 @@ html.dark, .dark {
   border-radius: 8px;
   padding: 12px;
   background-color: transparent;
-  color: #2563eb;
+  color: var(--primary);
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
@@ -2742,7 +2903,7 @@ html.dark, .dark {
 
 .btn-add-symptom-dashed:hover {
   background-color: var(--primary-glow);
-  border-color: #2563eb;
+  border-color: var(--primary);
 }
 
 .symptom-helper-text {
@@ -2758,7 +2919,7 @@ html.dark, .dark {
 .btn-update-tree {
   margin-top: auto;
   width: 100%;
-  background: #2563eb;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -2777,7 +2938,7 @@ html.dark, .dark {
 .btn-update-tree:hover {
   transform: translateY(-1.5px);
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25);
-  background-color: #1d4ed8;
+  background-color: var(--secondary);
 }
 
 /* Column 2: Suggested diagnosis tree diagram */
@@ -3183,8 +3344,8 @@ html.dark, .dark {
 }
 
 .btn-details-tab.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
 
 /* Tab content details */
@@ -3201,7 +3362,7 @@ html.dark, .dark {
   color: var(--text-primary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-left: 3px solid #2563eb;
+  border-left: 3px solid var(--primary);
   padding-left: 8px;
   margin-bottom: 8px;
 }
@@ -3247,7 +3408,7 @@ html.dark, .dark {
 }
 
 .details-ref-item:hover {
-  border-color: #2563eb;
+  border-color: var(--primary);
   background: var(--primary-glow);
 }
 
@@ -3263,7 +3424,7 @@ html.dark, .dark {
   height: 22px;
   border-radius: 5px;
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3299,7 +3460,7 @@ html.dark, .dark {
 }
 
 .details-ref-item:hover .ref-item-link-icon {
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .btn-view-all-docs {
@@ -3321,8 +3482,8 @@ html.dark, .dark {
 }
 
 .btn-view-all-docs:hover {
-  border-color: #2563eb;
-  color: #2563eb;
+  border-color: var(--primary);
+  color: var(--primary);
   background: var(--primary-glow);
 }
 
@@ -3386,13 +3547,28 @@ html.dark, .dark {
 
 .column-questionnaire h2 {
   font-family: var(--font-heading);
-  font-size: 16px;
+  font-size: 26px;
   font-weight: 700;
-  color: var(--text-primary);
+  letter-spacing: -0.5px;
   margin-bottom: 6px;
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--secondary);
+}
+.column-questionnaire h2 > :first-child,
+.column-questionnaire h2 {
+  background: var(--display-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+/* Biểu tượng trợ giúp bên trong tiêu đề không được dính dải chuyển màu,
+   nếu không nó biến mất hoàn toàn. */
+.column-questionnaire h2 svg {
+  -webkit-text-fill-color: currentColor;
+  color: var(--text-muted);
+  flex: none;
 }
 
 .column-questionnaire .col-desc {
@@ -3435,7 +3611,7 @@ html.dark, .dark {
 
 .patient-desc-header-badge {
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -3470,11 +3646,11 @@ html.dark, .dark {
 
 .patient-desc-textarea:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--primary);
 }
 
 .btn-analyze-desc {
-  background-color: #2563eb;
+  background-color: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -3492,7 +3668,7 @@ html.dark, .dark {
 }
 
 .btn-analyze-desc:hover {
-  background-color: #1d4ed8;
+  background-color: var(--secondary);
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.25);
 }
@@ -3532,7 +3708,7 @@ html.dark, .dark {
 
 .checklist-step-badge {
   background-color: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  color: var(--primary);
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -3641,33 +3817,33 @@ html.dark, .dark {
 
 /* Symptom Active States */
 .symptom-card.active-yes {
-  border-color: #22c55e;
+  border-color: var(--accent);
   background-color: rgba(34, 197, 94, 0.04);
 }
 
 .symptom-btn.active-yes {
-  background-color: #22c55e;
-  border-color: #22c55e;
+  background-color: var(--accent);
+  border-color: var(--accent);
   color: white;
 }
 
 .symptom-btn.active-yes:hover {
-  background-color: #16a34a;
+  background-color: var(--accent);
 }
 
 .symptom-card.active-no {
-  border-color: #ef4444;
+  border-color: var(--danger);
   background-color: rgba(239, 68, 68, 0.02);
 }
 
 .symptom-btn.active-no {
-  background-color: #ef4444;
-  border-color: #ef4444;
+  background-color: var(--danger);
+  border-color: var(--danger);
   color: white;
 }
 
 .symptom-btn.active-no:hover {
-  background-color: #dc2626;
+  background-color: var(--danger);
 }
 
 html.dark {
@@ -3714,7 +3890,7 @@ html.dark {
 }
 
 .btn-diagnose-submit {
-  background-color: #2563eb;
+  background-color: var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -3731,7 +3907,7 @@ html.dark {
 }
 
 .btn-diagnose-submit:hover {
-  background-color: #1d4ed8;
+  background-color: var(--secondary);
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
 }
@@ -3768,7 +3944,7 @@ html.dark {
 
 .results-card-badge {
   background-color: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  color: var(--accent);
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 11px;
@@ -3810,7 +3986,7 @@ html.dark {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: #22c55e;
+  background-color: var(--accent);
 }
 
 /* Diagnosis suggestions list */
@@ -3853,7 +4029,7 @@ html.dark {
 
 .cause-item-pct {
   font-weight: 700;
-  color: #22c55e;
+  color: var(--accent);
   font-size: 13px;
 }
 
@@ -3867,15 +4043,15 @@ html.dark {
 
 .cause-item-bar-fill {
   height: 100%;
-  background-color: #22c55e;
+  background-color: var(--accent);
   border-radius: 3px;
   transition: width var(--transition-slow) ease-in-out;
 }
 
-.cause-item.medium-pct .cause-item-pct { color: #f97316; }
-.cause-item.medium-pct .cause-item-bar-fill { background-color: #f97316; }
-.cause-item.low-pct .cause-item-pct { color: #a855f7; }
-.cause-item.low-pct .cause-item-bar-fill { background-color: #a855f7; }
+.cause-item.medium-pct .cause-item-pct { color: var(--warning); }
+.cause-item.medium-pct .cause-item-bar-fill { background-color: var(--warning); }
+.cause-item.low-pct .cause-item-pct { color: var(--violet); }
+.cause-item.low-pct .cause-item-bar-fill { background-color: var(--violet); }
 
 .icd10-badge {
   display: inline-block;
@@ -3885,7 +4061,7 @@ html.dark {
   font-size: 10.5px;
   font-weight: 700;
   background-color: rgba(37, 99, 235, 0.1);
-  color: #2563eb;
+  color: var(--primary);
   vertical-align: middle;
 }
 
@@ -3894,13 +4070,13 @@ html.dark {
   align-items: flex-start;
   gap: 5px;
   font-size: 11.5px;
-  color: #ef4444;
+  color: var(--danger);
   font-weight: 500;
   line-height: 1.4;
 }
 
 .selected-symptom-bullet.excluded .selected-symptom-dot {
-  background-color: #ef4444;
+  background-color: var(--danger);
 }
 
 /* Endoscopy / physical exam suggestion cards (Call 2 results) */
@@ -4085,7 +4261,7 @@ html.dark {
 }
 
 .legend-dot.yes {
-  background-color: #22c55e;
+  background-color: var(--accent);
 }
 
 .legend-dot.unselected {
@@ -4094,7 +4270,7 @@ html.dark {
 
 .legend-x {
   font-weight: 700;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 11px;
 }
 
@@ -4394,13 +4570,13 @@ html.dark {
 }
 
 .decision-node-card.active-yes {
-  border-color: #22c55e !important;
+  border-color: var(--accent) !important;
   background-color: rgba(34, 197, 94, 0.05);
   box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2);
 }
 
 .decision-node-card.active-no {
-  border-color: #ef4444 !important;
+  border-color: var(--danger) !important;
   background-color: rgba(239, 68, 68, 0.04);
   opacity: 0.85;
 }
@@ -4459,14 +4635,14 @@ html.dark {
 }
 
 .decision-node-card .card-btn.active-yes {
-  background-color: #22c55e;
-  border-color: #22c55e;
+  background-color: var(--accent);
+  border-color: var(--accent);
   color: white;
 }
 
 .decision-node-card .card-btn.active-no {
-  background-color: #ef4444;
-  border-color: #ef4444;
+  background-color: var(--danger);
+  border-color: var(--danger);
   color: white;
 }
 
@@ -4481,8 +4657,8 @@ html.dark {
 }
 
 .decision-node-card .card-btn-choice.active-choice {
-  background-color: #2563eb;
-  border-color: #2563eb;
+  background-color: var(--primary);
+  border-color: var(--primary);
   color: white;
 }
 
@@ -4615,11 +4791,16 @@ html.dark {
 }
 
 .pp-title {
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 700;
   margin: 0;
-  color: var(--text-primary);
+  letter-spacing: -0.5px;
   white-space: nowrap;
+  color: var(--secondary);
+  background: var(--display-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .pp-search-wrap {
@@ -4738,7 +4919,7 @@ html.dark {
   align-items: center;
   gap: 7px;
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
   border: none;
   padding: 10px 16px;
   border-radius: 9px;
@@ -4855,10 +5036,33 @@ html.dark {
 }
 
 .pp-card h3 {
-  font-size: 15px;
-  font-weight: 700;
-  margin: 0 0 14px;
+  font-size: var(--title-rail);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+/* .pp-card dùng cho CẢ cột chính lẫn cột phụ. Nhãn nhỏ in hoa ở trên chỉ đúng
+   với cột phụ; thẻ nằm trong lưới tổng quan của cột chính phải giữ cỡ tiêu đề
+   khối, nếu không "Tóm tắt bệnh án" lại tụt xuống ngang hàng chú thích. */
+.pp-overview-grid .pp-card h3 {
+  font-size: var(--title-section);
+  font-weight: 600;
+  letter-spacing: -0.15px;
+  text-transform: none;
   color: var(--text-primary);
+}
+
+/* Ngoại lệ có chủ đích: thẻ Cảnh báo y tế KHI đang có cảnh báo thật thì không
+   còn là thông tin phụ nữa, nên nó lấy lại cỡ chữ và màu của cột chính. */
+.pp-alert-card.danger h3 {
+  font-size: var(--title-section);
+  font-weight: 600;
+  letter-spacing: -0.15px;
+  text-transform: none;
+  color: var(--pp-red-text-strong);
 }
 
 /* --- Patient identity header card --- */
@@ -5285,8 +5489,9 @@ html.dark {
 
 /* --- Important medical info cards --- */
 .pp-info-section h3 {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: var(--title-section);
+  font-weight: 600;
+  letter-spacing: -0.15px;
   margin: 0 0 12px;
   color: var(--text-primary);
 }
@@ -5307,10 +5512,37 @@ html.dark {
   min-width: 0;
 }
 
-.pp-info-card.danger { background: var(--pp-red-bg); border-color: var(--pp-red-border); }
-.pp-info-card.warning { background: var(--pp-orange-bg); border-color: var(--pp-orange-border); }
-.pp-info-card.info { background: var(--pp-blue-bg); border-color: var(--pp-blue-border); }
-.pp-info-card.purple { background: var(--pp-purple-bg); border-color: var(--pp-purple-border); }
+/* Mức độ được mã hoá bằng CẢ hình lẫn màu, không chỉ màu: ô có dữ liệu mang
+   thêm một vạch dày bên trái. Bác sĩ mù màu vẫn phân biệt được, và mắt bắt
+   được vạch đỏ nhanh hơn bắt được sắc nền. */
+.pp-info-card.danger,
+.pp-info-card.warning,
+.pp-info-card.info,
+.pp-info-card.purple {
+  border-left-width: 4px;
+}
+
+.pp-info-card.empty {
+  background: var(--pp-neutral-bg);
+  border-color: var(--pp-neutral-border);
+}
+.pp-info-card.empty .pp-info-icon {
+  background: var(--pp-neutral-icon-bg);
+  color: var(--pp-neutral-icon);
+}
+.pp-info-card.empty .pp-info-value { color: var(--text-muted); }
+
+/* Dị ứng là thứ duy nhất ở màn hình này có thể giết người. Khi nó CÓ dữ liệu
+   thì nó phải là thứ mắt bắt được đầu tiên. */
+.pp-info-card.danger .pp-info-value {
+  font-weight: 600;
+  color: var(--pp-red-text-strong);
+}
+
+.pp-info-card.danger { background: var(--pp-red-bg); border-color: var(--pp-red-border); border-left-color: var(--pp-red-icon); }
+.pp-info-card.warning { background: var(--pp-orange-bg); border-color: var(--pp-orange-border); border-left-color: var(--pp-orange-icon); }
+.pp-info-card.info { background: var(--pp-blue-bg); border-color: var(--pp-blue-border); border-left-color: var(--pp-blue-icon); }
+.pp-info-card.purple { background: var(--pp-purple-bg); border-color: var(--pp-purple-border); border-left-color: var(--pp-purple-icon); }
 
 .pp-info-icon {
   width: 34px;
@@ -5708,7 +5940,7 @@ html.dark {
   height: 20px;
   border-radius: 50%;
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
   font-size: 11px;
   font-weight: 700;
   display: flex;
@@ -5922,7 +6154,7 @@ html.dark {
   height: 20px;
   border-radius: 50%;
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
   font-size: 11px;
   font-weight: 700;
   display: inline-flex;
@@ -6922,10 +7154,10 @@ html.dark {
 }
 
 /* --- Category color hues (shared: card icon, row icon, tag pill source) --- */
-.pp-doc-hue-red { --doc-c: #ef4444; --doc-c-dark: #dc2626; --doc-c-bg: rgba(239, 68, 68, 0.14); }
-.pp-doc-hue-blue { --doc-c: #2563eb; --doc-c-dark: #1d4ed8; --doc-c-bg: rgba(37, 99, 235, 0.14); }
-.pp-doc-hue-green { --doc-c: #16a34a; --doc-c-dark: #15803d; --doc-c-bg: rgba(22, 163, 74, 0.14); }
-.pp-doc-hue-slate { --doc-c: #64748b; --doc-c-dark: #475569; --doc-c-bg: rgba(100, 116, 139, 0.14); }
+.pp-doc-hue-red { --doc-c: var(--danger); --doc-c-dark: var(--danger); --doc-c-bg: rgba(239, 68, 68, 0.14); }
+.pp-doc-hue-blue { --doc-c: var(--primary); --doc-c-dark: var(--secondary); --doc-c-bg: rgba(37, 99, 235, 0.14); }
+.pp-doc-hue-green { --doc-c: var(--accent); --doc-c-dark: var(--accent); --doc-c-bg: rgba(22, 163, 74, 0.14); }
+.pp-doc-hue-slate { --doc-c: #5e797e; --doc-c-dark: #40585c; --doc-c-bg: rgba(94, 121, 126, 0.14); }
 
 /* --- Grid view --- */
 .pp-doc-grid {
@@ -6985,7 +7217,7 @@ html.dark {
   padding: 11px;
   border-radius: 12px;
   background: var(--doc-c);
-  color: #fff;
+  color: var(--text-on-fill);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
 }
 
@@ -7040,12 +7272,12 @@ html.dark {
 .pp-pill-green { background: var(--pp-pill-green-bg); color: var(--pp-pill-green-text); }
 .pp-pill-blue { background: var(--pp-blue-icon-bg); color: var(--pp-blue-icon); }
 .pp-pill-purple { background: var(--pp-purple-icon-bg); color: var(--pp-purple-icon); }
-.pp-pill-pink { background: rgba(236, 72, 153, 0.14); color: #db2777; }
+.pp-pill-pink { background: rgba(168, 56, 111, 0.14); color: #a8386f; }
 .pp-pill-slate { background: var(--pp-pill-gray-bg); color: var(--pp-pill-gray-text); }
 
 html.dark .pp-pill-pink, .dark .pp-pill-pink {
   background: rgba(244, 114, 182, 0.16);
-  color: #f9a8d4;
+  color: #e78bb4;
 }
 
 /* --- List view --- */
@@ -7076,7 +7308,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   height: 34px;
   border-radius: 8px;
   background: var(--doc-c);
-  color: #fff;
+  color: var(--text-on-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7682,7 +7914,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   padding: 0 4px;
   border-radius: 999px;
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
   font-size: 10px;
   font-weight: 700;
 }
@@ -8027,7 +8259,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 
 .pp-hist-side-btn:hover {
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
 }
 
 .pp-hist-vital-right {
@@ -8111,8 +8343,8 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--danger);
+  color: var(--text-on-fill);
   font-size: 9.5px;
   font-weight: 700;
   display: flex;
@@ -8191,7 +8423,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .notif-item-dot.overdue {
-  background: var(--danger, #ef4444);
+  background: var(--danger, var(--danger));
 }
 
 .notif-item-body {
@@ -8222,7 +8454,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .notif-item-due.overdue {
-  color: var(--danger, #ef4444);
+  color: var(--danger, var(--danger));
 }
 
 .notif-item-dismiss {
@@ -8266,11 +8498,16 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .drug-hero-title {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 700;
-  color: var(--text-primary);
   margin: 0 0 6px 0;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.6px;
+  color: var(--secondary);
+  background: var(--display-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  width: fit-content;
 }
 
 .drug-hero-desc {
@@ -8362,9 +8599,9 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .btn-drug-mic.recording {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #ef4444;
+  background: var(--danger);
+  color: var(--text-on-fill);
+  border-color: var(--danger);
   animation: pulse 1.5s infinite;
 }
 
@@ -8385,7 +8622,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 
 .btn-drug-clear:hover {
   background: var(--bg-hover);
-  color: #ef4444;
+  color: var(--danger);
   border-color: rgba(239, 68, 68, 0.3);
 }
 
@@ -8396,7 +8633,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   padding: 9px 20px;
   border-radius: 8px;
   background: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   border: none;
   font-size: 14px;
   font-weight: 600;
@@ -8514,7 +8751,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 
 .btn-drug-copy.copied {
   background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
+  color: var(--accent);
   border-color: rgba(16, 185, 129, 0.3);
 }
 
@@ -8642,7 +8879,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 
 .drug-inline-citation:hover {
   background: var(--primary);
-  color: #ffffff;
+  color: var(--text-on-fill);
   transform: scale(1.05);
 }
 
@@ -8660,7 +8897,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   padding: 3px 8px;
   border-radius: 4px;
   background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
+  color: var(--accent);
   border: 1px solid rgba(16, 185, 129, 0.24);
 }
 
@@ -8746,7 +8983,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   height: 32px;
   border-radius: 6px;
   background: rgba(239, 68, 68, 0.14);
-  color: #ef4444;
+  color: var(--danger);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -8849,7 +9086,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .drug-summary-item.status-success .drug-summary-item-icon {
-  color: #10b981;
+  color: var(--accent);
   flex-shrink: 0;
 }
 
@@ -8858,7 +9095,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .drug-summary-item.status-warning .drug-summary-item-icon {
-  color: #f59e0b;
+  color: var(--warning);
   flex-shrink: 0;
 }
 
@@ -8867,7 +9104,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 }
 
 .drug-summary-item.status-danger .drug-summary-item-icon {
-  color: #ef4444;
+  color: var(--danger);
   flex-shrink: 0;
 }
 
@@ -9203,7 +9440,7 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   padding: 0 5px;
   border-radius: 9px;
   background: var(--danger);
-  color: #fff;
+  color: var(--text-on-fill);
   font-size: 10.5px;
   font-weight: 700;
   line-height: 18px;

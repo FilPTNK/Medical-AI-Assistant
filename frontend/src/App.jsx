@@ -110,6 +110,34 @@ import {
 } from 'lucide-react';
 
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+/**
+ * Trường lâm sàng này có nội dung thật hay chỉ là chỗ trống?
+ *
+ * Không thể chỉ kiểm tra chuỗi rỗng. Trong cơ sở dữ liệu hiện có bệnh nhân với
+ * `allergies` bằng đúng chuỗi "Không có" — một chuỗi truthy. Nếu chỉ xét truthy
+ * thì bệnh nhân KHÔNG dị ứng vẫn hiện ô đỏ, và màu đỏ lại mất hết sức cảnh báo
+ * đúng như trước khi sửa.
+ *
+ * Cố ý KHÔNG đoán xa hơn: chỉ những câu phủ định nguyên vẹn, viết trọn, mới bị
+ * coi là trống. "Không dị ứng penicillin đã biết" vẫn là thông tin lâm sàng
+ * thật và phải giữ nguyên màu cảnh báo.
+ */
+const NO_DATA_PHRASES = new Set([
+  '', '-', '--', 'n/a', 'na',
+  'không', 'không có', 'khong', 'khong co',
+  'chưa có', 'chua co', 'chưa ghi', 'chua ghi',
+  'chưa có tiền sử bệnh', 'chua co tien su benh',
+  'không rõ', 'khong ro',
+]);
+
+const hasClinicalValue = (value) => {
+  if (value == null) return false;
+  const text = String(value).trim();
+  if (!text) return false;
+  const normalized = text.toLowerCase().replace(/[.,;:!]+$/, '').trim();
+  return !NO_DATA_PHRASES.has(normalized);
+};
 const MAX_PINNED_CONVERSATIONS = 3;
 
 // --- Hồ sơ bệnh nhân (patient profile) helpers ---
@@ -407,6 +435,13 @@ export default function App() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [exportPdfOpen, setExportPdfOpen] = useState(false);
   const toggleTheme = () => settings.setAppearance(isDarkMode ? 'light' : 'dark');
+
+  // Gỡ màn hình khởi động nằm trong index.html. Nó phải sống cho tới khi biết
+  // chắc sẽ hiện cái gì tiếp theo — màn đăng nhập hay giao diện chính. Gỡ sớm
+  // hơn là bác sĩ lại nhìn thấy một nhịp trắng đúng như trước.
+  useEffect(() => {
+    if (auth.status !== 'loading') window.__bootDone?.();
+  }, [auth.status]);
 
   // Mọi API hồ sơ đều trả 401 khi chưa có phiên, nên dữ liệu ban đầu được tải ở
   // đây thay vì lúc mount — nếu không, danh sách bệnh nhân và tài liệu sẽ rỗng
@@ -4435,28 +4470,32 @@ export default function App() {
                           <div className="pp-info-section">
                             <h3>Thông tin y tế quan trọng</h3>
                             <div className="pp-info-cards">
-                              <div className="pp-info-card danger">
+                              {/* Màu ở bốn ô này phải MANG NGHĨA. Trước đây ô Dị ứng luôn
+                                  đỏ kể cả khi trống, nên đỏ mất hết sức cảnh báo: liếc vào
+                                  không phân biệt được "có dị ứng" với "chưa ghi gì". Nay ô
+                                  trống về trung tính, chỉ ô có dữ liệu thật mới mang màu. */}
+                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.allergies) ? 'danger' : 'empty'}`}>
                                 <div className="pp-info-icon"><Ban size={16} /></div>
                                 <div>
                                   <div className="pp-info-title">Dị ứng</div>
                                   <div className="pp-info-value">{selectedPatient.allergies || 'Không có'}</div>
                                 </div>
                               </div>
-                              <div className="pp-info-card warning">
+                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.chronic_conditions) ? 'warning' : 'empty'}`}>
                                 <div className="pp-info-icon"><Stethoscope size={16} /></div>
                                 <div>
                                   <div className="pp-info-title">Chẩn đoán</div>
                                   <div className="pp-info-value">{selectedPatient.chronic_conditions || 'Không có'}</div>
                                 </div>
                               </div>
-                              <div className="pp-info-card info">
+                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.surgical_history) ? 'info' : 'empty'}`}>
                                 <div className="pp-info-icon"><FileText size={16} /></div>
                                 <div>
                                   <div className="pp-info-title">Tiền sử bệnh</div>
                                   <div className="pp-info-value">{selectedPatient.surgical_history || 'Chưa có tiền sử bệnh'}</div>
                                 </div>
                               </div>
-                              <div className="pp-info-card purple">
+                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.family_history) ? 'purple' : 'empty'}`}>
                                 <div className="pp-info-icon"><UsersRound size={16} /></div>
                                 <div>
                                   <div className="pp-info-title">Tiền sử gia đình</div>
@@ -5642,9 +5681,12 @@ export default function App() {
                       </div>
 
                       {/* Medical alert */}
-                      <div className={`pp-card pp-alert-card ${selectedPatient.allergies ? 'danger' : 'neutral'}`}>
+                      <div className={`pp-card pp-alert-card ${hasClinicalValue(selectedPatient.allergies) ? 'danger' : 'neutral'}`}>
                         <h3>Cảnh báo y tế</h3>
-                        {selectedPatient.allergies ? (
+                        {/* Cùng một phép thử với bốn ô thông tin y tế: chuỗi
+                            "Không có" nằm trong cơ sở dữ liệu là chỗ trống, không
+                            phải một cảnh báo. */}
+                        {hasClinicalValue(selectedPatient.allergies) ? (
                           <div className="pp-alert-box">
                             <AlertCircle size={16} />
                             <div>

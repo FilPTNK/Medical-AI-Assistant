@@ -302,10 +302,10 @@
 .ca-btn-primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
 }
 
-.ca-btn-primary:hover:not(:disabled) { background: var(--secondary); color: #fff; }
+.ca-btn-primary:hover:not(:disabled) { background: var(--secondary); color: var(--text-on-fill); }
 
 .ca-btn-add { width: 100%; justify-content: center; }
 

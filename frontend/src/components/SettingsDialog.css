@@ -12,26 +12,30 @@
    Namespaced .st-* so it cannot collide with the older .settings-* rules.
    ===================================================================== */
 
+/* Các biến --st-* nay DẪN XUẤT từ token chung của index.css. Trước đây hộp
+   thoại này có bảng màu riêng sao chép từ ChatGPT (xanh #3a83f7, xám trung
+   tính), nên sau khi đổi app sang xanh mòng két nó sẽ là mảng màu duy nhất còn
+   sót lại của hệ cũ. Chỉ giữ riêng những sắc độ mà giao diện chính không có. */
 .st-scope {
-  --st-bg: #ffffff;
-  --st-bg-elevated: #ffffff;
-  --st-bg-hover: rgba(0, 0, 0, 0.05);
-  --st-bg-selected: #ececec;
-  --st-bg-input: #ffffff;
-  --st-menu-bg: #ffffff;
+  --st-bg: var(--bg-card);
+  --st-bg-elevated: var(--bg-card);
+  --st-bg-hover: var(--bg-hover);
+  --st-bg-selected: var(--bg-sunk);
+  --st-bg-input: var(--bg-card);
+  --st-menu-bg: var(--bg-card);
 
-  --st-text: #0d0d0d;
-  --st-text-secondary: #5d5d5d;
-  --st-text-tertiary: #8f8f8f;
-  --st-text-inverted: #ffffff;
+  --st-text: var(--text-primary);
+  --st-text-secondary: var(--text-secondary);
+  --st-text-tertiary: var(--text-muted);
+  --st-text-inverted: var(--text-on-fill);
 
-  --st-border-light: rgba(0, 0, 0, 0.05);
-  --st-border-medium: rgba(0, 0, 0, 0.15);
-  --st-border-heavy: rgba(0, 0, 0, 0.23);
+  --st-border-light: var(--border-soft);
+  --st-border-medium: var(--border);
+  --st-border-heavy: var(--border);
 
-  --st-accent: #3a83f7;
-  --st-danger: #e02e2a;
-  --st-danger-bg: rgba(224, 46, 42, 0.1);
+  --st-accent: var(--primary);
+  --st-danger: var(--danger);
+  --st-danger-bg: var(--pp-red-bg);
 
   --st-shadow-long:
     0 8px 16px rgba(0, 0, 0, 0.12),
@@ -44,30 +48,16 @@
   --st-radius-menu-item: 12px;
   --st-radius-control: 8px;
 
-  font-family: -apple-system, BlinkMacSystemFont, ui-sans-serif, "Segoe UI",
-    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-family: var(--font-body);
 }
 
+/* Chế độ tối: mọi --st-* ở trên đã trỏ vào token chung, mà token chung tự đổi
+   theo chế độ. Chỉ còn lại vài sắc độ nổi khối mà hộp thoại cần riêng. */
 html.dark .st-scope,
 .dark .st-scope {
-  --st-bg: #212121;
-  --st-bg-elevated: #2f2f2f;
-  --st-bg-hover: rgba(255, 255, 255, 0.06);
-  --st-bg-selected: #303030;
-  --st-bg-input: #2f2f2f;
-  --st-menu-bg: #353535;
-
-  --st-text: #ffffff;
-  --st-text-secondary: #cdcdcd;
-  --st-text-tertiary: #afafaf;
-  --st-text-inverted: #0d0d0d;
-
-  --st-border-light: rgba(255, 255, 255, 0.05);
-  --st-border-medium: rgba(255, 255, 255, 0.15);
-  --st-border-heavy: rgba(255, 255, 255, 0.23);
-
-  --st-danger: #ff4d4a;
-  --st-danger-bg: rgba(255, 77, 74, 0.14);
+  --st-bg-elevated: var(--bg-hover);
+  --st-bg-input: var(--bg-sunk);
+  --st-menu-bg: var(--bg-hover);
 
   --st-shadow-long:
     0 8px 16px rgba(0, 0, 0, 0.32),
@@ -381,7 +371,7 @@ html.dark .st-scope,
 .st-btn-danger {
   border-color: transparent;
   background-color: var(--st-danger);
-  color: #ffffff;
+  color: var(--text-on-fill);
 }
 
 .st-btn-danger:hover { opacity: 0.88; background-color: var(--st-danger); }
@@ -407,6 +397,8 @@ html.dark .st-scope,
   width: 16px;
   height: 16px;
   border-radius: 50%;
+  /* Núm công tắc cố ý trắng ở CẢ hai chế độ: nó là viên bi nổi trên đường ray
+     màu, không phải chữ, nên không đi theo --text-on-fill. */
   background-color: #ffffff;
   transition: transform 0.15s ease;
   transform: translateX(2px);
@@ -520,8 +512,8 @@ html.dark .st-scope,
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background-color: #c2410c;
-  color: #ffffff;
+  background-color: var(--primary);
+  color: var(--text-on-fill);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -775,8 +767,8 @@ html.dark .st-scope,
   padding: 0;
   border: 3px solid var(--st-text);
   border-radius: 50%;
-  background-color: #c2410c;
-  color: #ffffff;
+  background-color: var(--primary);
+  color: var(--text-on-fill);
   font-family: inherit;
   cursor: pointer;
   overflow: visible;

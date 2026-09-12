@@ -52,7 +52,7 @@
   padding: 0 18px;
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-on-fill);
   background-color: var(--primary);
   border: none;
   border-radius: 10px;

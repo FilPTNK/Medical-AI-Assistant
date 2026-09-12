@@ -1,27 +1,33 @@
 /* Màn hình đăng nhập / đăng ký.
  *
- * Khung riêng, không dùng token màu chung của index.css: cổng vào có bảng màu
- * của chính nó (mực xanh than + vàng hổ phách) nên các biến --lg-* khai báo
- * ngay tại .lg-screen — đổi một chỗ là đổi cả bốn chế độ.
+ * Trước đây màn này có bảng màu RIÊNG (mực xanh than + vàng hổ phách), tách hẳn
+ * khỏi phần còn lại của app vốn dùng xanh mòng két. Kết quả là hai thứ trông như
+ * hai sản phẩm khác nhau, và đó là một phần của cảm giác chắp vá. Các biến
+ * --lg-* nay DẪN XUẤT từ token chung của index.css thay vì tự khai báo màu, nên
+ * đổi bảng màu ở một chỗ là cổng vào đi theo.
+ *
+ * Vẫn giữ lớp --lg-* ở giữa chứ không thay thẳng bằng token chung: màn này cần
+ * vài sắc độ riêng (ô nhập lõm hơn, trang nền phẳng hơn) mà giao diện chính
+ * không có.
  */
 
 .lg-screen {
-  --lg-gold: #c9891f;
-  --lg-gold-hover: #a97113;
-  --lg-ink: #141b2d;          /* nền nút chính */
-  --lg-ink-hover: #232f4c;
-  --lg-ink-text: #ffffff;     /* chữ trên nút chính */
-  --lg-title: #101828;
-  --lg-label: #111827;
-  --lg-muted: #6b7280;
-  --lg-faint: #98a0ae;
-  --lg-line: #e5e7eb;
-  --lg-field: #f4f5f9;
-  --lg-field-line: #eceef5;
-  --lg-field-focus: #ffffff;
-  --lg-card: #ffffff;
-  --lg-page: #fbfbfd;
-  --lg-ring: rgba(201, 137, 31, 0.16);
+  --lg-gold: var(--primary);            /* nhấn — nay là xanh mòng két, không còn vàng */
+  --lg-gold-hover: var(--secondary);
+  --lg-ink: var(--primary);             /* nền nút chính */
+  --lg-ink-hover: var(--secondary);
+  --lg-ink-text: var(--text-on-fill);   /* chữ trên nút chính */
+  --lg-title: var(--text-primary);
+  --lg-label: var(--text-primary);
+  --lg-muted: var(--text-secondary);
+  --lg-faint: var(--text-muted);
+  --lg-line: var(--border);
+  --lg-field: var(--bg-sunk);
+  --lg-field-line: var(--border-soft);
+  --lg-field-focus: var(--bg-card);
+  --lg-card: var(--bg-card);
+  --lg-page: var(--bg-app);
+  --lg-ring: var(--primary-glow);
 
   /* #root là flex container, nên màn hình này phải tự nhận toàn bộ chiều ngang;
      nếu không nó co lại vừa nội dung và dạt về mép trái. */
@@ -39,23 +45,12 @@
   color: var(--lg-title);
 }
 
+/* Khối chế độ tối của riêng màn này gần như không còn việc gì: mọi --lg-* ở
+   trên đều trỏ vào token chung, mà token chung đã tự đổi theo chế độ. Chỉ giữ
+   lại đúng chỗ cần sắc độ khác. */
 .dark .lg-screen {
-  --lg-gold: #e0a94a;
-  --lg-gold-hover: #f0bd63;
-  --lg-ink: #edf0f6;
-  --lg-ink-hover: #ffffff;
-  --lg-ink-text: #101725;
-  --lg-title: #f3f4f6;
-  --lg-label: #e9eaee;
-  --lg-muted: #a5a8b3;
-  --lg-faint: #7f838f;
-  --lg-line: #32323a;
-  --lg-field: #26262c;
-  --lg-field-line: #33333b;
-  --lg-field-focus: #2c2c33;
-  --lg-card: #1c1c21;
-  --lg-page: #131317;
-  --lg-ring: rgba(224, 169, 74, 0.2);
+  --lg-field: var(--bg-sunk);
+  --lg-field-focus: var(--bg-hover);
 }
 
 .lg-card {
@@ -77,9 +72,9 @@
   height: 54px;
   margin: 0 auto 18px;
   border-radius: 16px;
-  background: linear-gradient(145deg, #f0c35c, var(--lg-gold));
-  color: #fff;
-  box-shadow: 0 8px 18px -8px rgba(201, 137, 31, 0.7);
+  background: var(--display-gradient);
+  color: var(--text-on-fill);
+  box-shadow: 0 8px 18px -8px var(--primary-glow);
 }
 
 .lg-card h1 {

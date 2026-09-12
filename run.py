@@ -1,9 +1,10 @@
 import os
 import sys
-import socket
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 
 def log(msg):
     """In và đẩy ra ngay: stdout của runner cũng có thể là pipe bị đệm."""
@@ -121,26 +122,46 @@ def stop_process_tree(process, label):
 
 
 def wait_for_backend(process, host="127.0.0.1", port=8000, timeout=180):
-    """Chờ tới khi backend thực sự nhận kết nối, rồi mới bật Vite.
+    """Chờ tới khi backend thực sự TRẢ LỜI được, rồi mới bật Vite.
 
     Backend phải import torch + chromadb trước khi uvicorn bind cổng, mất
     khoảng 20-30s trên máy không có SSD nhanh. Trước đây runner chỉ sleep 1.5s
     rồi bật Vite ngay, nên trình duyệt gọi /api/auth/status khi cổng 8000 chưa
     mở và nhận ECONNREFUSED — giao diện hiện "không kết nối được với máy chủ".
+
+    Bản trước chỉ mở một socket tới cổng 8000 rồi tuyên bố sẵn sàng. Hai cách
+    nó nói dối, cả hai đều đã gặp thật trên máy này:
+
+    1. Một tiến trình backend CŨ còn sống và đang giữ cổng 8000. Socket mở
+       được ngay lập tức, runner in "sẵn sàng sau 0s", trong khi backend MỚI
+       còn chưa nạp xong mô hình. Bác sĩ mở trình duyệt và gặp lỗi.
+    2. Cổng đã mở nhưng uvicorn còn đang nạp mô hình nhúng, nên mọi request
+       đều treo.
+
+    Nay hỏi thẳng một endpoint công khai và đợi một phản hồi HTTP thật.
     """
     print("[SYSTEM] Đang chờ backend sẵn sàng (nạp thư viện AI, thường 20-40s)...")
     started = time.time()
+    url = f"http://{host}:{port}/api/auth/status"
     while time.time() - started < timeout:
         if process.poll() is not None:
             print(f"[SYSTEM] Backend đã thoát sớm với mã {process.poll()}.")
             return False
         try:
-            with socket.create_connection((host, port), timeout=1):
-                elapsed = time.time() - started
-                log(f"[SYSTEM] Backend đã sẵn sàng sau {elapsed:.0f}s.")
-                return True
-        except OSError:
+            # /api/auth/status nằm trong PUBLIC_PATHS nên không đòi đăng nhập.
+            # Chỉ cần nó trả về một mã HTTP bất kỳ là backend đã phục vụ được;
+            # kể cả 4xx cũng chứng minh ứng dụng đang chạy, khác hẳn với việc
+            # cổng mở mà không ai trả lời.
+            with urllib.request.urlopen(url, timeout=3):
+                pass
+        except urllib.error.HTTPError:
+            pass                      # có trả lời = đang phục vụ
+        except Exception:
             time.sleep(1)
+            continue
+        elapsed = time.time() - started
+        log(f"[SYSTEM] Backend đã sẵn sàng sau {elapsed:.0f}s.")
+        return True
     print(f"[SYSTEM] Hết {timeout}s chờ backend. Vẫn bật giao diện, bạn thử tải lại trang sau.")
     return False
 

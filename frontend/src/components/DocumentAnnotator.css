@@ -324,10 +324,10 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
 .annot-mini-btn.primary {
   background-color: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
 }
 
-.annot-mini-btn.primary:hover { background-color: var(--secondary); color: #fff; }
+.annot-mini-btn.primary:hover { background-color: var(--secondary); color: var(--text-on-fill); }
 
 /* ---- document-level note ---- */
 
@@ -379,7 +379,7 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-on-fill);
   background-color: var(--primary);
   border: none;
   border-radius: 7px;

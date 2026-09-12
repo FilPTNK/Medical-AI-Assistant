@@ -214,10 +214,10 @@
 .ex-btn-primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-fill);
 }
 
-.ex-btn-primary:hover:not(:disabled) { background: var(--secondary); color: #fff; }
+.ex-btn-primary:hover:not(:disabled) { background: var(--secondary); color: var(--text-on-fill); }
 
 .ex-spin { animation: ex-rotate 0.9s linear infinite; }
 @keyframes ex-rotate { to { transform: rotate(360deg); } }
