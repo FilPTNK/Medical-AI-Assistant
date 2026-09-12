@@ -10,6 +10,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
 import IntroExperience from './components/IntroExperience';
+import { readSseStream } from './lib/sse';
 import SettingsDialog from './components/SettingsDialog';
 import AccountMenu from './components/AccountMenu';
 import AuthedImage from './components/AuthedImage';
@@ -634,6 +635,9 @@ export default function App() {
   const recognitionTargetRef = useRef(null);
   const autoSendAfterDictationRef = useRef(null); // set per-dictation; fires on recognition end
   const chatInputRef = useRef(null);
+  // AbortController của lần tra cứu đang chạy. Đóng nó là server ngừng
+  // gọi mô hình thật, không phải chỉ giao diện thôi ngóng.
+  const searchAbortRef = useRef(null);
 
   // Diagnosis Tree Pipeline state (3-step agent pipeline: tree -> endoscopy -> final diagnosis)
   const [zoomScale, setZoomScale] = useState(1);
@@ -1567,6 +1571,23 @@ export default function App() {
     )));
   };
 
+  /**
+   * Sửa tin nhắn CUỐI của một cuộc trò chuyện.
+   *
+   * Câu trả lời tra cứu y văn về theo luồng, nên bong bóng trả lời được tạo
+   * rỗng trước rồi lớn dần. `patch` nhận tin nhắn hiện tại và trả về tin nhắn
+   * mới, chứ không phải một object trộn vào — nối chữ cần đọc giá trị cũ, và
+   * đọc nó từ state bên ngoài sẽ lấy phải bản cũ giữa lúc các mẩu chữ về dồn.
+   */
+  const patchLastMessage = (convId, patch) => {
+    setConversations(prev => prev.map(c => {
+      if (c.id !== convId || c.messages.length === 0) return c;
+      const messages = c.messages.slice();
+      messages[messages.length - 1] = patch(messages[messages.length - 1]);
+      return { ...c, messages, updatedAt: Date.now() };
+    }));
+  };
+
   const handleNewChat = () => {
     setActiveConversationId(null);
     setDraftWelcome([makeWelcomeMessage()]);
@@ -1719,6 +1740,20 @@ export default function App() {
     setQuery('');
     setLoading(true);
 
+    // Bong bóng trả lời được tạo NGAY, còn rỗng, rồi lớn dần theo luồng. Nhờ
+    // vậy khối trích dẫn hiện lên trước khi mô hình nói được chữ nào — đo được
+    // nguồn về sau ~80ms còn chữ đầu tiên sau ~890ms.
+    appendMessageToConversation(convId, {
+      role: 'assistant',
+      text: '',
+      sources: [],
+      time: timeStr,
+      streaming: true
+    });
+
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
     try {
       const headers = { 'Content-Type': 'application/json' };
       if (apiKey) {
@@ -1728,44 +1763,71 @@ export default function App() {
       const res = await fetch('/api/search', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query: q, created_by: doctorName })
+        body: JSON.stringify({ query: q, created_by: doctorName }),
+        signal: controller.signal
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Yêu cầu tìm kiếm thất bại.");
+        // Lỗi trước khi luồng bắt đầu (401, 400) vẫn là JSON như cũ.
+        let detail = 'Yêu cầu tìm kiếm thất bại.';
+        try {
+          const errorData = await res.json();
+          detail = errorData.detail || detail;
+        } catch { /* thân không phải JSON: giữ câu mặc định */ }
+        throw new Error(detail);
       }
 
-      const data = await res.json();
-
-      const assistantMsg = {
-        role: 'assistant',
-        text: data.answer,
-        sources: data.sources || [],
-        time: timeStr
-      };
-
-      appendMessageToConversation(convId, assistantMsg);
-      if (data.sources && data.sources.length > 0) {
-        setActiveSources(data.sources);
-        setSelectedSourceIndex(0);
-        setActivePage(data.sources[0]);
-      } else {
-        setActiveSources([]);
-        setActivePage(null);
-      }
+      await readSseStream(res, (event, data) => {
+        if (event === 'status') {
+          patchLastMessage(convId, m => ({ ...m, statusNote: data.message }));
+        } else if (event === 'sources') {
+          const sources = data.sources || [];
+          patchLastMessage(convId, m => ({ ...m, sources, statusNote: null }));
+          if (sources.length > 0) {
+            setActiveSources(sources);
+            setSelectedSourceIndex(0);
+            setActivePage(sources[0]);
+          } else {
+            setActiveSources([]);
+            setActivePage(null);
+          }
+        } else if (event === 'delta') {
+          patchLastMessage(convId, m => ({ ...m, text: m.text + data.text }));
+        } else if (event === 'error') {
+          // KHÔNG xoá trích dẫn đã nhận. `degraded` nghĩa là các trang sách vẫn
+          // dùng được, chỉ phần diễn giải của mô hình là không có — bác sĩ vẫn
+          // đọc được sách, đó là điểm quan trọng nhất của cả đợt này.
+          patchLastMessage(convId, m => ({
+            ...m,
+            errorMessage: data.message,
+            errorDetail: data.detail || null,
+            degraded: !!data.degraded,
+            statusNote: null
+          }));
+        }
+      });
     } catch (err) {
-      console.error(err);
-      const errorMsg = {
-        role: 'assistant',
-        text: `Lỗi tìm kiếm: ${err.message}\n\n(Vui lòng cấu hình API Key trong trang Cài đặt và thử lại hoặc kiểm tra kết nối mạng.)`,
-        sources: [],
-        time: timeStr
-      };
-      appendMessageToConversation(convId, errorMsg);
+      if (err.name === 'AbortError') {
+        // Bác sĩ tự bấm dừng. Giữ lại chữ và trích dẫn đã về được.
+        patchLastMessage(convId, m => ({ ...m, cancelled: true }));
+      } else {
+        console.error(err);
+        patchLastMessage(convId, m => ({
+          ...m,
+          errorMessage: err.message,
+          degraded: (m.sources || []).length > 0
+        }));
+      }
     } finally {
+      searchAbortRef.current = null;
+      patchLastMessage(convId, m => ({ ...m, streaming: false }));
       setLoading(false);
     }
+  };
+
+  /** Bác sĩ bấm dừng. Đóng kết nối là server dừng gọi mô hình thật. */
+  const handleCancelSearch = () => {
+    if (searchAbortRef.current) searchAbortRef.current.abort();
   };
 
   /**
@@ -3548,12 +3610,52 @@ export default function App() {
                         </div>
                       )}
                       <div className="message-bubble">
+                        {msg.statusNote && (
+                          <p className="bubble-status" role="status">
+                            <Loader2 size={13} className="animate-spin" />
+                            {msg.statusNote}
+                          </p>
+                        )}
                         <div className="bubble-text">
                           {msg.role === 'assistant'
                             ? renderMessageText(msg.text, msg.sources)
                             : <p className="markdown-paragraph">{msg.text}</p>
                           }
+                          {msg.streaming && msg.text && <span className="stream-caret" aria-hidden="true" />}
+                          {msg.streaming && !msg.text && !msg.errorMessage && !msg.statusNote && (
+                            <div className="loading-dots" role="status" aria-label="Đang tra cứu y văn">
+                              <span />
+                              <span />
+                              <span />
+                            </div>
+                          )}
                         </div>
+                        {msg.errorMessage && (
+                          // role="alert" để máy đọc màn hình đọc ngay, không chờ
+                          // bác sĩ tự dò tới. Khối này nằm DƯỚI phần chữ và
+                          // KHÔNG thay thế trích dẫn: hỏng mô hình thì các trang
+                          // sách bên dưới vẫn là thứ dùng được.
+                          <div
+                            className={`bubble-alert ${msg.degraded ? 'bubble-alert-degraded' : ''}`}
+                            role="alert"
+                          >
+                            <AlertCircle size={14} />
+                            <div>
+                              <p className="bubble-alert-text">{msg.errorMessage}</p>
+                              {msg.degraded && (msg.sources || []).length > 0 && (
+                                <p className="bubble-alert-hint">
+                                  {msg.sources.length} trang sách ở bên dưới vẫn tra được bình thường.
+                                </p>
+                              )}
+                              {msg.errorDetail && (
+                                <p className="bubble-alert-detail">{msg.errorDetail}</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {msg.cancelled && (
+                          <p className="bubble-status bubble-status-muted">Đã dừng theo yêu cầu.</p>
+                        )}
                         <div className="bubble-footer">
                           {msg.reused && (
                             <span className="bubble-reused-tag" title="Kết quả lấy lại từ lịch sử tra cứu, không gọi lại AI">
@@ -3579,18 +3681,19 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                  {/* Bong bong tra loi da ton tai va tu chay chu, nen khong con
+                      mot hang cho rieng nua — hai cai cung luc la hai vong xoay.
+                      Cho lai day dung mot thu: duong ra. */}
                   {loading && (
-                    <div className="message-row row-assistant">
-                      <div className="assistant-avatar">
-                        <Loader2 className="avatar-spark animate-spin" size={16} />
-                      </div>
-                      <div className="message-bubble bubble-loading">
-                        <div className="loading-dots">
-                          <span />
-                          <span />
-                          <span />
-                        </div>
-                      </div>
+                    <div className="chat-cancel-row">
+                      <button
+                        type="button"
+                        className="chat-cancel-btn"
+                        onClick={handleCancelSearch}
+                      >
+                        <X size={14} />
+                        Dừng tra cứu
+                      </button>
                     </div>
                   )}
                   <div ref={chatEndRef} />
@@ -3710,6 +3813,17 @@ export default function App() {
                                   <p className="doc-publisher">
                                     {sourcePublisher(src)}
                                   </p>
+                                  {/* Tên thuốc của đoạn này do OCR đọc hỏng. Nội dung
+                                      vẫn là dữ liệu thuốc thật nên trang vẫn được trả
+                                      về, nhưng bác sĩ phải biết cái NHÃN không đáng
+                                      tin trước khi đọc theo nó. Có cả chữ và biểu
+                                      tượng, không chỉ màu, để không phụ thuộc màu sắc. */}
+                                  {src.name_suspect && (
+                                    <p className="doc-ocr-warning">
+                                      <AlertCircle size={12} />
+                                      Tên thuốc ở trang này bị lỗi OCR, đối chiếu bản scan
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               <div className="item-row-right">

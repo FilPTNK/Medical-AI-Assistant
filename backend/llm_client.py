@@ -16,31 +16,44 @@ from typing import List, Dict, Any, Optional
 LLM_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
 LLM_MAX_RETRIES = 1
 
+# Riêng cho đường tra cứu y văn chảy dần.
+#
+# Khi stream, `read` không còn là "chờ cả câu trả lời" mà là "chờ mẩu chữ tiếp
+# theo" — đo được chữ đầu tiên về sau 886ms, chậm nhất 1,63s. 15s là 9 lần con
+# số chậm nhất đó, đủ rộng cho một lần mạng chậm và đủ chặt để không ai nhìn
+# vòng xoay hai phút.
+#
+# max_retries=0 là CỐ Ý. Bác sĩ đã chốt: không tự thử lại. Với retry=1, một lần
+# treo thành hai lần chờ liên tiếp mà không ai được báo, nên cái chờ dài gấp đôi
+# và trần thời gian ở main.py mất tác dụng. Muốn thử lại thì bác sĩ bấm lại.
+STREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=30.0, pool=5.0)
+STREAM_MAX_RETRIES = 0
 
-def _llm_client(api_key: str) -> OpenAI:
+
+def _llm_client(api_key: str, streaming: bool = False) -> OpenAI:
     """OpenAI client trỏ tới DeepSeek, luôn kèm timeout và giới hạn retry."""
     return OpenAI(
         api_key=api_key,
         base_url=config.DEEPSEEK_API_URL,
-        timeout=LLM_TIMEOUT,
-        max_retries=LLM_MAX_RETRIES,
+        timeout=STREAM_TIMEOUT if streaming else LLM_TIMEOUT,
+        max_retries=STREAM_MAX_RETRIES if streaming else LLM_MAX_RETRIES,
     )
 
-def generate_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api_key: str = "") -> str:
-    """
-    Calls the DeepSeek API (using OpenAI client) to generate an answer
-    based on the provided document contexts.
-    """
-    # Use custom key if provided, otherwise config key
-    api_key = custom_api_key if custom_api_key else config.DEEPSEEK_API_KEY
+NO_KEY_MESSAGE = (
+    "DeepSeek API key is not configured. "
+    "Please click the 'Settings' gear in the top right to configure your API key, "
+    "or add it to your `.env` file in the project folder."
+)
 
-    if not api_key:
-        return (
-            "DeepSeek API key is not configured. "
-            "Please click the 'Settings' gear in the top right to configure your API key, "
-            "or add it to your `.env` file in the project folder."
-        )
 
+def _build_answer_messages(query: str, context_chunks: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Dựng messages cho câu trả lời tra cứu y văn.
+
+    Tách riêng vì có HAI đường dùng chung đúng bộ prompt này: `generate_answer`
+    (chờ sinh xong) và `stream_answer` (chảy dần). Để hai bản sao thì sớm muộn
+    một bên được sửa quy tắc trích dẫn mà bên kia không, và bác sĩ nhận câu trả
+    lời khác nhau tuỳ đường nào được gọi.
+    """
     # Format the context text for the model
     context_str = ""
     for idx, chunk in enumerate(context_chunks):
@@ -72,16 +85,30 @@ def generate_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api
 
     user_prompt = f"Context:\n{context_str}\nQuestion: {query}\n\nAnswer:"
 
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def generate_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api_key: str = "") -> str:
+    """
+    Calls the DeepSeek API (using OpenAI client) to generate an answer
+    based on the provided document contexts.
+    """
+    # Use custom key if provided, otherwise config key
+    api_key = custom_api_key if custom_api_key else config.DEEPSEEK_API_KEY
+
+    if not api_key:
+        return NO_KEY_MESSAGE
+
     try:
         # Initialize OpenAI client with DeepSeek credentials
         client = _llm_client(api_key)
 
         response = client.chat.completions.create(
             model=config.DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=_build_answer_messages(query, context_chunks),
             temperature=0.1,  # Low temperature for factuality
             max_tokens=1000
         )
@@ -89,6 +116,45 @@ def generate_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api
     except Exception as e:
         print(f"Error calling DeepSeek API: {e}")
         return f"Error calling DeepSeek API: {str(e)}\n\n(Please check your connection and DEEPSEEK_API_KEY settings in .env)"
+
+
+def stream_answer(query: str, context_chunks: List[Dict[str, Any]], custom_api_key: str = ""):
+    """Câu trả lời tra cứu y văn, chảy dần theo từng đoạn.
+
+    Sinh ra các cặp ``(kind, payload)``:
+
+    - ``("delta", "…")`` — một mẩu chữ mới, nối vào cuối phần đã có
+    - ``("error", "…")`` — câu báo lỗi đọc được, dừng tại đây
+
+    KHÔNG bắt lỗi rồi trả nó ra như một câu trả lời. `generate_answer` làm thế:
+    mọi ngoại lệ bị biến thành chuỗi "Error calling DeepSeek API: …" và đi vào
+    đúng chỗ mà bác sĩ đọc câu trả lời y khoa, đồng thời được ghi vào lịch sử
+    tra cứu như một câu trả lời thật. Ở đây lỗi là lỗi, và phía gọi quyết định
+    hiện gì.
+    """
+    api_key = custom_api_key if custom_api_key else config.DEEPSEEK_API_KEY
+    if not api_key:
+        yield ("error", NO_KEY_MESSAGE)
+        return
+
+    try:
+        client = _llm_client(api_key, streaming=True)
+        stream = client.chat.completions.create(
+            model=config.DEEPSEEK_MODEL,
+            messages=_build_answer_messages(query, context_chunks),
+            temperature=0.1,
+            max_tokens=1000,
+            stream=True,
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            piece = chunk.choices[0].delta.content
+            if piece:
+                yield ("delta", piece)
+    except Exception as e:
+        print(f"Lỗi khi stream câu trả lời y văn: {type(e).__name__}: {e}")
+        yield ("error", f"{type(e).__name__}: {e}")
 
 def _strip_json_fences(content: str) -> str:
     """Strips ```json ... ``` code fences if the model wrapped its JSON output in one."""

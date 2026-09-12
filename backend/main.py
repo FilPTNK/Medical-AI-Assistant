@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import shutil
 import json
 import uuid
@@ -7,7 +8,7 @@ import time
 import sqlite3
 import secrets
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
@@ -28,7 +29,7 @@ import library_db
 import agent
 from pdf_processor import process_pdf_parent_child_summary, SimpleLoader
 from vector_store import VectorStore
-from llm_client import generate_answer, generate_diagnosis_tree, suggest_endoscopy_exam, generate_final_diagnosis, generate_treatment_suggestion, generate_drug_report, stream_drug_report, generate_document_comparison
+from llm_client import generate_answer, stream_answer, generate_diagnosis_tree, suggest_endoscopy_exam, generate_final_diagnosis, generate_treatment_suggestion, generate_drug_report, stream_drug_report, generate_document_comparison
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,6 +99,11 @@ class SearchResultItem(BaseModel):
     # quyển vì trong bộ nhiều tập một số trang không định danh duy nhất.
     doc_title: Optional[str] = None
     citation: Optional[str] = None
+    # Tên thuốc của chunk này do OCR đọc hỏng (xem drug_name.py). Nội dung vẫn
+    # là dữ liệu thuốc thật nên chunk KHÔNG bị loại, nhưng giao diện phải nói
+    # rõ cái nhãn không đáng tin. Trước đây cờ này dừng lại ở backend: llm_client
+    # có nhận, còn model trả về cho UI thì không có trường nào để chở nó đi.
+    name_suspect: bool = False
 
 class QueryResponse(BaseModel):
     answer: str
@@ -131,6 +137,7 @@ def to_search_result(s: dict) -> SearchResultItem:
         score=s["score"],
         doc_title=s.get("doc_title") or doc_name,
         citation=s.get("citation") or documents.display_citation(doc_name, s["page_num"]),
+        name_suspect=bool(s.get("name_suspect", False)),
     )
 
 def read_json_data(file_path: str) -> list:
@@ -149,6 +156,65 @@ def write_json_data(file_path: str, data: list):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Error writing {file_path}: {e}")
+
+
+# =============================================================================
+# Đo thời gian từng khâu
+# =============================================================================
+
+class StageTimer:
+    r"""Đo thời gian từng khâu của một request và in ra ĐÚNG MỘT dòng log.
+
+    Một dòng cho cả request, không phải một dòng mỗi khâu: backend chạy nhiều
+    request song song, nên log từng khâu của các request khác nhau sẽ xen vào
+    nhau và không còn ghép lại được để biết một lần tra mất bao lâu.
+
+    Dùng như sau::
+
+        t = StageTimer("search")
+        with t.stage("retrieval"):
+            sources = db.search(query)
+        with t.stage("llm"):
+            answer = generate_answer(...)
+        t.log(f"q={len(query)}c")
+
+    In ra::
+
+        [TIMING] search retrieval=412ms llm=8310ms total=8724ms q=17c
+
+    Khâu nào ném lỗi thì thời gian của nó VẪN được ghi, rồi lỗi bay tiếp ra
+    ngoài — nếu không thì đúng những lần chậm nhất lại là những lần không có
+    số liệu. Gọi ``log()`` trong ``finally`` để mọi lần tra đều để lại một dòng.
+    """
+
+    def __init__(self, label: str):
+        self.label = label
+        self.stages: Dict[str, int] = {}
+        self._t0 = time.perf_counter()
+
+    @contextmanager
+    def stage(self, name: str):
+        t = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.stages[name] = round((time.perf_counter() - t) * 1000)
+
+    @property
+    def total_ms(self) -> int:
+        return round((time.perf_counter() - self._t0) * 1000)
+
+    def timings(self) -> Dict[str, int]:
+        """Số đo của từng khâu, cộng tổng. Khâu chưa chạy thì không có mặt."""
+        return dict(self.stages, total=self.total_ms)
+
+    def log(self, note: str = "") -> Dict[str, int]:
+        result = self.timings()
+        parts = " ".join(f"{k}={v}ms" for k, v in result.items())
+        # flush=True vì stdout của tiến trình con bị buffer khi run.py pipe nó,
+        # và log đo thời gian mà đến muộn thì mất hẳn tác dụng.
+        print(f"[TIMING] {self.label} {parts}" + (f" {note}" if note else ""), flush=True)
+        return result
 
 # =============================================================================
 # XÁC THỰC & PHÂN QUYỀN
@@ -1452,39 +1518,267 @@ def delete_document(doc_name: str):
 
     return {"status": "success", "message": f"Document '{safe_name}' deleted."}
 
+# =============================================================================
+# Tra cứu y văn có trả lời của mô hình — luồng SSE, có trần thời gian, hủy được
+# =============================================================================
+
+# Các trần dưới đây đặt theo số đo thật, không phải đoán. Chạy lại bằng
+# `python eval/timing_run.py --stream --repeat 2` sau mỗi lần đổi model hoặc
+# đổi nhà cung cấp. Đo ngày 13/09/2026, máy còn 2,1 GB RAM trống:
+#
+#     tìm lần đầu (nạp model + BM25)   21,7s
+#     tìm sau khi đã nạp               trung vị 65ms, chậm nhất 172ms
+#     chữ đầu tiên của mô hình         trung vị 886ms, chậm nhất 1,63s
+#     mô hình sinh xong                trung vị 3,06s, chậm nhất 3,68s
+#
+# Kế hoạch ban đầu chốt 10s cho khâu tìm. Số đo cho thấy con số đó SAI theo cả
+# hai chiều: quá lỏng cho lần tìm bình thường (150 lần trung vị, nên nó chỉ nổ
+# khi hệ thống đã hỏng hẳn), và quá chặt cho lần tra ĐẦU TIÊN sau khi mở app,
+# vì lần đó phải nạp model mất 21,7s — một trần 10s sẽ giết đúng lần tra đầu
+# ngày của bác sĩ. Nên tách làm hai trần riêng.
+SEARCH_WARM_TIMEOUT_S = 5.0    # tìm khi model đã nạp: 29 lần lần chậm nhất đo được
+SEARCH_COLD_TIMEOUT_S = 60.0   # tìm khi còn phải nạp model: 2,8 lần số đo được
+SEARCH_TOKEN_GAP_TIMEOUT_S = 15.0  # im lặng giữa hai mẩu chữ: 9 lần chữ-đầu chậm nhất
+SEARCH_TOTAL_TIMEOUT_S = 60.0  # trần cứng cả lần tra: 16 lần lần chậm nhất đo được
+
+
+def _sse(event: str, payload: Any) -> str:
+    """Đóng gói một sự kiện Server-Sent Events."""
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 # Chat Tab Search & Answer endpoint (uses LLM)
-@app.post("/api/search", response_model=QueryResponse)
-def search_and_answer(request: QueryRequest, x_deepseek_key: Optional[str] = Header(None)):
+@app.post("/api/search")
+async def search_and_answer(
+    request: QueryRequest,
+    x_deepseek_key: Optional[str] = Header(None),
+):
+    """Tra cứu y văn kèm câu trả lời của mô hình, trả về theo luồng SSE.
+
+    Trước đây endpoint này là một hàm đồng bộ chặn từ đầu đến cuối: tìm xong
+    mới gọi mô hình, mô hình sinh xong mới trả về một cục. Ba hệ quả đo được:
+
+    1. Khâu tìm KHÔNG có trần thời gian nào. (Khâu gọi mô hình thì có —
+       `llm_client.LLM_TIMEOUT` đặt read=120s — nhưng kèm `max_retries=1`, nên
+       xấu nhất là ~4 phút vòng xoay, và lần thử lại thứ hai không báo cho ai.)
+    2. Không hủy được. Bác sĩ gõ sai câu hỏi thì chỉ còn cách chờ hết.
+    3. Không chảy dần, dù chữ đầu tiên của mô hình về sau 886ms còn cả câu mất
+       hơn 3s. Tức là hơn hai giây nhìn vòng xoay trong khi chữ đã có sẵn.
+
+    Nay: nguồn trích dẫn đẩy đi ngay khi tìm xong, chữ chảy dần về sau, mọi khâu
+    có trần riêng, và bác sĩ đóng kết nối là công việc dừng thật.
+
+    Các sự kiện của luồng:
+
+    - ``sources``  — danh sách trích dẫn, gửi ngay khi tìm xong
+    - ``delta``    — một mẩu chữ mới của câu trả lời
+    - ``error``    — hỏng; ``degraded`` = true nghĩa là trích dẫn vẫn dùng được
+    - ``done``     — xong, kèm số đo từng khâu
+    """
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    try:
-        # Retrieve matching document contexts using advanced hybrid search + reranking
-        sources = enrich_sources(db.search(query, top_k=5))
+    api_key = x_deepseek_key or ""
 
-        # Generate contextualized answer from LLM
-        answer = generate_answer(query, sources, x_deepseek_key or "")
+    async def event_stream():
+        timer = StageTimer("search")
+        outcome = "ok"
+        answer_parts: List[str] = []
+        formatted_sources: List[SearchResultItem] = []
+        started = time.perf_counter()
 
-        # Map to Pydantic structure
-        formatted_sources = [to_search_result(s) for s in sources]
-
-        # Log the lookup so it can be browsed later and reused via "câu hỏi tương tự".
         try:
-            library_db.add_history(
-                query=query,
-                answer=answer,
-                sources=[s.dict() for s in formatted_sources],
-                embedding=db.embed_text(query),
-                embedding_model=db.embedding_model,
-                created_by=request.created_by,
-            )
-        except Exception as e:
-            print(f"Warning: failed to log search history: {e}")
+            # ---------- 1. Khâu tìm ----------
+            #
+            # Trần phụ thuộc việc model đã nạp chưa: lần đầu phải nạp mất 21,7s,
+            # những lần sau chỉ 65ms. Dùng một trần chung thì hoặc giết lần đầu,
+            # hoặc vô dụng cho các lần sau.
+            warm = db.is_warm()
+            budget = SEARCH_WARM_TIMEOUT_S if warm else SEARCH_COLD_TIMEOUT_S
+            if not warm:
+                yield _sse("status", {"phase": "loading_model",
+                                      "message": "Đang nạp mô hình tra cứu y văn, lần tra đầu tiên chậm hơn…"})
+            try:
+                with timer.stage("retrieval"):
+                    sources = await asyncio.wait_for(
+                        asyncio.to_thread(lambda: enrich_sources(db.search(query, top_k=5))),
+                        timeout=budget,
+                    )
+            except asyncio.TimeoutError:
+                outcome = "retrieval_timeout"
+                yield _error_event(
+                    "Không tra được y văn trong giới hạn thời gian. Máy chủ tra cứu "
+                    "đang quá tải hoặc chưa nạp xong. Thử lại sau một lát.",
+                    degraded=False,
+                    detail=f"retrieval vượt {budget:.0f}s (warm={warm})",
+                )
+                return
 
-        return QueryResponse(answer=answer, sources=formatted_sources)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search and generation failed: {str(e)}")
+            formatted_sources = [to_search_result(s) for s in sources]
+            yield _sse("sources", {"sources": [s.dict() for s in formatted_sources]})
+
+            if not sources:
+                outcome = "no_sources"
+                yield _error_event(
+                    "Không tìm thấy đoạn y văn nào khớp câu hỏi này. "
+                    "Lưu ý Dược thư trong kho hiện chỉ có quyển 1, chữ A đến H.",
+                    degraded=False,
+                    detail="db.search trả về 0 kết quả",
+                )
+                return
+
+            # ---------- 2. Khâu mô hình, chảy dần ----------
+            #
+            # Bọc generator đồng bộ của llm_client: mỗi lần lấy một mẩu chữ đều
+            # là một lần chờ có trần. Trần tính theo KHOẢNG IM LẶNG giữa hai mẩu,
+            # không phải tổng: mô hình đang chảy chữ đều đặn thì không có lý do
+            # cắt, còn tắt tiếng giữa câu 15s thì chắc chắn là treo.
+            #
+            # asyncio.wait_for hủy phần chờ nhưng KHÔNG giết được thread đang
+            # nằm trong socket. Thread đó tự thoát khi httpx hết read timeout,
+            # nên trần ở llm_client phải cùng cỡ với trần ở đây.
+            pull = _sync_iter_puller(stream_answer(query, sources, api_key))
+            with timer.stage("llm"):
+                while True:
+                    # KHÔNG gọi http_request.is_disconnected() ở đây. Đã thử và
+                    # đo: nó làm hỏng đúng cái nó định làm. StreamingResponse của
+                    # Starlette tự chạy một task đọc kênh `receive` để bắt
+                    # "http.disconnect" rồi hủy generator này. Gọi
+                    # is_disconnected() là tranh đọc cùng kênh đó, và thông điệp
+                    # disconnect bị mình lấy mất nên task kia không bao giờ thấy.
+                    # Kết quả đo được: khách đóng kết nối giữa luồng mà server vẫn
+                    # chạy hết, vẫn gọi mô hình tới cùng, vẫn ghi lịch sử —
+                    # outcome=ok thay vì cancelled. Đường hủy đúng là
+                    # CancelledError bắt ở dưới.
+                    elapsed = time.perf_counter() - started
+                    if elapsed > SEARCH_TOTAL_TIMEOUT_S:
+                        outcome = "total_timeout"
+                        yield _error_event(
+                            "Câu trả lời mất quá nhiều thời gian nên đã dừng. "
+                            "Các trang sách tìm được vẫn ở bên dưới.",
+                            degraded=True,
+                            detail=f"tổng vượt {SEARCH_TOTAL_TIMEOUT_S:.0f}s",
+                        )
+                        break
+
+                    try:
+                        item = await asyncio.wait_for(
+                            asyncio.to_thread(pull),
+                            timeout=min(SEARCH_TOKEN_GAP_TIMEOUT_S,
+                                        SEARCH_TOTAL_TIMEOUT_S - elapsed),
+                        )
+                    except asyncio.TimeoutError:
+                        outcome = "llm_stall"
+                        yield _error_event(
+                            "Máy chủ AI tạm thời không hoạt động. Các trang sách "
+                            "tìm được vẫn ở bên dưới, dùng được ngay.",
+                            degraded=True,
+                            detail=f"không có mẩu chữ nào trong {SEARCH_TOKEN_GAP_TIMEOUT_S:.0f}s",
+                        )
+                        break
+
+                    if item is None:
+                        break
+
+                    kind, payload = item
+                    if kind == "error":
+                        outcome = "llm_error"
+                        yield _error_event(
+                            "Máy chủ AI tạm thời không hoạt động. Các trang sách "
+                            "tìm được vẫn ở bên dưới, dùng được ngay.",
+                            degraded=True,
+                            detail=payload,
+                        )
+                        break
+
+                    answer_parts.append(payload)
+                    yield _sse("delta", {"text": payload})
+
+            # ---------- 3. Ghi lịch sử ----------
+            #
+            # Chỉ ghi khi có câu trả lời thật. Bản cũ ghi cả những lần hỏng, vì
+            # generate_answer biến ngoại lệ thành chuỗi "Error calling DeepSeek
+            # API: …" rồi trả ra như một câu trả lời — nên lịch sử tra cứu có
+            # những dòng trông như câu trả lời y khoa mà thật ra là thông báo lỗi,
+            # và "câu hỏi tương tự" đem chúng ra dùng lại.
+            answer = "".join(answer_parts)
+            if answer.strip():
+                with timer.stage("history"):
+                    try:
+                        await asyncio.to_thread(
+                            library_db.add_history,
+                            query=query,
+                            answer=answer,
+                            sources=[s.dict() for s in formatted_sources],
+                            embedding=db.embed_text(query),
+                            embedding_model=db.embedding_model,
+                            created_by=request.created_by,
+                        )
+                    except Exception as e:
+                        print(f"Warning: failed to log search history: {e}")
+
+            yield _sse("done", {"timings": timer.timings(), "outcome": outcome})
+
+        except asyncio.CancelledError:
+            # Bác sĩ bấm nút hủy hoặc đóng tab. Không phải lỗi.
+            outcome = "cancelled"
+            raise
+        except Exception as e:
+            outcome = f"crash:{type(e).__name__}"
+            print(f"Lỗi khi stream tra cứu y văn: {type(e).__name__}: {e}")
+            yield _error_event(
+                "Tra cứu thất bại. Thử lại sau một lát.",
+                degraded=bool(formatted_sources),
+                detail=f"{type(e).__name__}: {e}",
+            )
+        finally:
+            # Trong finally để lần hỏng và lần bị hủy cũng để lại số đo — đó
+            # chính là những lần cần biết khâu nào đã ngốn hết thời gian.
+            timer.log(f"q={len(query)}c outcome={outcome}")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Tắt buffering của proxy, nếu không toàn bộ luồng bị gom lại và
+            # bác sĩ vẫn phải chờ như cũ.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _error_event(message: str, degraded: bool, detail: str) -> str:
+    """Sự kiện lỗi cho giao diện.
+
+    `detail` chỉ đi kèm khi chạy chế độ phát triển. Bác sĩ luôn nhận `message` —
+    một câu tiếng Việt nói rõ chuyện gì và còn dùng được gì. `degraded` cho giao
+    diện biết trích dẫn vẫn ở đó, nên đừng xoá kết quả đi khi báo lỗi.
+    """
+    payload = {"message": message, "degraded": degraded}
+    if config.DEV_MODE:
+        payload["detail"] = detail
+    return _sse("error", payload)
+
+
+def _sync_iter_puller(generator):
+    """Biến generator đồng bộ thành một hàm lấy-một-mẩu, hết thì trả None.
+
+    Cần vì `asyncio.to_thread` nhận một hàm để gọi, còn `next()` trên một
+    generator thì ném StopIteration — mà StopIteration bay qua ranh giới
+    thread/coroutine sẽ thành RuntimeError khó đọc thay vì "hết dữ liệu".
+    """
+    it = iter(generator)
+
+    def pull():
+        try:
+            return next(it)
+        except StopIteration:
+            return None
+
+    return pull
 
 # Literature Search Tab endpoint (local retrieval only, NO LLM)
 @app.post("/api/literature-search", response_model=QueryResponse)
@@ -1493,20 +1787,29 @@ def literature_search(request: QueryRequest):
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    timer = StageTimer("literature-search")
     try:
-        # Retrieve matching document contexts using advanced hybrid search + reranking
-        sources = enrich_sources(db.search(query, top_k=10))
+        # Retrieve matching document contexts using hybrid search (dense + BM25 + RRF)
+        with timer.stage("retrieval"):
+            sources = enrich_sources(db.search(query, top_k=10))
 
         # Map to Pydantic structure
         formatted_sources = [to_search_result(s) for s in sources]
 
         # No LLM answer returned.
+        #
+        # Dòng này trước đây ghi "Xếp hạng bởi RRF & Cross-Encoder Reranking".
+        # Cross-Encoder reranker đã bị gỡ (xem vector_store.py), nên câu đó nói
+        # sai về cách kết quả được xếp hạng — tệ hơn là không nói gì, vì bác sĩ
+        # tin vào thứ tự dựa trên một khâu không còn tồn tại.
         return QueryResponse(
-            answer="Kết quả tìm kiếm y văn (Xếp hạng bởi RRF & Cross-Encoder Reranking):",
+            answer="Kết quả tìm kiếm y văn (xếp hạng bằng hợp nhất RRF của tìm theo nghĩa và BM25):",
             sources=formatted_sources
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Literature search failed: {str(e)}")
+    finally:
+        timer.log(f"q={len(query)}c")
 
 # =============================================================================
 # Document research: highlights & personal notes, lookup history, source compare
@@ -1804,10 +2107,7 @@ def search_drug_book(query: str, top_k: int = 6) -> List[Dict[str, Any]]:
 class DrugReportRequest(BaseModel):
     query: str
 
-def _sse(event: str, payload: Any) -> str:
-    """Đóng gói một sự kiện Server-Sent Events."""
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
+# _sse dùng chung với đường tra cứu y văn, định nghĩa ở trên.
 
 @app.post("/api/drugs/report")
 def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optional[str] = Header(None)):

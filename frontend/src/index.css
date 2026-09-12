@@ -9551,3 +9551,118 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
 /* --- Menu tài khoản: hàng thông tin không còn là bộ chuyển hồ sơ --- */
 .st-menu-account-static { cursor: default; }
 .st-menu-account-static:hover { background: transparent; }
+
+/* =========================================================================
+   Đợt 2 — tra cứu y văn chảy dần: trạng thái, lỗi còn dùng được, nút dừng
+
+   Mọi màu ở đây đều là token. Bốn màu ngữ nghĩa ở chế độ tối đều SÁNG, nên chữ
+   trên mảng đặc phải dùng --text-on-fill, không phải #fff viết cứng.
+   ========================================================================= */
+
+/* Câu "đang nạp mô hình…" — nói thật đang chờ gì, không phải vòng xoay trơn */
+.bubble-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.bubble-status-muted { margin: 8px 0 0; color: var(--text-muted); }
+
+/* Con trỏ nhấp nháy ở cuối phần chữ đang chảy. Tắt theo prefers-reduced-motion:
+   một thứ nhấp nháy cạnh liều thuốc là thứ phải dừng được. */
+.stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--primary);
+  animation: stream-caret-blink 1s step-end infinite;
+}
+@keyframes stream-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret { animation: none; opacity: 1; }
+}
+
+/* Khối báo lỗi. Nằm DƯỚI phần chữ và không thay thế trích dẫn.
+   Vạch dày bên trái để phân biệt được mà không cần đọc màu. */
+.bubble-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--pp-red-border);
+  border-left: 3px solid var(--pp-red-icon);
+  border-radius: 6px;
+  background: var(--pp-red-bg);
+  color: var(--pp-red-text-strong);
+}
+.bubble-alert > svg { flex: none; margin-top: 2px; color: var(--pp-red-icon); }
+
+/* "Còn dùng được" là một trạng thái KHÁC với "hỏng hẳn": mô hình không trả lời
+   nhưng các trang sách vẫn tra được. Màu cảnh báo, không phải màu lỗi. */
+.bubble-alert-degraded {
+  border-color: var(--pp-orange-border);
+  border-left-color: var(--pp-orange-icon);
+  background: var(--pp-orange-bg);
+  /* Khong co token --pp-orange-text-strong. Chu cua khoi nay dung
+     --text-primary: nen cam o CA HAI che do deu nhat, va chu cam dam
+     tren nen cam nhat khong dat 4,5:1. */
+  color: var(--text-primary);
+}
+.bubble-alert-degraded > svg { color: var(--pp-orange-icon); }
+
+.bubble-alert-text { margin: 0; font-size: 13.5px; line-height: 1.5; font-weight: 500; }
+.bubble-alert-hint { margin: 4px 0 0; font-size: 12.5px; color: var(--text-secondary); }
+
+/* Chi tiết kỹ thuật. Backend chỉ gửi trường này khi MEDICAL_ASSISTANT_DEV=1,
+   nên ở máy bác sĩ khối này không bao giờ được vẽ. */
+.bubble-alert-detail {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  /* --text-muted chi dat 4,10:1 tren nen cam o che do toi, do bang
+     contrast_check.mjs. --text-secondary dat 6,65:1. */
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Nút dừng. Giữ chỗ riêng một hàng nên lúc hiện ra không đẩy phần chữ nhảy. */
+.chat-cancel-row { display: flex; justify-content: center; padding: 6px 0 2px; }
+.chat-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 44px cao để bấm được chắc tay giữa lúc đang khám, không phải nhắm vào một
+     mục tiêu 24px. */
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.chat-cancel-btn:hover { border-color: var(--pp-red-icon); color: var(--pp-red-text); }
+.chat-cancel-btn:focus-visible { outline: 2px solid var(--border-active); outline-offset: 2px; }
+
+/* Cờ tên thuốc hỏng OCR trên thẻ nguồn. Có biểu tượng VÀ chữ — không bao giờ
+   chỉ dựa vào màu để nói một nhãn không đáng tin. */
+.doc-ocr-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--pp-orange-icon);
+}
+.doc-ocr-warning > svg { flex: none; margin-top: 1px; }

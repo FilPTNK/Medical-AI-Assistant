@@ -128,6 +128,19 @@ const PAIRS = [
   ['pp-pill-green-text', 'pp-pill-green-bg', 4.5, 'chữ trên chip xanh'],
   ['pp-pill-gray-text', 'pp-pill-gray-bg', 4.5, 'chữ trên chip xám'],
   ['pp-badge-blue-text', 'pp-badge-blue-bg', 4.5, 'chữ trên huy hiệu xanh'],
+
+  // Đợt 2 — tra cứu chảy dần. Khối báo lỗi nằm trong bong bóng trả lời, tức là
+  // trên nền thẻ, nhưng tự tô nền riêng nên đo trên nền đó.
+  ['text-primary', 'pp-orange-bg', 4.5, 'chữ khối "còn dùng được" trên nền cam nhạt'],
+  ['text-secondary', 'pp-orange-bg', 4.5, 'dòng gợi ý trong khối "còn dùng được"'],
+  ['text-secondary', 'pp-orange-bg', 4.5, 'chi tiết kỹ thuật trong khối "còn dùng được"'],
+  ['pp-red-text-strong', 'pp-red-bg', 4.5, 'chữ khối lỗi hẳn'],
+  ['text-secondary', 'pp-red-bg', 4.5, 'dòng gợi ý trong khối lỗi hẳn'],
+  ['primary', 'bg-card', 4.5, 'con trỏ chữ đang chảy trên thẻ'],
+  ['text-secondary', 'bg-card', 4.5, 'chữ nút dừng tra cứu'],
+  ['pp-red-text', 'bg-card', 4.5, 'chữ nút dừng khi trỏ vào'],
+  ['pp-orange-icon', 'bg-card', 4.5, 'cờ tên thuốc hỏng OCR trên thẻ nguồn'],
+  ['pp-orange-icon', 'bg-right-panel', 4.5, 'cờ tên thuốc hỏng OCR ở cột nguồn'],
   // KHÔNG đo viền thẻ trang trí ở đây. Bản đầu của script có đo, và cả hai chế
   // độ đều "hỏng" ở mức 1,3:1. Nhưng đó là phép đo sai, không phải màu sai:
   // WCAG 1.4.11 đòi 3:1 cho ranh giới mà thiếu nó thì KHÔNG nhận ra được thành

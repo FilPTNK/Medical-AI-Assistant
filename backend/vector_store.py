@@ -231,6 +231,18 @@ class VectorDB:
         self._lookup = None
         self._doc_freq = None
 
+    def is_warm(self) -> bool:
+        """Đã nạp xong model embedding và corpus/BM25 chưa.
+
+        Dùng để chọn trần thời gian cho khâu tìm: lần tìm khi còn phải nạp mất
+        khoảng 21,7s, còn khi đã nạp chỉ 65ms. Một trần chung cho cả hai thì
+        hoặc giết lần tra đầu tiên sau khi mở app, hoặc lỏng đến mức vô dụng.
+
+        Chỉ ĐỌC trạng thái, không nạp gì và không giữ khoá — gọi được từ đường
+        request mà không làm nó phải chờ.
+        """
+        return self._embedding is not None and self._corpus_cache is not None
+
     @property
     def embedding(self):
         if self._embedding is None:
@@ -498,7 +510,8 @@ class VectorDB:
         except Exception as e:
             print(f"Error reloading db: {e}")
 
-    # Advanced Hybrid Search with BM25, RRF, and Cross-Encoder Reranking
+    # Hybrid search: dense (cosine) + BM25, hợp nhất bằng RRF. KHÔNG có bước
+    # rerank — cross-encoder đã gỡ, xem chú thích "3." ở đầu tệp.
     def search(self, query: str, top_k: int = 5, doc_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Hybrid search over the indexed chunks.
 

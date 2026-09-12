@@ -32,3 +32,12 @@ os.makedirs(VECTOR_DB_DIR, exist_ok=True)
 
 PORT = int(os.getenv("PORT", "8000"))
 HOST = os.getenv("HOST", "127.0.0.1")
+
+# Chế độ phát triển. Chỉ khi bật thì chi tiết kỹ thuật của lỗi mới được gửi ra
+# giao diện. Ở chế độ thường bác sĩ chỉ thấy câu tiếng Việt nói rõ phải làm gì:
+# một chuỗi như "AuthenticationError: Error code: 401 …" giữa lúc đang khám
+# không giúp được gì, mà lại lộ cấu hình máy chủ cho bất cứ ai xem màn hình.
+#
+# Bật bằng biến môi trường, không phải bằng cách sửa mã:
+#     MEDICAL_ASSISTANT_DEV=1 python run.py
+DEV_MODE = os.getenv("MEDICAL_ASSISTANT_DEV", "").strip().lower() in ("1", "true", "yes", "on")
