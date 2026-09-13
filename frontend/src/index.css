@@ -9731,3 +9731,315 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   max-height: 280px;
   overflow-y: auto;
 }
+
+/* ============================================================================
+   ĐỢT 4 — Trình xem hai cột: ảnh scan gốc và bản OCR cạnh nhau.
+
+   Vì sao hai cột chứ không phải nút chuyển qua lại: với sách scan, bản OCR
+   CHÍNH LÀ chỗ có thể sai ("Giảm dau", "Ha nhiệt", "Thdn trong"). Bác sĩ chỉ
+   đối chiếu được khi thấy cả hai CÙNG LÚC; chuyển qua lại bắt người đọc phải
+   nhớ, mà nhớ chính là thứ hỏng khi đang khám.
+
+   KHÔNG tô sáng trên ảnh scan. Kho này chỉ có chữ OCR ở mức TRANG, không có
+   toạ độ từng từ, mà tô sáng trên ảnh thì bắt buộc phải có toạ độ. IIIF Content
+   Search 2.0 nói thẳng về trường hợp này ("Many systems do not have full
+   word-level coordinate information") và cách xử được chấp nhận là tô sáng ở
+   phần chữ, còn ảnh chỉ cần tới đúng trang. Muốn khung trên ảnh thì phải OCR
+   lại để lấy hOCR/ALTO — không back-annotate được từ chữ đã có.
+   ========================================================================== */
+
+.reader-content-body.two-col {
+  display: grid;
+  /* Cột chữ giữ khoảng 65–75 ký tự một dòng; WCAG 1.4.8 (AAA) đặt trần 80. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 34rem);
+  gap: 18px;
+  align-items: start;
+}
+
+.reader-pane { min-width: 0; }
+
+.reader-pane-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.reader-pane-note {
+  font-size: 11.5px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--primary);
+}
+
+/* Chừa sẵn chỗ đúng tỉ lệ trang sách. Một <img> trần chiếm 0×0 cho tới khi ảnh
+   về, nên cả trang giật một nhịp khi nó xuất hiện — aspect-ratio giữ chỗ ngay
+   từ lần vẽ đầu. Tỉ lệ A4 ≈ 1/1,414. */
+.reader-pane-scan .reader-scan-image,
+.reader-pane-scan img {
+  width: 100%;
+  aspect-ratio: 1 / 1.414;
+  object-fit: contain;
+  background: var(--bg-sunk);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.reader-pane-text .reader-plain-text {
+  display: block;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reader-hit {
+  background: var(--primary-glow);
+  color: var(--text-primary);
+  /* Màu không được là dấu hiệu DUY NHẤT — gạch chân để người không phân biệt
+     được màu vẫn thấy chỗ khớp. */
+  border-bottom: 2px solid var(--primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* --- thanh tìm trong tài liệu --- */
+
+.reader-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.reader-search-icon { color: var(--text-muted); flex-shrink: 0; }
+
+.reader-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.reader-search-go,
+.reader-search-clear {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.reader-search-go {
+  color: var(--text-on-fill);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+}
+.reader-search-go:disabled { opacity: .5; cursor: default; }
+
+.reader-search-clear {
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+}
+
+.reader-search-status {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.reader-matches {
+  margin-top: 10px;
+  /* Nền thẻ chứ không phải nền chìm: số trang màu xanh mòng két trên nền chìm
+     chỉ đạt 4,41:1, dưới ngưỡng AA. Viền giữ cho khối danh sách vẫn tách bạch. */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  /* Danh sách trang khớp có thể dài — cuộn trong khung, đừng đẩy trang đang đọc
+     ra khỏi màn hình. */
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.reader-matches-head {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+}
+
+.reader-matches-list { list-style: none; margin: 0; padding: 0; }
+
+.reader-match {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  /* 44px: cùng ngưỡng chạm với nút hủy của đợt 2 */
+  min-height: 44px;
+  padding: 9px 12px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.reader-match:hover { background: var(--bg-hover); }
+.reader-match.current { background: var(--primary-glow); }
+
+.reader-match-page {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-match-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- ô nhảy trang --- */
+
+.reader-page-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reader-page-input {
+  width: 68px;
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 13.5px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.reader-page-input:focus-visible,
+.reader-search-input:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: 1px;
+}
+
+/* Dưới ~900px không đủ chỗ cho hai cột. Xếp chồng, ảnh scan trước — và nút
+   chuyển một cột vẫn còn đó cho người muốn xem từng bên một. */
+@media (max-width: 900px) {
+  .reader-content-body.two-col {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .reader-pane-text .reader-plain-text { max-width: none; }
+}
+
+/* Phạm vi tài liệu trong kho (t208) — Dược thư Quyển 1 dừng ở "A – Hydroxyzin".
+   Nói ra ở ĐÚNG lúc bác sĩ tra không ra, vì đó là lúc kết luận sai hình thành:
+   "app hỏng", hoặc tệ hơn, "không có thuốc đó". */
+
+.coverage-notice {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.coverage-notice > svg { flex-shrink: 0; margin-top: 2px; color: var(--primary); }
+.coverage-notice p { margin: 0; }
+.coverage-notice ul { margin: 5px 0; padding-left: 18px; }
+.coverage-notice strong { color: var(--text-primary); }
+.coverage-notice-hint { margin-top: 5px !important; color: var(--text-muted); }
+
+.reader-coverage {
+  margin: 0 0 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.reader-coverage strong { color: var(--text-secondary); }
+
+/* ============================================================================
+   Bảng màu bút tô của trình xem tài liệu (t103).
+
+   CỐ Ý không gộp vào bộ token ngữ nghĩa. Đây là bảng màu PHÂN LOẠI: bác sĩ tự
+   chọn vàng hay xanh, và chính màu đó LÀ nội dung — tô vàng khác tô xanh vì
+   người tô muốn thế. Ép năm màu này về bảng xanh mòng két thì chúng trùng nhau
+   và mất sạch ý nghĩa. Cùng lớp với bảng màu chuỗi biểu đồ.
+
+   Cái sửa được là đưa chúng thành token CÓ TÊN, khai ở một chỗ, thay vì rải mã
+   hex khắp tệp component — để còn đo lại và đổi được ở một nơi.
+   ========================================================================== */
+
+:root {
+  --hl-yellow:        rgba(250, 204, 21, 0.42);
+  --hl-yellow-strong: rgba(202, 138, 4, 0.55);
+  --hl-yellow-solid:  #facc15;
+
+  --hl-green:         rgba(34, 197, 94, 0.32);
+  --hl-green-strong:  rgba(21, 128, 61, 0.45);
+  --hl-green-solid:   #22c55e;
+
+  --hl-blue:          rgba(59, 130, 246, 0.30);
+  --hl-blue-strong:   rgba(29, 78, 216, 0.45);
+  --hl-blue-solid:    #3b82f6;
+
+  --hl-pink:          rgba(236, 72, 153, 0.28);
+  --hl-pink-strong:   rgba(190, 24, 93, 0.42);
+  --hl-pink-solid:    #ec4899;
+
+  --hl-purple:        rgba(168, 85, 247, 0.28);
+  --hl-purple-strong: rgba(126, 34, 206, 0.42);
+  --hl-purple-solid:  #a855f7;
+}
+
+/* Chế độ tối: nền tô nhạt đi để không nuốt chữ, còn vạch chân sáng lên để vẫn
+   thấy được — vạch chân là dấu hiệu KHÔNG phụ thuộc màu, nên nó phải rõ. */
+html.dark, .dark {
+  --hl-yellow:        rgba(250, 204, 21, 0.22);
+  --hl-yellow-strong: rgba(250, 204, 21, 0.75);
+
+  --hl-green:         rgba(34, 197, 94, 0.22);
+  --hl-green-strong:  rgba(74, 222, 128, 0.75);
+
+  --hl-blue:          rgba(59, 130, 246, 0.24);
+  --hl-blue-strong:   rgba(96, 165, 250, 0.75);
+
+  --hl-pink:          rgba(236, 72, 153, 0.22);
+  --hl-pink-strong:   rgba(244, 114, 182, 0.75);
+
+  --hl-purple:        rgba(168, 85, 247, 0.22);
+  --hl-purple-strong: rgba(192, 132, 252, 0.75);
+}

@@ -21,6 +21,8 @@ import google_login
 import mailer
 import patient_db
 import patient_context
+import text_fold
+import doc_index
 import profile_db
 import auth_db
 import reminder_db
@@ -2344,6 +2346,82 @@ def get_page_image(doc_name: str, page_num: int, dpi: int = 150):
         media_type="image/jpeg",
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+SEARCH_IN_DOC_MAX_PAGES = 200
+SEARCH_IN_DOC_SNIPPET_PAD = 70
+
+
+@app.get("/api/documents/{doc_name}/search")
+def search_in_document(doc_name: str, q: str = Query(..., min_length=2)):
+    """
+    Tìm một cụm chữ TRONG một tài liệu, trả về các trang IN có chứa nó.
+
+    Việc này thuộc về backend chứ không phải frontend: tìm ở phía trình duyệt
+    thì chỉ tìm được những trang bác sĩ đã mở, tức là tìm được càng ít khi càng
+    cần tìm.
+
+    So khớp sau khi GẤP DẤU (xem text_fold): gõ không dấu vẫn ra, và quan trọng
+    hơn, những chỗ OCR làm rụng nét ngang của đ — kho này có thật, ví dụ "Giảm
+    dau" — vẫn khớp khi bác sĩ gõ "giảm đau".
+
+    Lượt tìm đầu tiên của mỗi tài liệu phải dựng chỉ mục (Dược thư Quyển 1 mất
+    khoảng 10 giây cho 913 trang); các lượt sau khoảng 4ms. Trả kèm `was_cold`
+    để giao diện nói được vì sao lần đầu lâu, thay vì để bác sĩ nhìn vòng xoay
+    và đoán là hỏng.
+    """
+    safe_name = get_safe_filename(doc_name)
+    was_cold = not doc_index.is_warm(safe_name)
+    texts, folded = doc_index.get_index(safe_name)
+    if not folded:
+        raise HTTPException(status_code=404, detail="Tài liệu này chưa có bản văn bản để tìm.")
+
+    needle = text_fold.fold(q.strip())
+    if not needle:
+        return {"query": q, "total_pages": 0, "truncated": False, "was_cold": was_cold, "matches": []}
+
+    matches = []
+    truncated = False
+    for printed_page in sorted(folded.keys()):
+        hay = folded[printed_page]
+        hit = hay.find(needle)
+        if hit == -1:
+            continue
+        if len(matches) >= SEARCH_IN_DOC_MAX_PAGES:
+            truncated = True
+            break
+
+        text = texts.get(printed_page, "")
+        # Bảng chỉ số chỉ dựng cho trang thật sự khớp — dựng cho cả 913 trang là
+        # hàng chục MB trên một máy chỉ còn khoảng 1 GB trống.
+        _, index_map = text_fold.fold_with_map(text)
+        if hit < len(index_map):
+            orig_start = index_map[hit]
+            end_idx = min(hit + len(needle), len(index_map)) - 1
+            orig_end = index_map[end_idx] + 1
+        else:
+            orig_start, orig_end = 0, 0
+
+        left = max(0, orig_start - SEARCH_IN_DOC_SNIPPET_PAD)
+        right = min(len(text), orig_end + SEARCH_IN_DOC_SNIPPET_PAD)
+        snippet = text[left:right].strip().replace("\n", " ")
+        matches.append({
+            "page_num": printed_page,
+            "citation": documents.display_citation(safe_name, printed_page),
+            "snippet": ("…" if left > 0 else "") + snippet + ("…" if right < len(text) else ""),
+            # Vị trí trong chữ GỐC, để reader cuộn tới đúng chỗ và tô sáng.
+            "match_start": orig_start,
+            "match_end": orig_end,
+            "count": hay.count(needle),
+        })
+
+    return {
+        "query": q,
+        "total_pages": len(matches),
+        "truncated": truncated,
+        "was_cold": was_cold,
+        "matches": matches,
+    }
 
 
 @app.get("/api/documents/{doc_name}/pages/{page_num}")

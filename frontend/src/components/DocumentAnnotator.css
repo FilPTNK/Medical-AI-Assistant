@@ -37,13 +37,13 @@
   padding: 1px 0;
   cursor: pointer;
   color: inherit;
-  background-color: var(--annot-hl, rgba(250, 204, 21, 0.4));
-  box-shadow: inset 0 -1.5px 0 var(--annot-hl-strong, rgba(202, 138, 4, 0.55));
+  background-color: var(--annot-hl, var(--hl-yellow));
+  box-shadow: inset 0 -1.5px 0 var(--annot-hl-strong, var(--hl-yellow-strong));
   transition: background-color var(--transition-fast);
 }
 
 .annot-mark:hover {
-  background-color: var(--annot-hl-strong, rgba(202, 138, 4, 0.55));
+  background-color: var(--annot-hl-strong, var(--hl-yellow-strong));
 }
 
 .annot-mark.active {
@@ -51,19 +51,16 @@
   outline-offset: 1px;
 }
 
-.annot-mark-yellow { --annot-hl: rgba(250, 204, 21, 0.42); --annot-hl-strong: rgba(202, 138, 4, 0.55); }
-.annot-mark-green  { --annot-hl: rgba(34, 197, 94, 0.32);  --annot-hl-strong: rgba(21, 128, 61, 0.45); }
-.annot-mark-blue   { --annot-hl: rgba(59, 130, 246, 0.3);  --annot-hl-strong: rgba(29, 78, 216, 0.45); }
-.annot-mark-pink   { --annot-hl: rgba(236, 72, 153, 0.28); --annot-hl-strong: rgba(190, 24, 93, 0.42); }
-.annot-mark-purple { --annot-hl: rgba(168, 85, 247, 0.28); --annot-hl-strong: rgba(126, 34, 206, 0.42); }
+.annot-mark-yellow { --annot-hl: var(--hl-yellow); --annot-hl-strong: var(--hl-yellow-strong); }
+.annot-mark-green { --annot-hl: var(--hl-green); --annot-hl-strong: var(--hl-green-strong); }
+.annot-mark-blue { --annot-hl: var(--hl-blue); --annot-hl-strong: var(--hl-blue-strong); }
+.annot-mark-pink { --annot-hl: var(--hl-pink); --annot-hl-strong: var(--hl-pink-strong); }
+.annot-mark-purple { --annot-hl: var(--hl-purple); --annot-hl-strong: var(--hl-purple-strong); }
 
-/* Nền tối: giảm độ đậm của nền tô sáng để chữ sáng vẫn đọc rõ, bù lại bằng gạch chân đậm hơn */
+/* Nền tối: việc đổi độ đậm của nền tô sáng nay nằm trong token (--hl-* ở
+   index.css, khối html.dark), không lặp lại ở đây nữa. Còn lại đúng phần
+   KHÔNG phải màu: thêm đệm ngang cho chữ sáng đỡ thô. */
 html.dark .annot-mark, .dark .annot-mark { padding: 1px 2px; }
-html.dark .annot-mark-yellow, .dark .annot-mark-yellow { --annot-hl: rgba(250, 204, 21, 0.22); --annot-hl-strong: rgba(250, 204, 21, 0.75); }
-html.dark .annot-mark-green,  .dark .annot-mark-green  { --annot-hl: rgba(34, 197, 94, 0.22);  --annot-hl-strong: rgba(74, 222, 128, 0.75); }
-html.dark .annot-mark-blue,   .dark .annot-mark-blue   { --annot-hl: rgba(59, 130, 246, 0.24); --annot-hl-strong: rgba(96, 165, 250, 0.75); }
-html.dark .annot-mark-pink,   .dark .annot-mark-pink   { --annot-hl: rgba(236, 72, 153, 0.22); --annot-hl-strong: rgba(244, 114, 182, 0.75); }
-html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 85, 247, 0.22); --annot-hl-strong: rgba(192, 132, 252, 0.75); }
 
 /* ---- floating selection toolbar ---- */
 
@@ -86,7 +83,7 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
   width: 17px;
   height: 17px;
   border-radius: 50%;
-  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  border: 1.5px solid var(--border);
   cursor: pointer;
   padding: 0;
   transition: transform var(--transition-fast);
@@ -95,11 +92,11 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
 .annot-color-dot:hover { transform: scale(1.15); }
 .annot-color-dot.selected { outline: 2px solid var(--primary); outline-offset: 1.5px; }
 
-.annot-color-yellow { background-color: #facc15; }
-.annot-color-green  { background-color: #22c55e; }
-.annot-color-blue   { background-color: #3b82f6; }
-.annot-color-pink   { background-color: #ec4899; }
-.annot-color-purple { background-color: #a855f7; }
+.annot-color-yellow { background-color: var(--hl-yellow-solid); }
+.annot-color-green { background-color: var(--hl-green-solid); }
+.annot-color-blue { background-color: var(--hl-blue-solid); }
+.annot-color-pink { background-color: var(--hl-pink-solid); }
+.annot-color-purple { background-color: var(--hl-purple-solid); }
 
 .annot-toolbar-divider {
   width: 1px;
@@ -211,7 +208,7 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
 
 .annot-item {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--annot-accent, #facc15);
+  border-left: 3px solid var(--annot-accent, var(--hl-yellow-solid));
   border-radius: 8px;
   background-color: var(--bg-card);
   padding: 9px 10px;
@@ -223,11 +220,11 @@ html.dark .annot-mark-purple, .dark .annot-mark-purple { --annot-hl: rgba(168, 8
 .annot-item:hover { box-shadow: var(--shadow-sm); }
 .annot-item.active { box-shadow: 0 0 0 2px var(--primary-glow); border-color: var(--border-active); }
 
-.annot-item-yellow { --annot-accent: #facc15; }
-.annot-item-green  { --annot-accent: #22c55e; }
-.annot-item-blue   { --annot-accent: #3b82f6; }
-.annot-item-pink   { --annot-accent: #ec4899; }
-.annot-item-purple { --annot-accent: #a855f7; }
+.annot-item-yellow { --annot-accent: var(--hl-yellow-solid); }
+.annot-item-green { --annot-accent: var(--hl-green-solid); }
+.annot-item-blue { --annot-accent: var(--hl-blue-solid); }
+.annot-item-pink { --annot-accent: var(--hl-pink-solid); }
+.annot-item-purple { --annot-accent: var(--hl-purple-solid); }
 
 .annot-item-quote {
   font-size: 12px;

@@ -101,6 +101,15 @@ function ratio(a, b) {
  * ranh giới đồ hoạ (viền ô nhập, vạch mức độ) theo tiêu chí 1.4.11.
  */
 const PAIRS = [
+  // Đợt 4 — trình xem hai cột
+  ['text-muted', 'bg-card', 4.5, 'nhãn cột ảnh scan / bản OCR'],
+  ['text-primary', 'bg-card', 4.5, 'chữ OCR trong cột văn bản'],
+  ['primary', 'bg-card', 4.5, 'chữ ghi chú "đã tô sáng"'],
+  ['text-secondary', 'bg-card', 4.5, 'đoạn trích trong danh sách trang khớp'],
+  ['primary', 'bg-card', 4.5, 'số trang trong danh sách trang khớp'],
+  ['text-secondary', 'bg-sunk', 4.5, 'bảng báo phạm vi quyển sách'],
+  ['text-on-fill', 'primary', 4.5, 'chữ trên nút Tìm'],
+  ['text-primary', 'bg-card', 4.5, 'số trang trong ô nhảy trang'],
   // Đợt 3 — panel "AI đã đọc gì từ bệnh án" (tiền sử đã khử danh)
   ['text-primary', 'bg-sunk', 4.5, 'nhãn mở/gập panel tiền sử'],
   ['text-muted', 'bg-sunk', 4.5, 'chữ phụ "đã bỏ tên" trên panel tiền sử'],

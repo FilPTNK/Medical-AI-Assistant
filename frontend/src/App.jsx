@@ -11,6 +11,7 @@ import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
 import IntroExperience from './components/IntroExperience';
 import { readSseStream } from './lib/sse';
+import { findMatches, bestAnchor } from './lib/fold';
 import SettingsDialog from './components/SettingsDialog';
 import AccountMenu from './components/AccountMenu';
 import AuthedImage from './components/AuthedImage';
@@ -29,86 +30,87 @@ import ClinicAdminDialog, { ChangePasswordDialog } from './components/ClinicAdmi
 import DiagnosisTreeView from './components/DiagnosisTreeView';
 import { apiSend, apiDownload } from './lib/apiClient';
 import {
-  Search,
-  Pill,
-  Info,
-  Moon,
-  Sun,
+  Activity,
+  AlertCircle,
+  Ban,
+  BarChart3,
+  Bell,
+  BellRing,
+  BookOpen,
+  Calendar,
+  Check,
+  CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  ChevronDown,
-  ExternalLink,
+  ClipboardList,
+  Clock,
+  Columns,
   Copy,
-  ThumbsUp,
-  ThumbsDown,
-  Send,
-  Upload,
-  Trash2,
-  X,
-  Check,
-  Stethoscope,
-  Loader2,
-  Sparkles,
-  AlertCircle,
-  BookOpen,
-  Library,
-  Users,
+  Download,
+  ExternalLink,
+  Eye,
+  FileText,
+  FlaskConical,
   GitBranch,
-  Activity,
-  ZoomIn,
-  ZoomOut,
+  GitCompareArrows,
+  Heart,
+  History,
+  Image as ImageIcon,
+  Info,
+  KeyRound,
+  LayoutGrid,
+  Library,
+  List,
+  Loader2,
+  Lock,
+  Mail,
+  MapPin,
   Maximize2,
-  Plus,
   Mic,
-  Square,
+  Minus,
+  Moon,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  MoreHorizontal,
+  Paperclip,
+  PencilLine,
+  Phone,
+  Pill,
   Pin,
   PinOff,
-  PencilLine,
-  Share2,
-  CheckCircle2,
-  LayoutGrid,
-  List,
-  Download,
-  Eye,
-  FileText,
-  Bell,
-  Phone,
-  Mail,
-  MapPin,
-  Scale,
-  Ruler,
-  Ban,
-  UsersRound,
-  Heart,
-  Thermometer,
-  Paperclip,
-  Minus,
-  UserRound,
-  Image as ImageIcon,
-  Calendar,
+  Plus,
   Printer,
-  ClipboardList,
-  FlaskConical,
-  Waves,
-  ScanLine,
   RotateCcw,
-  Target,
-  Clock,
-  Utensils,
+  Ruler,
+  Scale,
+  ScanLine,
+  Search,
+  Send,
+  Share2,
   ShieldAlert,
-  History,
-  GitCompareArrows,
-  BarChart3,
-  BellRing,
   ShieldCheck,
-  KeyRound,
-  Lock
+  Sparkles,
+  Square,
+  Stethoscope,
+  Sun,
+  Target,
+  Thermometer,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+  Upload,
+  UserRound,
+  Users,
+  UsersRound,
+  Utensils,
+  Waves,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -471,6 +473,20 @@ export default function App() {
   const [libraryPreview, setLibraryPreview] = useState(null); // { doc_name, page_num, text } | null
   // Reader: xem ảnh scan trang gốc thay cho văn bản OCR (đối chiếu trích dẫn)
   const [readerShowScan, setReaderShowScan] = useState(false);
+  // Đợt 4 — hai cột: ảnh scan bên trái, chữ OCR bên phải. readerShowScan vẫn
+  // giữ nguyên và trở thành cách xem khi màn hình hẹp, chỗ không đủ cho hai cột.
+  const [readerTwoCol, setReaderTwoCol] = useState(true);
+  // Ô gõ số trang. Giữ riêng với activePage.page_num vì lúc bác sĩ đang gõ "40"
+  // trên đường tới "400" thì chưa được nhảy trang.
+  const [readerPageInput, setReaderPageInput] = useState('');
+  // Tìm chữ TRONG tài liệu.
+  const [readerQuery, setReaderQuery] = useState('');
+  const [readerMatches, setReaderMatches] = useState(null);   // null = chưa tìm lần nào
+  const [readerSearching, setReaderSearching] = useState(false);
+  const [readerTruncated, setReaderTruncated] = useState(false);
+  // Cụm chữ đang được tô sáng trên trang đang mở. Tách khỏi readerQuery để ô
+  // tìm kiếm gõ tiếp không làm nhấp nháy phần tô sáng của kết quả đang đọc.
+  const [readerHighlight, setReaderHighlight] = useState('');
 
   // Lịch sử tra cứu (tái sử dụng kết quả cũ thay vì hỏi lại AI)
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -2200,12 +2216,20 @@ export default function App() {
     return doc?.page_count || 0;
   };
 
-  const handleOpenPageReader = async (docName, pageNum, fallbackSource = null) => {
+  // `quoteToHighlight`: đoạn chunk của kết quả tìm kiếm. Bấm vào trích dẫn thì
+  // mở đúng trang VÀ tô sáng sẵn đúng đoạn đó — không bắt bác sĩ tự dò lại bằng
+  // mắt trên một trang sách đầy chữ.
+  const handleOpenPageReader = async (docName, pageNum, fallbackSource = null, quoteToHighlight = null) => {
     try {
       const res = await fetch(`/api/documents/${encodeURIComponent(docName)}/pages/${pageNum}`);
       if (res.ok) {
         const data = await res.json();
         setActivePage(data);
+        if (quoteToHighlight) {
+          // Neo được thì tô sáng, không neo được thì thôi — thà không tô gì còn
+          // hơn tô nhầm chỗ.
+          setReaderHighlight(bestAnchor(data.text || '', quoteToHighlight));
+        }
       } else {
         if (fallbackSource) {
           setActivePage(fallbackSource);
@@ -2223,6 +2247,81 @@ export default function App() {
     }
   };
 
+  // Nhảy thẳng tới một trang. Trước đợt này muốn tới trang 400 phải bấm mũi tên
+  // 399 lần: số trang chỉ là chữ hiển thị, không gõ vào được.
+  // Tô sáng cụm đang tìm trên chữ CÒN NGUYÊN DẤU.
+  //
+  // Neo theo NỘI DUNG chứ không theo vị trí ký tự mà backend trả về: hai bên đọc
+  // chữ của trang qua hai đường khác nhau (doc_index gộp theo trang in, endpoint
+  // trang đi qua page_map), nên độ lệch một vài ký tự là chuyện có thể xảy ra.
+  // Neo theo nội dung thì lệch cũng vẫn tô đúng chỗ, còn neo theo offset thì tô
+  // trượt mà không ai biết. Đây cũng là tinh thần của TextQuoteSelector (W3C).
+  const renderHighlightedText = (text, query) => {
+    if (!text) return null;
+    const hits = query ? findMatches(text, query) : [];
+    if (hits.length === 0) return <span className="reader-plain-text">{text}</span>;
+    const parts = [];
+    let cursor = 0;
+    hits.forEach((h, i) => {
+      if (h.start > cursor) parts.push(<span key={`t${i}`}>{text.slice(cursor, h.start)}</span>);
+      parts.push(<mark key={`m${i}`} className="reader-hit">{text.slice(h.start, h.end)}</mark>);
+      cursor = h.end;
+    });
+    if (cursor < text.length) parts.push(<span key="tail">{text.slice(cursor)}</span>);
+    return <span className="reader-plain-text">{parts}</span>;
+  };
+
+  // Phạm vi thật sự có trong kho. Lấy từ manifest (trường `coverage`), không
+  // viết cứng: Dược thư Quyển 1 dừng ở "A – Hydroxyzin", nên bác sĩ tra
+  // Paracetamol sẽ không thấy CHUYÊN LUẬN nào. Không nói ra thì họ kết luận là
+  // app hỏng, hoặc tệ hơn, kết luận là không có thuốc đó.
+  //
+  // Lưu ý: chữ "paracetamol" VẪN xuất hiện trên 27 trang của Quyển 1 (trong mục
+  // tương tác của thuốc khác), nên câu chữ phải nói về CHUYÊN LUẬN chứ không
+  // phải về "không có chữ nào".
+  const indexCoverage = () => documents.filter(d => d.coverage);
+
+  const handleGoToPage = (raw) => {
+    if (!activePage) return;
+    const n = parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(n)) return;
+    const min = readerMinPage(activePage.doc_name);
+    const max = readerMaxPage(activePage.doc_name);
+    if (n < min || (max && n > max)) {
+      showStatus('info', `Tài liệu này chỉ có trang ${min}–${max || '?'}.`);
+      return;
+    }
+    handleOpenPageReader(activePage.doc_name, n);
+  };
+
+  // Tìm chữ trong CẢ tài liệu, không chỉ trang đang mở.
+  const handleSearchInDoc = async () => {
+    if (!activePage || !readerQuery.trim()) return;
+    setReaderSearching(true);
+    try {
+      const res = await fetch(
+        `/api/documents/${encodeURIComponent(activePage.doc_name)}/search?q=${encodeURIComponent(readerQuery.trim())}`
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Không tìm được trong tài liệu.');
+      }
+      const data = await res.json();
+      setReaderMatches(data.matches || []);
+      setReaderTruncated(!!data.truncated);
+      setReaderHighlight(readerQuery.trim());
+      if ((data.matches || []).length === 0) {
+        showStatus('info', 'Không có trang nào chứa cụm này.');
+      }
+    } catch (err) {
+      console.error(err);
+      showStatus('error', err.message);
+      setReaderMatches([]);
+    } finally {
+      setReaderSearching(false);
+    }
+  };
+
   const handlePrevPage = () => {
     if (!activePage) return;
     const prevPage = activePage.page_num - 1;
@@ -2237,6 +2336,39 @@ export default function App() {
     if (maxPage && nextPage > maxPage) return;
     handleOpenPageReader(activePage.doc_name, nextPage);
   };
+
+  // Số trang vào đường dẫn, để mở lại và chia sẻ được đúng chỗ.
+  //
+  // replaceState chứ không pushState: mỗi lần lật trang mà đẩy một mục vào lịch
+  // sử thì nút Back của trình duyệt biến thành nút lùi-một-trang-sách, và bác sĩ
+  // phải bấm 40 lần mới thoát ra được. Cả hai hàm đều KHÔNG phát popstate, nên
+  // ghi ở đây không vòng ngược lại thành vòng lặp.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (activePage?.doc_name) {
+      url.searchParams.set('doc', activePage.doc_name);
+      url.searchParams.set('page', String(activePage.page_num));
+    } else {
+      url.searchParams.delete('doc');
+      url.searchParams.delete('page');
+    }
+    window.history.replaceState(null, '', url);
+  }, [activePage?.doc_name, activePage?.page_num]);
+
+  // Mở đúng trang khi vào bằng đường dẫn có sẵn. Chỉ chạy một lần, sau khi danh
+  // sách tài liệu đã về — cần nó để biết khoảng trang hợp lệ.
+  const urlPageOpened = useRef(false);
+  useEffect(() => {
+    if (urlPageOpened.current || documents.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const doc = params.get('doc');
+    const page = parseInt(params.get('page') || '', 10);
+    if (doc && Number.isFinite(page)) {
+      urlPageOpened.current = true;
+      setActiveTab('library');
+      handleOpenPageReader(doc, page);
+    }
+  }, [documents]);
 
   const handleSaveApiKey = (value) => {
     setApiKey(value);
@@ -2892,7 +3024,7 @@ export default function App() {
           onClick={() => {
             if (source) {
               setSelectedSourceIndex(num - 1);
-              handleOpenPageReader(source.doc_name, source.page_num, source);
+              handleOpenPageReader(source.doc_name, source.page_num, source, source.text || source.snippet);
             }
           }}
           title={source ? (source.citation || `${source.doc_name} - Trang ${source.page_num}`) : `Nguồn ${num}`}
@@ -3683,6 +3815,28 @@ export default function App() {
                         {msg.cancelled && (
                           <p className="bubble-status bubble-status-muted">Đã dừng theo yêu cầu.</p>
                         )}
+                        {/* Không ra trang nào là lúc bác sĩ dễ hiểu nhầm nhất. */}
+                        {msg.role === 'assistant' && !msg.streaming && (msg.sources || []).length === 0
+                          && !msg.errorMessage && !msg.cancelled && indexCoverage().length > 0 && (
+                          <div className="coverage-notice" role="note">
+                            <BookOpen size={14} />
+                            <div>
+                              <p>Kho tài liệu hiện chỉ có các chuyên luận trong phạm vi:</p>
+                              <ul>
+                                {indexCoverage().map(d => (
+                                  <li key={d.doc_name}>
+                                    <strong>{d.doc_title || d.doc_name}</strong> — {d.coverage}
+                                  </li>
+                                ))}
+                              </ul>
+                              <p className="coverage-notice-hint">
+                                Thuốc nằm ngoài phạm vi này chưa có chuyên luận trong kho, nên
+                                không tra ra được — không phải app hỏng, và cũng không có nghĩa
+                                là thuốc đó không tồn tại.
+                              </p>
+                            </div>
+                          </div>
+                        )}
                         <div className="bubble-footer">
                           {msg.reused && (
                             <span className="bubble-reused-tag" title="Kết quả lấy lại từ lịch sử tra cứu, không gọi lại AI">
@@ -3826,7 +3980,7 @@ export default function App() {
                               className={`citation-item-row ${isSelected ? 'selected' : ''}`}
                               onClick={() => {
                                 setSelectedSourceIndex(idx);
-                                handleOpenPageReader(src.doc_name, src.page_num, src);
+                                handleOpenPageReader(src.doc_name, src.page_num, src, src.text || src.snippet);
                               }}
                             >
                               <div className="item-row-left">
@@ -3872,37 +4026,162 @@ export default function App() {
                           {sourceTitle(activePage)} — Trang {activePage.page_num}
                         </h3>
                         <div className="reader-header-actions">
-                          {/* Với sách scan, bản OCR chính là chỗ có thể sai. Bác sĩ
-                              fact-check được chỉ khi nhìn thấy trang in thật. */}
+                          {/* Hai cột là mặc định khi đủ chỗ. Nút này vẫn còn vì
+                              dưới ~900px không đủ chỗ cho cả hai, và vì đôi khi
+                              bác sĩ chỉ muốn phóng to đúng một bên. */}
                           <button
-                            className={`icon-btn-action ${readerShowScan ? 'active' : ''}`}
-                            onClick={() => setReaderShowScan(v => !v)}
-                            title={readerShowScan ? 'Xem văn bản OCR' : 'Xem ảnh trang gốc để đối chiếu'}
+                            className={`icon-btn-action ${readerTwoCol ? 'active' : ''}`}
+                            onClick={() => setReaderTwoCol(v => !v)}
+                            title={readerTwoCol ? 'Xem một cột' : 'Xem hai cột: ảnh scan và bản OCR cạnh nhau'}
                           >
-                            {readerShowScan ? <FileText size={16} /> : <ScanLine size={16} />}
+                            <Columns size={16} />
                           </button>
-                          <button className="icon-btn-action" title="Mở rộng"><ExternalLink size={16} /></button>
+                          {!readerTwoCol && (
+                            <button
+                              className={`icon-btn-action ${readerShowScan ? 'active' : ''}`}
+                              onClick={() => setReaderShowScan(v => !v)}
+                              title={readerShowScan ? 'Xem văn bản OCR' : 'Xem ảnh trang gốc để đối chiếu'}
+                            >
+                              {readerShowScan ? <FileText size={16} /> : <ScanLine size={16} />}
+                            </button>
+                          )}
                           <button className="icon-btn-action" onClick={() => setActivePage(null)} title="Đóng"><X size={16} /></button>
                         </div>
                       </div>
-                      <div className="reader-content-body">
-                        {readerShowScan ? (
+
+                      {/* Phạm vi quyển sách, ngay cạnh tên nó. */}
+                      {(documents.find(d => d.doc_name === activePage.doc_name)?.coverage) && (
+                        <p className="reader-coverage">
+                          Quyển này chứa chuyên luận trong phạm vi{' '}
+                          <strong>{documents.find(d => d.doc_name === activePage.doc_name).coverage}</strong>.
+                        </p>
+                      )}
+
+                      {/* Tìm chữ trong CẢ tài liệu */}
+                      <div className="reader-search-bar">
+                        <Search size={15} className="reader-search-icon" />
+                        <input
+                          type="search"
+                          className="reader-search-input"
+                          placeholder="Tìm chữ trong tài liệu này…"
+                          value={readerQuery}
+                          onChange={(e) => setReaderQuery(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSearchInDoc(); }}
+                        />
+                        <button
+                          type="button"
+                          className="reader-search-go"
+                          onClick={handleSearchInDoc}
+                          disabled={readerSearching || !readerQuery.trim()}
+                        >
+                          {readerSearching ? <Loader2 size={14} className="animate-spin" /> : 'Tìm'}
+                        </button>
+                        {readerHighlight && (
+                          <button
+                            type="button"
+                            className="reader-search-clear"
+                            onClick={() => { setReaderHighlight(''); setReaderMatches(null); setReaderQuery(''); }}
+                          >
+                            Bỏ tô sáng
+                          </button>
+                        )}
+                      </div>
+
+                      {readerSearching && (
+                        <p className="reader-search-status" role="status">
+                          Đang dựng chỉ mục chữ cho tài liệu này. Lần tìm đầu tiên sau khi mở app
+                          mất khoảng mươi giây; những lần sau gần như tức thì.
+                        </p>
+                      )}
+
+                      {readerMatches !== null && !readerSearching && (
+                        <div className="reader-matches">
+                          <div className="reader-matches-head">
+                            {readerMatches.length === 0
+                              ? 'Không có trang nào chứa cụm này.'
+                              : `${readerMatches.length} trang có chứa “${readerHighlight}”`}
+                            {readerTruncated && ' (đã cắt bớt)'}
+                          </div>
+                          <ul className="reader-matches-list">
+                            {readerMatches.map((m) => (
+                              <li key={m.page_num}>
+                                <button
+                                  type="button"
+                                  className={`reader-match ${m.page_num === activePage.page_num ? 'current' : ''}`}
+                                  onClick={() => handleOpenPageReader(activePage.doc_name, m.page_num)}
+                                >
+                                  <span className="reader-match-page">tr. {m.page_num}</span>
+                                  <span className="reader-match-snippet">{m.snippet}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className={`reader-content-body ${readerTwoCol ? 'two-col' : ''}`}>
+                        {readerTwoCol ? (
+                          <>
+                            {/* Ảnh scan bên trái. Không tô sáng được trên ảnh: kho
+                                này chỉ có chữ OCR ở mức TRANG, không có toạ độ từng
+                                từ. IIIF Content Search 2.0 lường trước đúng trường
+                                hợp này và cách xử đã được chấp nhận là tô sáng ở
+                                cột chữ, còn ảnh thì chỉ tới đúng trang. Muốn khung
+                                trên ảnh thì phải OCR lại để lấy hOCR/ALTO — việc
+                                riêng, không thuộc đợt này. */}
+                            <div className="reader-pane reader-pane-scan">
+                              <div className="reader-pane-label">Ảnh scan gốc</div>
+                              <AuthedImage
+                                className="reader-scan-image"
+                                url={`/api/documents/${encodeURIComponent(activePage.doc_name)}/pages/${activePage.page_num}/image?dpi=150`}
+                                alt={`Ảnh scan ${sourceCitation(activePage)}`}
+                              />
+                            </div>
+                            <div className="reader-pane reader-pane-text">
+                              <div className="reader-pane-label">
+                                Bản OCR
+                                {readerHighlight && <span className="reader-pane-note">đã tô sáng “{readerHighlight}”</span>}
+                              </div>
+                              {renderHighlightedText(activePage.text, readerHighlight)}
+                            </div>
+                          </>
+                        ) : readerShowScan ? (
                           <AuthedImage
                             className="reader-scan-image"
                             url={`/api/documents/${encodeURIComponent(activePage.doc_name)}/pages/${activePage.page_num}/image?dpi=150`}
                             alt={`Ảnh scan ${sourceCitation(activePage)}`}
                           />
+                        ) : readerHighlight ? (
+                          renderHighlightedText(activePage.text, readerHighlight)
                         ) : (
                           renderSimpleMarkdown(activePage.text)
                         )}
                       </div>
+
                       <div className="reader-footer-pagination">
                         <button onClick={handlePrevPage} disabled={activePage.page_num <= readerMinPage(activePage.doc_name)}>
                           <ChevronLeft size={16} />
                         </button>
-                        <span className="pagination-text">
-                          Trang {activePage.page_num} / {readerMaxPage(activePage.doc_name) || '?'}
-                        </span>
+                        {/* Ô gõ số trang. Form để phím Enter hoạt động đúng nghĩa. */}
+                        <form
+                          className="reader-page-jump"
+                          onSubmit={(e) => { e.preventDefault(); handleGoToPage(readerPageInput); }}
+                        >
+                          <label className="sr-only" htmlFor="reader-page-input">Nhảy tới trang</label>
+                          <span className="pagination-text">Trang</span>
+                          <input
+                            id="reader-page-input"
+                            type="number"
+                            className="reader-page-input"
+                            min={readerMinPage(activePage.doc_name)}
+                            max={readerMaxPage(activePage.doc_name) || undefined}
+                            placeholder={String(activePage.page_num)}
+                            value={readerPageInput}
+                            onChange={(e) => setReaderPageInput(e.target.value)}
+                            onBlur={() => setReaderPageInput('')}
+                          />
+                          <span className="pagination-text">/ {readerMaxPage(activePage.doc_name) || '?'}</span>
+                        </form>
                         <button onClick={handleNextPage} disabled={activePage.page_num >= readerMaxPage(activePage.doc_name)}>
                           <ChevronRight size={16} />
                         </button>
