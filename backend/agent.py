@@ -1,7 +1,7 @@
 import json
 from typing import Any, Callable, Dict, List, Optional
 import config
-import patient_db
+import patient_context
 from llm_client import _strip_json_fences, _llm_client
 
 # 3 rounds of tool use max, then one forced final round with no tools.
@@ -43,56 +43,18 @@ TOOLS = [
 
 
 def _summarize_patient_history(patient_id: str) -> str:
-    patient = patient_db.get_patient(patient_id)
-    if not patient:
+    """
+    Tiền sử đã khử danh. Định nghĩa thật nằm ở patient_context — cả đường agent
+    này lẫn cây chẩn đoán bốn bước đều gọi cùng một hàm, để không có hai phiên
+    bản "tiền sử bệnh nhân" trôi khác nhau.
+
+    Trước đây hàm này tự dựng chuỗi và mở đầu bằng ĐÚNG TÊN bệnh nhân, nên tên
+    đi thẳng ra DeepSeek mỗi lần agent gọi tool.
+    """
+    context = patient_context.build_patient_context(patient_id)
+    if context is None:
         return "Không tìm thấy hồ sơ bệnh nhân."
-
-    lines: List[str] = []
-    age = patient.get("age")
-    lines.append(
-        f"Bệnh nhân: {patient.get('name', '?')}, "
-        f"{f'{age} tuổi' if age is not None else 'chưa rõ tuổi'}, "
-        f"giới tính {patient.get('gender') or 'chưa rõ'}."
-    )
-
-    for field, label in [
-        ("allergies", "Dị ứng"),
-        ("chronic_conditions", "Bệnh nền/bệnh mạn tính"),
-        ("surgical_history", "Tiền sử phẫu thuật"),
-        ("family_history", "Tiền sử gia đình"),
-    ]:
-        value = (patient.get(field) or "").strip()
-        if value:
-            lines.append(f"{label}: {value}")
-
-    visits = patient.get("visits") or []
-    past_visits = [v for v in visits if (v.get("symptoms") or v.get("diagnosis_primary"))][:5]
-    if past_visits:
-        lines.append("Lịch sử khám gần đây:")
-        for v in past_visits:
-            date = v.get("visit_date") or "?"
-            symptoms = (v.get("symptoms") or "").strip() or "(chưa ghi)"
-            diagnosis = (v.get("diagnosis_primary") or "").strip() or "(chưa có chẩn đoán)"
-            lines.append(f"- {date}: triệu chứng \"{symptoms}\" -> chẩn đoán \"{diagnosis}\"")
-
-    vitals = patient.get("vitals") or []
-    if vitals:
-        lines.append("Sinh hiệu gần nhất:")
-        for v in vitals:
-            lines.append(f"- {v.get('vital_type')}: {v.get('value')}")
-
-    notes = patient.get("notes") or []
-    if notes:
-        lines.append("Ghi chú lâm sàng gần đây:")
-        for n in notes[:3]:
-            reason = (n.get("reason_for_visit") or "").strip()
-            if reason:
-                lines.append(f"- {n.get('visit_date') or ''}: {reason}")
-
-    if len(lines) == 1:
-        lines.append("Chưa có tiền sử khám hoặc ghi chú nào trước đó.")
-
-    return "\n".join(lines)
+    return context
 
 
 def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
@@ -115,7 +77,8 @@ def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _parse_final_answer(content: str, trace: List[Dict[str, Any]], sources_used: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _parse_final_answer(content: str, trace: List[Dict[str, Any]], sources_used: List[Dict[str, Any]],
+                        patient_ctx: Optional[str] = None) -> Dict[str, Any]:
     parsed = _safe_json_loads(content) or {}
     differentials = parsed.get("diagnosis_differentials") or []
     if not isinstance(differentials, list):
@@ -126,6 +89,8 @@ def _parse_final_answer(content: str, trace: List[Dict[str, Any]], sources_used:
         "reasoning": str(parsed.get("reasoning") or content or "").strip(),
         "agent_trace": trace,
         "agent_sources": sources_used,
+        # Đúng chuỗi tiền sử đã gửi đi, trả ngược về cho giao diện hiện ra.
+        "patient_context": patient_ctx,
     }
 
 
@@ -154,7 +119,7 @@ def run_diagnostic_agent(
         "Bạn là Agent Bác sĩ Lâm sàng AI, hỗ trợ bác sĩ con người đưa ra chẩn đoán sơ bộ. "
         "Bạn có công cụ để tra cứu tiền sử bệnh nhân và tra cứu Dược Thư Quốc Gia — hãy dùng chúng TRƯỚC KHI kết luận, thay vì đoán ngay.\n\n"
         "QUY TRÌNH BẮT BUỘC:\n"
-        "1. Luôn gọi 'xem_tien_su_benh_nhan' ít nhất một lần để biết dị ứng, bệnh nền, thuốc/chẩn đoán các lần khám trước.\n"
+        "1. Tiền sử bệnh nhân ĐÃ được nạp sẵn ở đầu tin nhắn, trong thẻ <tien_su_benh_nhan>. Hãy đọc nó trước tiên. Gọi 'xem_tien_su_benh_nhan' chỉ khi cần xem lại.\n"
         "2. Nếu còn nghi vấn về tiêu chuẩn chẩn đoán, triệu chứng đặc hiệu, hoặc thuốc liên quan, hãy gọi 'tra_cuu_duoc_thu' với từ khóa phù hợp để đối chiếu tài liệu gốc. Có thể gọi nhiều lần với từ khóa khác nhau nếu cần, nhưng không quá 3 lần tra cứu tổng cộng.\n"
         "3. Chỉ kết luận (không gọi thêm tool) khi đã có đủ căn cứ.\n"
         "4. Khi kết luận, trả lời DUY NHẤT một JSON object theo schema, không kèm markdown:\n"
@@ -166,9 +131,19 @@ def run_diagnostic_agent(
         "Nếu tiền sử có dị ứng thuốc hoặc bệnh nền liên quan trực tiếp, PHẢI đề cập trong reasoning."
     )
 
+    # Nạp sẵn tiền sử thay vì trông vào việc agent tự gọi tool. Đo trên
+    # ToolFailBench (2026): tỉ lệ BỎ QUA tool trong các tác vụ BẮT BUỘC phải gọi
+    # là 11,8%–20,6% tùy mô hình, và các tác giả kết luận kỷ luật gọi tool là
+    # thuộc tính của mô hình chứ không phải của câu lệnh hệ thống. Nghĩa là dòng
+    # "Luôn gọi 'xem_tien_su_benh_nhan'" ở trên trước đây là lời khuyên, và cứ
+    # khoảng 1 trên 7 lần chẩn đoán được đưa ra mà chưa hề đọc mục dị ứng.
+    # Tool vẫn giữ nguyên để agent xem lại khi cần; chỉ khác là nó không còn là
+    # đường DUY NHẤT để tiền sử đi vào.
+    patient_ctx, context_block = patient_context.build_prompt_block(patient_id)
+
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Triệu chứng bệnh nhân hiện tại: {symptoms}\n\nHãy điều tra và đưa ra chẩn đoán."}
+        {"role": "user", "content": context_block + f"Triệu chứng bệnh nhân hiện tại: {symptoms}\n\nHãy điều tra và đưa ra chẩn đoán."}
     ]
 
     trace: List[Dict[str, Any]] = []
@@ -199,7 +174,7 @@ def run_diagnostic_agent(
         tool_calls = getattr(msg, "tool_calls", None) or []
 
         if not tool_calls:
-            return _parse_final_answer(msg.content or "", trace, sources_used)
+            return _parse_final_answer(msg.content or "", trace, sources_used, patient_ctx)
 
         messages.append({
             "role": "assistant",
@@ -280,4 +255,5 @@ def run_diagnostic_agent(
         "reasoning": "AI Agent không thể đưa ra kết luận sau nhiều bước tra cứu. Vui lòng thử lại.",
         "agent_trace": trace,
         "agent_sources": sources_used,
+        "patient_context": patient_ctx,
     }

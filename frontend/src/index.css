@@ -9666,3 +9666,68 @@ html.dark .pp-pill-pink, .dark .pp-pill-pink {
   color: var(--pp-orange-icon);
 }
 .doc-ocr-warning > svg { flex: none; margin-top: 1px; }
+
+/* ============================================================================
+   "AI đã đọc gì từ bệnh án" — khối tiền sử đã khử danh, hiện nguyên văn.
+
+   Gập sẵn là có chủ đích, không phải cho gọn. Tổng quan hệ thống (JMIR AI 2024)
+   thấy giải thích làm bác sĩ dễ chấp nhận kết quả AI hơn mà KHÔNG giúp nhận ra
+   kết quả sai, và giải thích dài thì người dùng bỏ qua; y văn về mệt mỏi cảnh
+   báo đo được tỉ lệ bỏ qua cảnh báo CDSS 46,2–96,2%. Một panel luôn mở sẽ thành
+   thứ trang trí mà mắt tự động lướt qua. Mở ra khi cần thì nó còn là bằng chứng.
+   ========================================================================== */
+
+.patient-context-disclosure {
+  margin-top: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+
+.patient-context-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  /* 44px chiều cao: cùng ngưỡng chạm với nút hủy của đợt 2 */
+  min-height: 44px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.patient-context-toggle:hover { background: var(--bg-hover); }
+.patient-context-toggle:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: -2px;
+}
+
+.patient-context-hint {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.patient-context-body {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-card);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  /* Tiền sử là văn bản nhiều dòng, giữ nguyên xuống dòng nhưng vẫn ngắt được
+     khi hẹp — đừng để bảng dài đẩy cả cột ngang ra. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow-y: auto;
+}

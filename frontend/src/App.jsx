@@ -668,6 +668,13 @@ export default function App() {
   const [diagPatientSearchOpen, setDiagPatientSearchOpen] = useState(false);
   const [diagPatientResults, setDiagPatientResults] = useState([]);
   const [diagSelectedPatient, setDiagSelectedPatient] = useState(null);
+  // Nguyên văn khối tiền sử backend đã gửi ra DeepSeek, trả ngược về để hiện
+  // cho bác sĩ. Không tự dựng lại ở frontend: dựng lại là có phiên bản thứ hai,
+  // và phiên bản thứ hai thì không chứng minh được điều gì về cái đã gửi thật.
+  const [patientContextSent, setPatientContextSent] = useState(null);
+  // Gập sẵn. Y văn về mệt mỏi cảnh báo và về giải thích dài bị bỏ qua đều
+  // chống lại một panel luôn mở: tỉ lệ bỏ qua cảnh báo CDSS đo được 46,2–96,2%.
+  const [patientContextOpen, setPatientContextOpen] = useState(false);
   // Non-null while a diagnosis session is being handed off to the Patients tab — read by
   // handleSaveNewVisit to know it should redirect into the Điều trị tab instead of the
   // regular "expand this visit in Lịch sử" behavior.
@@ -2506,7 +2513,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ description: patientDesc })
+        body: JSON.stringify({ description: patientDesc, patient_id: diagSelectedPatient?.id || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2514,7 +2521,10 @@ export default function App() {
       }
       const data = await res.json();
       setDiagnosisTree(data);
-      showStatus('success', "Đã tạo cây chẩn đoán từ mô tả bệnh nhân.");
+      setPatientContextSent(data.patient_context || null);
+      showStatus('success', diagSelectedPatient
+        ? "Đã tạo cây chẩn đoán từ mô tả bệnh nhân và tiền sử trong bệnh án."
+        : "Đã tạo cây chẩn đoán từ mô tả bệnh nhân.");
     } catch (err) {
       console.error(err);
       showStatus('error', err.message);
@@ -2678,7 +2688,8 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded })
+        body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded,
+                               patient_id: diagSelectedPatient?.id || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2686,6 +2697,7 @@ export default function App() {
       }
       const data = await res.json();
       setExamResult(data);
+      if (data.patient_context) setPatientContextSent(data.patient_context);
       showStatus('success', "Đã có gợi ý khám & nội soi.");
     } catch (err) {
       console.error(err);
@@ -2710,7 +2722,8 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded, exam_notes: examNotes })
+        body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded, exam_notes: examNotes,
+                               patient_id: diagSelectedPatient?.id || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2718,6 +2731,7 @@ export default function App() {
       }
       const data = await res.json();
       setFinalDiagnoses(data.diagnoses || []);
+      if (data.patient_context) setPatientContextSent(data.patient_context);
       setSelectedDiagnosisIds(new Set());
       showStatus('success', "Đã có kết quả chẩn đoán cuối cùng.");
     } catch (err) {
@@ -2734,6 +2748,7 @@ export default function App() {
     setDiagPatientQuery(value);
     setDiagPatientSearchOpen(true);
     setDiagSelectedPatient(null);
+    setPatientContextSent(null);
     if (!value.trim()) { setDiagPatientResults([]); return; }
     try {
       const res = await fetch(`/api/patients?search=${encodeURIComponent(value)}`);
@@ -2745,6 +2760,9 @@ export default function App() {
 
   const handleSelectDiagPatient = (pat) => {
     setDiagSelectedPatient(pat);
+    // Đổi bệnh nhân thì khối tiền sử đang hiện là của người khác. Xoá ngay,
+    // đừng để nó nằm lại trên màn hình cho tới lần gọi sau.
+    setPatientContextSent(null);
     setDiagPatientQuery(pat.name);
     setDiagPatientSearchOpen(false);
     setDiagPatientResults([]);
@@ -2782,9 +2800,13 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ diagnoses: ranked, exam_notes: examNotes })
+        body: JSON.stringify({ diagnoses: ranked, exam_notes: examNotes,
+                               patient_id: diagSelectedPatient?.id || null })
       });
-      if (res.ok) treatment = await res.json();
+      if (res.ok) {
+        treatment = await res.json();
+        if (treatment.patient_context) setPatientContextSent(treatment.patient_context);
+      }
     } catch (err) {
       console.error("Error generating treatment suggestion:", err);
     } finally {
@@ -2824,8 +2846,12 @@ export default function App() {
       setDiagHandoffPayload(payload);
       prefillVisitFromHandoff(payload);
       setIsAddVisitOpen(true);
+      // Nói rõ là CHƯA ghi. Không có câu này thì bác sĩ bị đẩy sang tab khác mà
+      // không biết mình còn phải bấm Lưu, và tưởng đã xong.
+      showStatus('info', "Đã điền sẵn phiếu khám. Soát lại rồi bấm Lưu để ghi vào bệnh án — chưa có gì được ghi.");
     } else {
       openAddPatientModal(payload);
+      showStatus('info', "Đã điền sẵn hồ sơ bệnh nhân mới. Soát lại rồi bấm Lưu — chưa có gì được ghi.");
     }
   };
 
@@ -6304,6 +6330,9 @@ export default function App() {
               handleToggleDiagnosisSelected={handleToggleDiagnosisSelected}
               handleTreeCanvasMouseDown={handleTreeCanvasMouseDown}
               handleUpdateDisease={handleUpdateDisease}
+              patientContextSent={patientContextSent}
+              patientContextOpen={patientContextOpen}
+              setPatientContextOpen={setPatientContextOpen}
               isPanningTree={isPanningTree}
               isPreparingHandoff={isPreparingHandoff}
               nodeStatusMap={nodeStatusMap}

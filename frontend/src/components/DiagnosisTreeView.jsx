@@ -3,6 +3,8 @@ import {
   Activity,
   AlertCircle,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Info,
   Loader2,
@@ -17,10 +19,8 @@ import {
 } from 'lucide-react';
 
 /**
- * Tab "Chẩn đoán" — tách nguyên khối ra khỏi App.jsx, KHÔNG đổi hành vi.
- * Toàn bộ state vẫn nằm ở App.jsx và đi vào đây bằng props; đợt này chỉ di chuyển
- * mã, để đợt nối tiền sử ngay sau đó đọc được thành một diff nhỏ, thay vì lẫn
- * trong một lần dời 470 dòng.
+ * Tab "Chẩn đoán". Tách ra khỏi App.jsx ở commit trước; toàn bộ state vẫn nằm ở
+ * App.jsx và đi vào đây bằng props.
  */
 export default function DiagnosisTreeView({
   centerTreeCanvas,
@@ -45,6 +45,9 @@ export default function DiagnosisTreeView({
   isPanningTree,
   isPreparingHandoff,
   nodeStatusMap,
+  patientContextOpen,
+  patientContextSent,
+  setPatientContextOpen,
   patientDesc,
   renderDecisionTreeNode,
   selectedDiagnosisDetail,
@@ -76,7 +79,7 @@ export default function DiagnosisTreeView({
               <div className="patient-desc-header">
                 <span className="patient-desc-header-badge">0</span>
                 <span>Bệnh nhân</span>
-                <Info size={14} style={{ color: 'var(--text-muted)', cursor: 'pointer' }} title="Chọn hồ sơ bệnh nhân đã khám trước đó để tự động điền lại kết quả chẩn đoán vào lần khám mới. Nếu chưa có hồ sơ, để trống rồi bấm 'Cập nhật bệnh' để tạo bệnh nhân mới." />
+                <Info size={14} style={{ color: 'var(--text-muted)', cursor: 'pointer' }} title="Chọn hồ sơ thì tiền sử trong bệnh án — dị ứng, bệnh nền, các lần khám trước — được nạp vào cả bốn bước chẩn đoán, và kết quả điền lại được vào lần khám mới. Tên và mã hồ sơ KHÔNG được gửi ra ngoài. Để trống thì chỉ dùng phần mô tả bạn gõ." />
               </div>
 
               <div className="pp-search-wrap" style={{ maxWidth: '460px' }}>
@@ -113,6 +116,30 @@ export default function DiagnosisTreeView({
                   </div>
                 )}
               </div>
+
+              {/* Đúng những gì AI đã đọc. Gập sẵn — y văn về hiệu chỉnh lòng tin
+                  cho thấy giải thích làm bác sĩ DỄ chấp nhận hơn mà KHÔNG giúp
+                  nhận ra kết quả sai (JMIR AI 2024), còn giải thích dài thì bị
+                  bỏ qua. Nên panel này không phải để thuyết phục: nó để kiểm
+                  chứng rằng tên bệnh nhân không lọt ra và mục dị ứng có đi vào,
+                  mà không phải mở nhật ký agent. */}
+              {patientContextSent && (
+                <div className="patient-context-disclosure">
+                  <button
+                    type="button"
+                    className="patient-context-toggle"
+                    onClick={() => setPatientContextOpen(!patientContextOpen)}
+                    aria-expanded={patientContextOpen}
+                  >
+                    {patientContextOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <span>AI đã đọc gì từ bệnh án</span>
+                    <span className="patient-context-hint">đã bỏ tên và mã hồ sơ</span>
+                  </button>
+                  {patientContextOpen && (
+                    <pre className="patient-context-body">{patientContextSent}</pre>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Section 1: Nhập mô tả bệnh nhân */}
@@ -479,7 +506,10 @@ export default function DiagnosisTreeView({
                     onClick={handleUpdateDisease}
                     disabled={selectedDiagnosisIds.size === 0 || isPreparingHandoff}
                   >
-                    {isPreparingHandoff ? <Loader2 size={16} className="animate-spin" /> : <ClipboardList size={16} />} Cập nhật bệnh{selectedDiagnosisIds.size > 0 ? ` (${selectedDiagnosisIds.size})` : ''}
+                    {/* Nút nói đúng việc nó làm: nó KHÔNG ghi thẳng vào bệnh án,
+                        nó mở sẵn phiếu khám đã điền để bác sĩ soát rồi tự bấm Lưu.
+                        Dấu ba chấm là quy ước cho "còn một bước nữa". */}
+                    {isPreparingHandoff ? <Loader2 size={16} className="animate-spin" /> : <ClipboardList size={16} />} Đưa sang bệnh án…{selectedDiagnosisIds.size > 0 ? ` (${selectedDiagnosisIds.size})` : ''}
                   </button>
                 </div>
               )}

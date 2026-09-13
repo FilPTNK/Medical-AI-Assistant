@@ -320,7 +320,8 @@ def _format_context_block(context_chunks: Optional[List[Dict[str, Any]]]) -> str
     return context_str
 
 
-def generate_diagnosis_tree(description: str, custom_api_key: str = "", context_chunks: Optional[List[Dict[str, Any]]] = None) -> dict:
+def generate_diagnosis_tree(description: str, custom_api_key: str = "", context_chunks: Optional[List[Dict[str, Any]]] = None,
+                            patient_block: str = "") -> dict:
     """
     Call 1: Asks DeepSeek to act as an ENT (Tai Mui Hong) expert agent and generate a full
     recursive diagnostic decision tree (JSON) from the patient's free-text description.
@@ -394,7 +395,13 @@ def generate_diagnosis_tree(description: str, custom_api_key: str = "", context_
     )
 
     context_block = _format_context_block(context_chunks)
-    user_prompt = f"Mô tả bệnh nhân: {description}\n\n"
+    # Khối tiền sử ĐÃ khử danh (patient_context) đi LÊN ĐẦU user_prompt, trên cả
+    # câu hỏi lẫn tài liệu tham khảo: "Lost in the Middle" (TACL 2024) đo được
+    # rằng thông tin nằm giữa ngữ cảnh bị bỏ sót nhiều hơn hẳn so với nằm ở đầu,
+    # và điều đó đúng với cả mô hình ngữ cảnh dài. Dị ứng thuốc không được phép
+    # rơi vào khúc giữa.
+    # Rỗng nghĩa là bác sĩ không chọn hồ sơ nào, khi đó prompt y hệt như trước.
+    user_prompt = patient_block + f"Mô tả bệnh nhân: {description}\n\n"
     if context_block:
         user_prompt += f"Tài liệu y khoa tham khảo:\n{context_block}\n"
     user_prompt += "Hãy tạo Cây Chẩn Đoán JSON theo đúng schema đã mô tả."
@@ -426,7 +433,8 @@ def suggest_endoscopy_exam(
     confirmed_symptoms: List[str],
     excluded_symptoms: List[str],
     custom_api_key: str = "",
-    context_chunks: Optional[List[Dict[str, Any]]] = None
+    context_chunks: Optional[List[Dict[str, Any]]] = None,
+    patient_block: str = "",
 ) -> dict:
     """
     Call 2: Given the confirmed/excluded symptoms from the tree, asks DeepSeek to suggest
@@ -459,7 +467,13 @@ def suggest_endoscopy_exam(
     context_block = _format_context_block(context_chunks)
     confirmed_str = ", ".join(confirmed_symptoms) if confirmed_symptoms else "Không có"
     excluded_str = ", ".join(excluded_symptoms) if excluded_symptoms else "Không có"
-    user_prompt = f"Triệu chứng CÓ (confirmed_symptoms): {confirmed_str}\nTriệu chứng LOẠI TRỪ (excluded_symptoms): {excluded_str}\n\n"
+    # Khối tiền sử ĐÃ khử danh (patient_context) đi LÊN ĐẦU user_prompt, trên cả
+    # câu hỏi lẫn tài liệu tham khảo: "Lost in the Middle" (TACL 2024) đo được
+    # rằng thông tin nằm giữa ngữ cảnh bị bỏ sót nhiều hơn hẳn so với nằm ở đầu,
+    # và điều đó đúng với cả mô hình ngữ cảnh dài. Dị ứng thuốc không được phép
+    # rơi vào khúc giữa.
+    # Rỗng nghĩa là bác sĩ không chọn hồ sơ nào, khi đó prompt y hệt như trước.
+    user_prompt = patient_block + f"Triệu chứng CÓ (confirmed_symptoms): {confirmed_str}\nTriệu chứng LOẠI TRỪ (excluded_symptoms): {excluded_str}\n\n"
     if context_block:
         user_prompt += f"Tài liệu y khoa tham khảo:\n{context_block}\n"
     user_prompt += "Hãy đưa ra định hướng khám & nội soi dạng JSON theo đúng schema."
@@ -491,7 +505,8 @@ def generate_final_diagnosis(
     excluded_symptoms: List[str],
     exam_notes: str,
     custom_api_key: str = "",
-    context_chunks: Optional[List[Dict[str, Any]]] = None
+    context_chunks: Optional[List[Dict[str, Any]]] = None,
+    patient_block: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Call 3: Combines confirmed/excluded functional symptoms with the doctor's real endoscopy/physical
@@ -523,7 +538,13 @@ def generate_final_diagnosis(
     context_block = _format_context_block(context_chunks)
     confirmed_str = ", ".join(confirmed_symptoms) if confirmed_symptoms else "Không có"
     excluded_str = ", ".join(excluded_symptoms) if excluded_symptoms else "Không có"
-    user_prompt = (
+    # Khối tiền sử ĐÃ khử danh (patient_context) đi LÊN ĐẦU user_prompt, trên cả
+    # câu hỏi lẫn tài liệu tham khảo: "Lost in the Middle" (TACL 2024) đo được
+    # rằng thông tin nằm giữa ngữ cảnh bị bỏ sót nhiều hơn hẳn so với nằm ở đầu,
+    # và điều đó đúng với cả mô hình ngữ cảnh dài. Dị ứng thuốc không được phép
+    # rơi vào khúc giữa.
+    # Rỗng nghĩa là bác sĩ không chọn hồ sơ nào, khi đó prompt y hệt như trước.
+    user_prompt = patient_block + (
         f"confirmed_symptoms: {confirmed_str}\n"
         f"excluded_symptoms: {excluded_str}\n"
         f"endoscopy_and_physical_exam_notes: {exam_notes}\n\n"
@@ -572,7 +593,8 @@ def generate_treatment_suggestion(
     selected_diagnoses: List[Dict[str, Any]],
     exam_notes: str,
     custom_api_key: str = "",
-    context_chunks: Optional[List[Dict[str, Any]]] = None
+    context_chunks: Optional[List[Dict[str, Any]]] = None,
+    patient_block: str = "",
 ) -> Dict[str, Any]:
     """
     Given the diagnoses the doctor picked (out of the Top 10 from Call 3), asks DeepSeek to
@@ -618,7 +640,13 @@ def generate_treatment_suggestion(
         + (f": {d.get('reasoning')}" if d.get('reasoning') else "")
         for d in selected_diagnoses
     ) or "Không có"
-    user_prompt = f"selected_diagnoses:\n{diagnoses_str}\n\nexam_notes: {exam_notes or 'Không có'}\n\n"
+    # Khối tiền sử ĐÃ khử danh (patient_context) đi LÊN ĐẦU user_prompt, trên cả
+    # câu hỏi lẫn tài liệu tham khảo: "Lost in the Middle" (TACL 2024) đo được
+    # rằng thông tin nằm giữa ngữ cảnh bị bỏ sót nhiều hơn hẳn so với nằm ở đầu,
+    # và điều đó đúng với cả mô hình ngữ cảnh dài. Dị ứng thuốc không được phép
+    # rơi vào khúc giữa.
+    # Rỗng nghĩa là bác sĩ không chọn hồ sơ nào, khi đó prompt y hệt như trước.
+    user_prompt = patient_block + f"selected_diagnoses:\n{diagnoses_str}\n\nexam_notes: {exam_notes or 'Không có'}\n\n"
     if context_block:
         user_prompt += f"Tài liệu y khoa tham khảo:\n{context_block}\n\n"
     user_prompt += "Hãy đề xuất phác đồ điều trị ban đầu dạng JSON theo đúng schema."

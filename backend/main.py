@@ -20,6 +20,7 @@ import documents
 import google_login
 import mailer
 import patient_db
+import patient_context
 import profile_db
 import auth_db
 import reminder_db
@@ -2160,16 +2161,33 @@ def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optiona
 
 
 # Diagnosis Tree Pipeline (3-step agent pipeline)
+#
+# Cả bốn bước đều nhận `patient_id` KHÔNG bắt buộc. Có id thì backend tự đọc hồ
+# sơ và tự dựng khối tiền sử đã khử danh; không có thì prompt y hệt như trước,
+# nên đường tra tự do (gõ mô tả, không chọn bệnh nhân) không hề đổi.
+#
+# Khử danh làm ở BACKEND chứ không ở frontend, dù frontend đã có sẵn tên trong
+# tay: để tên bệnh nhân chỉ có đúng MỘT chỗ có thể lọt ra, thay vì bốn chỗ gọi
+# API đều phải nhớ tự cắt tên, mãi mãi.
+#
+# Mỗi endpoint trả lại `patient_context` — đúng chuỗi đã gửi đi — để giao diện
+# hiện nguyên văn cho bác sĩ. Đó cũng là cách tự kiểm: tên bệnh nhân mà lọt vào
+# thì nó hiện ngay trên màn hình, không phải đào nhật ký agent mới thấy.
+
 class GenerateTreeRequest(BaseModel):
     description: str
+    patient_id: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/generate")
 def api_generate_diagnosis_tree(request: GenerateTreeRequest, x_deepseek_key: Optional[str] = Header(None)):
     description = request.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="Mô tả bệnh nhân không được để trống.")
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
     try:
-        return generate_diagnosis_tree(description, x_deepseek_key or "")
+        tree = generate_diagnosis_tree(description, x_deepseek_key or "", patient_block=patient_block)
+        tree["patient_context"] = patient_ctx
+        return tree
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -2178,6 +2196,7 @@ def api_generate_diagnosis_tree(request: GenerateTreeRequest, x_deepseek_key: Op
 class EndoscopyRequest(BaseModel):
     confirmed_symptoms: List[str]
     excluded_symptoms: List[str] = []
+    patient_id: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/endoscopy")
 def api_suggest_endoscopy(request: EndoscopyRequest, x_deepseek_key: Optional[str] = Header(None)):
@@ -2185,8 +2204,11 @@ def api_suggest_endoscopy(request: EndoscopyRequest, x_deepseek_key: Optional[st
     if not confirmed:
         raise HTTPException(status_code=400, detail="Cần ít nhất một triệu chứng đã xác nhận 'Có'.")
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
     try:
-        return suggest_endoscopy_exam(confirmed, excluded, x_deepseek_key or "")
+        result = suggest_endoscopy_exam(confirmed, excluded, x_deepseek_key or "", patient_block=patient_block)
+        result["patient_context"] = patient_ctx
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -2196,6 +2218,7 @@ class FinalDiagnosisRequest(BaseModel):
     confirmed_symptoms: List[str]
     excluded_symptoms: List[str] = []
     exam_notes: str
+    patient_id: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/final")
 def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional[str] = Header(None)):
@@ -2204,9 +2227,11 @@ def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional
         raise HTTPException(status_code=400, detail="Cần nhập kết quả khám lâm sàng & nội soi.")
     confirmed = [s.strip() for s in request.confirmed_symptoms if s.strip()]
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
     try:
-        diagnoses = generate_final_diagnosis(confirmed, excluded, exam_notes, x_deepseek_key or "")
-        return {"diagnoses": diagnoses}
+        diagnoses = generate_final_diagnosis(confirmed, excluded, exam_notes, x_deepseek_key or "",
+                                             patient_block=patient_block)
+        return {"diagnoses": diagnoses, "patient_context": patient_ctx}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -2215,13 +2240,22 @@ def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional
 class TreatmentSuggestionRequest(BaseModel):
     diagnoses: List[Dict[str, Any]]
     exam_notes: Optional[str] = None
+    patient_id: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/treatment")
 def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key: Optional[str] = Header(None)):
     if not request.diagnoses:
         raise HTTPException(status_code=400, detail="Cần ít nhất một chẩn đoán đã chọn.")
+    # Bước này là bước trả về medications[] rồi chảy thẳng vào bệnh án, nên đây
+    # đúng là chỗ dị ứng thuốc bị bỏ sót gây hại nhất. Trước đợt này nó nhận
+    # đúng hai thứ — chẩn đoán và ghi chú khám — và không có đường nào để biết
+    # bệnh nhân dị ứng penicillin.
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
     try:
-        return generate_treatment_suggestion(request.diagnoses, request.exam_notes or "", x_deepseek_key or "")
+        result = generate_treatment_suggestion(request.diagnoses, request.exam_notes or "",
+                                               x_deepseek_key or "", patient_block=patient_block)
+        result["patient_context"] = patient_ctx
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

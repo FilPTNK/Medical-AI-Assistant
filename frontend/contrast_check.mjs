@@ -101,6 +101,12 @@ function ratio(a, b) {
  * ranh giới đồ hoạ (viền ô nhập, vạch mức độ) theo tiêu chí 1.4.11.
  */
 const PAIRS = [
+  // Đợt 3 — panel "AI đã đọc gì từ bệnh án" (tiền sử đã khử danh)
+  ['text-primary', 'bg-sunk', 4.5, 'nhãn mở/gập panel tiền sử'],
+  ['text-muted', 'bg-sunk', 4.5, 'chữ phụ "đã bỏ tên" trên panel tiền sử'],
+  ['text-secondary', 'bg-card', 4.5, 'nội dung tiền sử nguyên văn'],
+  ['text-primary', 'bg-hover', 4.5, 'nhãn panel tiền sử khi rê chuột'],
+  ['border-active', 'bg-sunk', 3, 'vòng tiêu điểm trên panel tiền sử'],
   ['text-primary', 'bg-app', 4.5, 'chữ chính trên nền app'],
   ['text-primary', 'bg-card', 4.5, 'chữ chính trên thẻ'],
   ['text-primary', 'bg-sidebar', 4.5, 'chữ chính trên thanh bên'],
