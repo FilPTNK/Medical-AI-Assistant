@@ -1,0 +1,264 @@
+/* Khối đối chiếu dị ứng ↔ thuốc trên phiếu khám.
+
+   KHÔNG có mã màu viết cứng nào trong tệp này. Mọi màu đều là token đã đo
+   tương phản trong contrast_check.mjs, và mọi cặp mới dùng ở đây đã được thêm
+   vào PAIRS của kịch bản đó.
+
+   Ba mức khớp mang ba nền khác nhau, nhưng KHÔNG chỉ khác nhau ở màu: mỗi mức
+   còn có biểu tượng riêng, chữ nhãn riêng, và vạch dày bên trái. In đen trắng
+   hoặc với người mù màu thì thứ bậc vẫn đọc ra được. */
+
+.ac-panel {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--pp-neutral-icon);
+  border-radius: 6px;
+  padding: 11px 13px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+}
+
+/* Mức nặng nhất trong khối quyết định màu viền trái của cả khối, để nhìn lướt
+   qua là biết có cần dừng lại hay không. */
+.ac-panel.hit.exact,
+.ac-panel.hit.group {
+  border-color: var(--pp-red-border);
+  border-left-color: var(--pp-red-icon);
+  background: var(--pp-red-bg);
+}
+.ac-panel.hit.cross {
+  border-color: var(--pp-orange-border);
+  border-left-color: var(--pp-orange-icon);
+  background: var(--pp-orange-bg);
+}
+.ac-panel.unknown {
+  border-color: var(--pp-neutral-border);
+  border-left-color: var(--pp-neutral-icon);
+  background: var(--pp-neutral-bg);
+}
+/* "Không khớp gì" CỐ Ý trung tính chứ không xanh lá. Xanh lá đọc ra là "đã
+   kiểm, an toàn" — mà đó đúng là điều khối này không được phép nói. */
+.ac-panel.clear {
+  border-color: var(--border-soft);
+  border-left-color: var(--pp-neutral-icon);
+  background: var(--bg-sunk);
+}
+
+/* ---- đầu khối ---- */
+
+.ac-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ac-head-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.ac-panel.hit.exact .ac-head-title,
+.ac-panel.hit.group .ac-head-title { color: var(--pp-red-text-strong); }
+
+.ac-head-icon { flex-shrink: 0; }
+.ac-panel.hit.exact .ac-head-icon,
+.ac-panel.hit.group .ac-head-icon { color: var(--pp-red-icon); }
+.ac-panel.hit.cross .ac-head-icon { color: var(--pp-orange-icon); }
+.ac-panel.unknown .ac-head-icon,
+.ac-panel.clear .ac-head-icon { color: var(--pp-neutral-icon); }
+
+.ac-head-sub {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* Chữ NGUYÊN VĂN lấy từ bệnh án. Dùng dạng chữ khác hẳn để bác sĩ phân biệt
+   được đâu là chữ mình đã gõ và đâu là lời của máy. */
+.ac-quote {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+  quotes: '“' '”';
+}
+
+/* --text-muted CỐ Ý không dùng ở đây, dù đây đúng là chỗ "chữ mờ" hợp lý.
+   Đo được: text-muted trên nền đỏ nhạt chỉ đạt 4,14:1 và trên nền cam nhạt
+   4,10:1 — cả hai dưới ngưỡng 4,5:1. Nền tinh sáng hơn nền thẻ nên mọi màu
+   chữ nhạt đều tụt qua ngưỡng ở đúng chỗ này. text-secondary vẫn nhẹ hơn
+   text-primary mà đạt 6,7:1. */
+.ac-dim { color: var(--text-secondary); }
+
+/* ---- danh sách thuốc khớp ---- */
+
+.ac-hits {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ac-hit {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border-left: 3px solid var(--pp-neutral-icon);
+  background: var(--bg-card);
+}
+
+.ac-hit.exact,
+.ac-hit.group { border-left-color: var(--pp-red-icon); }
+.ac-hit.cross { border-left-color: var(--pp-orange-icon); }
+
+/* Chữ nhãn mức — kênh thứ hai sau biểu tượng, và là kênh không phụ thuộc màu.
+   Viết hoa, giãn chữ, cỡ nhỏ: đọc ra ngay mà không tranh chỗ với tên thuốc. */
+.ac-hit-tier {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 124px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  padding-top: 1px;
+}
+
+.ac-hit.exact .ac-hit-tier,
+.ac-hit.group .ac-hit-tier { color: var(--pp-red-text); }
+.ac-hit.cross .ac-hit-tier { color: var(--pp-orange-icon); }
+
+.ac-hit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ac-hit-drug {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.ac-hit-why {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Tỉ lệ đo được là thứ phân biệt "chéo nhóm 16,5%" với "chéo nhóm 2,1%".
+   Không có nó thì hai dòng trông y hệt nhau và bác sĩ mất đúng thông tin
+   khiến hai trường hợp này phải xử khác nhau. */
+.ac-hit-rate {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ac-hit-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.ac-hit-src {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- câu nhắc rằng đây không phải chống chỉ định ---- */
+
+.ac-caveat {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ---- phần gập: phạm vi, và những liên kết đã xét mà không báo ---- */
+
+.ac-pv { margin-top: 9px; }
+
+.ac-pv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px 4px 2px;
+  min-height: 26px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ac-pv-toggle:hover { color: var(--text-primary); }
+.ac-pv-toggle:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: 1px;
+}
+
+.ac-pv-body {
+  padding: 4px 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ac-pv-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.ac-pv-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* Chỉ cho trình đọc màn hình: thứ tự nghiêm trọng nói thành lời, vì biểu tượng
+   và màu đều không tới được người dùng trình đọc. */
+.ac-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 620px) {
+  .ac-hit { flex-direction: column; gap: 4px; }
+  .ac-hit-tier { min-width: 0; }
+}

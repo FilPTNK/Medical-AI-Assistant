@@ -28,6 +28,7 @@ import RemindersView from './components/RemindersView';
 import ExportPdfDialog from './components/ExportPdfDialog';
 import ClinicAdminDialog, { ChangePasswordDialog } from './components/ClinicAdmin';
 import DiagnosisTreeView from './components/DiagnosisTreeView';
+import AllergyCheckPanel from './components/AllergyCheckPanel';
 import { apiSend, apiDownload } from './lib/apiClient';
 import {
   Activity,
@@ -688,6 +689,7 @@ export default function App() {
   // cho bác sĩ. Không tự dựng lại ở frontend: dựng lại là có phiên bản thứ hai,
   // và phiên bản thứ hai thì không chứng minh được điều gì về cái đã gửi thật.
   const [patientContextSent, setPatientContextSent] = useState(null);
+  const [allergyCheck, setAllergyCheck] = useState(null);
   // Gập sẵn. Y văn về mệt mỏi cảnh báo và về giải thích dài bị bỏ qua đều
   // chống lại một panel luôn mở: tỉ lệ bỏ qua cảnh báo CDSS đo được 46,2–96,2%.
   const [patientContextOpen, setPatientContextOpen] = useState(false);
@@ -2938,6 +2940,10 @@ export default function App() {
       if (res.ok) {
         treatment = await res.json();
         if (treatment.patient_context) setPatientContextSent(treatment.patient_context);
+        // Gán thẳng, kể cả khi null. Backend trả khối này cả khi KHÔNG có khớp
+        // nào, vì "đã đối chiếu và không thấy gì" khác hẳn "chưa đối chiếu" —
+        // và khối trên phiếu khám phải nói được cả hai trạng thái.
+        setAllergyCheck(treatment.allergy_check || null);
       }
     } catch (err) {
       console.error("Error generating treatment suggestion:", err);
@@ -6494,6 +6500,18 @@ export default function App() {
                       {/* 3. Đơn thuốc */}
                       <div className="pp-modal-section">
                         <div className="pp-modal-section-title"><span className="pp-section-badge">3</span> Đơn thuốc</div>
+
+                        {/* Khối đối chiếu dị ứng đứng TRÊN danh sách thuốc, không
+                            phải dưới: nó phải nằm trên đường mắt đi từ tiêu đề
+                            xuống đơn thuốc rồi tới nút Lưu. Đặt dưới danh sách là
+                            đặt sau chỗ bác sĩ đã quyết xong.
+
+                            KHÔNG dùng hộp thoại chặn. Rào chặn cứng trong y văn
+                            chỉ đặt cho khớp đúng hoạt chất KÈM phản ứng nặng đã
+                            ghi, và kết quả của nó vẫn đang chờ đo; thí nghiệm
+                            2025 còn không lặp lại được kết quả 2021 về ma sát
+                            chủ ý. Nên chỗ này chỉ chắn tầm mắt, không chặn tay. */}
+                        <AllergyCheckPanel check={allergyCheck} />
 
                         <div className="pp-visit-med-block">
                           <div className="pp-visit-med-header">

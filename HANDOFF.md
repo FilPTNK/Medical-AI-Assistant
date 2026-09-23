@@ -1,14 +1,14 @@
 # Bàn giao — Antigravity Medical Assistant
 
-Cập nhật: 2026-09-12 (đợt giao diện). Nhánh: `fix/retrieval-and-stability`.
+Cập nhật: 2026-09-23 (đợt 5 — đối chiếu dị ứng). Nhánh: `fix/retrieval-and-stability`.
 Toàn bộ số liệu dưới đây là **đo được**, không phải ước lượng, trừ chỗ ghi rõ.
 
 Đợt 2026-09-12 làm **giao diện** (mục 2b). Đợt 2026-09-05 làm **#4, #5, #2**
 và ý tưởng "cân RRF" của bàn giao trước.
 
-Kế hoạch bốn đợt đã chốt với bác sĩ sau năm vòng phỏng vấn:
-**1 giao diện (xong) → 2 không bao giờ treo → 3 tiền sử vào chẩn đoán →
-4 trình xem tài liệu.**
+Kế hoạch bốn đợt đã chốt với bác sĩ sau năm vòng phỏng vấn — **đã xong cả bốn**:
+1 giao diện → 2 không bao giờ treo → 3 tiền sử vào chẩn đoán → 4 trình xem tài liệu.
+Đợt 5 (đối chiếu dị ứng ↔ thuốc) trước ghi là "hoãn có chủ đích", nay đã làm.
 
 ---
 
@@ -150,6 +150,175 @@ nạp mô hình nên mọi request đều treo. Nay đợi một **phản hồi 
   cùng họ.
 - **Bộ ảnh chụp "sau" chưa đủ.** Chrome treo vì máy hết RAM (xem mục 6b) nên
   chỉ chụp được tab Bệnh nhân chế độ sáng. Ảnh "trước" thì đủ cả 6.
+
+---
+
+## 2c. Đối chiếu dị ứng ↔ thuốc — đợt 2026-09-23
+
+Đây là mục "Đợt 5" mà bàn giao trước ghi là hoãn có chủ đích. Lý do hoãn vẫn
+đúng — *"làm nửa vời mà sót chéo nhóm thì nguy hơn không làm, vì trông như đã
+có lưới"* — nên đợt này bắt đầu bằng việc đọc y văn để biết cái lưới đó phải
+có hình gì.
+
+### Cách kiểm chứng
+
+```
+python eval/allergy_run.py           # 46 phép kiểm, thoát 1 nếu hỏng
+python eval/allergy_run.py --sweep   # thêm 9 phép quét cả 3.816 tên
+node frontend/contrast_check.mjs     # nay 85 cặp x 2 chế độ
+cd frontend && npm run build
+```
+
+**55/55 đạt.** `backend/drug_allergy.py` không import gì ngoài `text_fold`, nên
+bộ kiểm chạy được cả khi máy chưa cài thư viện backend.
+
+### Không dùng ATC, dù kho có sẵn 329 mã
+
+Ý đầu tiên là gom nhóm dị ứng theo `atc_code`. **Sai.** First Databank nói
+thẳng rằng họ "định nghĩa nhóm dị ứng THẬT và KHÔNG dùng lại nhóm điều trị":
+ATC xếp theo cơ quan đích, dị ứng đi theo cấu trúc hoá học. Trong chính kho
+này, ASPIRIN mang `A01AD05` còn DICLOFENAC mang `M01AB05` — cùng một cơ chế dị
+ứng chéo, hai nhánh ATC khác nhau từ chữ cái đầu. Đo thêm (Goss, MedInfo 2015):
+nhánh "cơ chế tác dụng" của NDF-RT cho NPV 56,8%, tức bỏ sót một nửa.
+
+Nên bảng nhóm là **tự soạn**: 10 nhóm có số đo + 3 nhóm chỉ khớp theo tên,
+205 cụm, 5 liên kết chéo — mỗi liên kết kèm tỉ lệ và nguồn.
+
+### Bốn mức, và vì sao không được gộp
+
+| mức | nghĩa | ví dụ |
+|---|---|---|
+| `exact` | trùng đúng hoạt chất | ghi "amoxicilin", kê Amoxicillin |
+| `group` | cùng nhóm dị ứng | ghi "penicilin", kê Amoxicillin |
+| `cross` | chéo giữa hai nhóm, **kèm tỉ lệ** | ghi "penicilin", kê Cefalexin |
+| `chua_kiem` | ô trống / "không rõ" / không đọc ra | — |
+
+Đo được (JAMIA Open 2026, 101.492 cảnh báo): chỉ **9,7%** là khớp đúng hoạt
+chất, **90,3%** là khớp nhóm hoặc chéo, và **98,9%** bị bỏ qua. Nhưng soi lại
+bệnh án thì **94–96,5%** lần bỏ qua đó **đúng về lâm sàng** (BMJ Qual Saf 2016)
+— lỗi nằm ở chỗ cảnh báo nổ, không nằm ở bác sĩ. Gộp bốn mức thành một chữ
+"cảnh báo" đỏ là cách chắc chắn nhất để biến lưới an toàn thành tiếng ồn.
+
+Cụ thể, hai dòng sau **không được** trông giống nhau:
+
+- penicilin → Cefalexin: **16,5%** (KTC 11,1–23,8) — chung chuỗi bên R1
+- penicilin → Ceftriaxon: **2,1%** (KTC 1,0–4,5) — chuỗi R1 khác hẳn
+
+Con số "10% dị ứng chéo penicilin–cephalosporin" là **sai và đã bị thay**: nó
+vốn là 8% trên tờ hướng dẫn của FDA, cao giả vì cephalosporin trước 1980 bị
+lẫn penicilin.
+
+### Những liên kết CỐ Ý không có trong bảng
+
+- **sulfonamid kháng khuẩn ↔ furosemid / thiazid / celecoxib / sulfonylurea /
+  acetazolamid**: Strom, NEJM 2003, 19.257 người — **không** chéo.
+- **sulfonamid ↔ muối sulfat, sulfit, lưu huỳnh**: chỉ trùng vần.
+- **aspirin ↔ celecoxib**: ức chế COX-2 chọn lọc, đa số vẫn dùng được.
+- **penicilin ↔ aztreonam**: không chéo (trừ ceftazidim, chung chuỗi R1).
+- **macrolid, quinolon, thuốc tê**: khớp đúng tên thì báo, nhưng **không**
+  dựng khớp chéo — y văn 2022 ghi rõ là chưa đo được. Cách chia thuốc tê
+  ester/amid là bài giảng kinh điển, không có trong tài liệu tham số.
+
+Bốn nhóm đầu hiện trên giao diện ở mục gập **"Đã xét và KHÔNG báo"** — im lặng
+thì bác sĩ tưởng máy bỏ sót.
+
+### So khớp theo token, không theo chuỗi con — đo trên chính kho này
+
+Chuỗi con sinh ra dương tính giả thật, không phải giả định:
+
+| dò chuỗi con | trúng nhầm |
+|---|---|
+| `amoxi` | AMOXICILIN **và TAMOXIFEN** |
+| `sulfa` | 27 tên, gồm **BUSULFAN, ITROSULFAN, ATROPIN SULFAT** |
+| `cef` | 38 tên, gồm cả `CEF-3` (tên biệt dược) |
+
+Nên mọi so khớp là **token nguyên vẹn**. Quét cả kho sau khi sửa:
+
+| ô dị ứng | khớp / 3.816 |
+|---|---|
+| "Dị ứng penicillin" | 67 (1,8%) |
+| "Dị ứng cephalosporin" | 32 (0,8%) |
+| "Dị ứng sulfamid" | 22 (0,6%) |
+| "Dị ứng aspirin" | 21 (0,6%) |
+| "Dị ứng morphin" | 7 (0,2%) |
+
+> Phép thử `--sweep` bản đầu tự mắc đúng cái lỗi nó đi bắt: nó dò chuỗi con
+> `"SULFAT" in name` nên chấm **SULFATHIOUREA** là dương tính giả, trong khi
+> đó là một sulfonamid kháng khuẩn thật và phải khớp. Nay nó xét `sulfat` có
+> đứng riêng thành một từ hay không.
+
+### Chính tả một `l` hay hai `l` — gộp bằng phép biến đổi
+
+Dược thư viết `AMOXICILIN`, cuốn Biệt dược viết `AMPICILLIN`. Liệt kê tay cả
+hai lối cho từng tên là thứ chắc chắn sẽ sót. Nên `_squeeze()` bóp mọi ký tự
+lặp liền nhau về một. Đo trên 3.816 tên: **đúng 6 va chạm, cả sáu đều là hai
+lối viết của CÙNG một thuốc** (allopurinol/alopurinol, attapulgit/atapulgit,
+cinnarizin/cinarizin, ampicilin/ampicillin). Không cặp nào trộn hai thuốc khác
+nhau.
+
+### Ô trống KHÁC ô ghi "không có"
+
+`App.jsx` có `NO_DATA_PHRASES` gộp cả hai, và với việc **tô màu thẻ** thì gộp
+như vậy đúng. Với việc **đối chiếu** thì sai, và sai nguy hiểm: "Không có"
+nghĩa là đã hỏi và không dị ứng; ô trống và "không rõ" nghĩa là **chưa ai hỏi**.
+Coi cái sau là đã kiểm sạch đúng là lớp hỏng y văn cảnh báo — bác sĩ thấy máy
+im thì tưởng đã có lưới. Nên ô trống → `chua_kiem`, hiện thành khối riêng,
+trông khác hẳn "đã đối chiếu và không thấy gì".
+
+Trong `patients.db` hiện có 3 bệnh nhân: một ghi `"Không có"`, hai bỏ trống —
+tức **hai trong ba** sẽ hiện khối "chưa đối chiếu được".
+
+### Công cụ không được nhận nhiều hơn nó làm được
+
+`ket_luan` chỉ nhận ba giá trị, và cả ba nói về **phép đo** chứ không nói về
+bệnh nhân: `co_khop`, `khong_thay_khop`, `chua_kiem`. **Không bao giờ có
+"không có xung đột"** — bộ phân tích dị ứng chữ tự do tốt nhất đã công bố đạt
+độ nhạy 75,73%, và đó là tiếng Anh; chưa ai đo cho tiếng Việt. Có phép thử
+riêng chặn các chữ "an toàn", "không có xung đột", "đã kiểm hết".
+
+`PHAM_VI` công bố thẳng chỗ công cụ không với tới — ONC HTI-1 bắt buộc thuộc
+tính *"cautioned out-of-scope use"* bằng lời thường.
+
+Khối cảnh báo còn nói rõ đây là **gợi ý xem lại, không phải chống chỉ định**:
+hơn 90% người mang nhãn dị ứng penicilin dung nạp được khi test, và tránh
+kháng sinh quá tay có hại đo được (HR 1,69 với MRSA, 1,26 với C. difficile
+trên 301.399 người).
+
+### Giao diện: không có hộp thoại chặn
+
+Rào chặn cứng trong y văn chỉ đặt cho khớp **đúng hoạt chất kèm phản ứng nặng
+đã ghi**, và kết quả của nó **vẫn đang chờ đo**. Thêm nữa, thí nghiệm 2025
+(n=281 và n=373) **không lặp lại được** kết quả Buçinca 2021 về "cognitive
+forcing function": cả ba kiểu ma sát chủ ý đều không giảm được thiên lệch. Nên
+khối chỉ **chắn tầm mắt**, đặt TRÊN danh sách thuốc — trên đường mắt đi từ
+tiêu đề xuống đơn thuốc rồi tới nút Lưu — chứ không chặn tay.
+
+Mỗi mức mang **bốn kênh**: biểu tượng, chữ nhãn viết hoa, vạch dày bên trái,
+và màu. Bỏ màu đi vẫn đọc ra thứ bậc (WCAG 1.4.1).
+
+> Khối "không khớp gì" **cố ý trung tính chứ không xanh lá**. Xanh lá đọc ra là
+> "đã kiểm, an toàn" — đúng thứ khối này không được phép nói.
+
+`contrast_check.mjs` bắt được một lỗi thật trong đợt này: `--text-muted` trên
+nền tinh chỉ đạt **4,14:1** (đỏ nhạt) và **4,10:1** (cam nhạt), đều dưới 4,5.
+Nền tinh sáng hơn nền thẻ nên chữ nhạt tụt qua ngưỡng ở đúng chỗ đó. Khối dùng
+`--text-secondary` (6,7:1).
+
+### Chưa làm
+
+- **Chỉ gắn vào `/api/diagnosis-tree/treatment`.** Đường `ai-diagnosis` và
+  agent ReAct chưa có đối chiếu. Cùng hàm `_doi_chieu_di_ung()` dùng lại được.
+- **Chưa đối chiếu khi bác sĩ tự gõ thêm thuốc** trong phiếu khám — hiện chỉ
+  đối chiếu danh sách do mô hình gợi ý.
+- **Tên biệt dược không đối chiếu được.** Bảng chỉ chứa tên gốc. Trong 38 tên
+  bắt đầu bằng `cef` của kho, 3 là tên biệt dược (`CEF-3`, `CEFACET`,
+  `CEFOBAC`) nên không nằm trong bảng.
+- **Chưa ghi lại lý do bác sĩ bỏ qua cảnh báo.** Y văn khuyến nghị thu lý do
+  có mã và chuyển tiếp cho dược sĩ.
+- **Backend không chạy được trên máy này lúc viết mã**: `python` hệ thống chưa
+  cài `dotenv`/`fastapi`/`chromadb`, nên `eval/deid_run.py` và endpoint thật
+  chưa chạy lại được sau thay đổi. `python run.py --reinstall` là cách cài.
+  Phần đối chiếu đã kiểm đầy đủ vì nó không phụ thuộc thư viện nào.
 
 ---
 
@@ -332,6 +501,7 @@ chưa dùng tới.
 
 ### Nhỏ hơn
 
+- Gắn đối chiếu dị ứng vào đường `ai-diagnosis` và agent ReAct (xem mục 2c).
 - Hiện cờ `name_suspect` trên giao diện (thêm trường vào `SearchResultItem`).
 - Chất lượng OCR trong **nội dung** (không phải tên): "Giảm dau", "Ha nhiệt",
   "Thdn trong". Một mẫu dò thận trọng bắt được 3,9% chunk, **soi tay cho thấy tỉ

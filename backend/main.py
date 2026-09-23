@@ -21,6 +21,7 @@ import google_login
 import mailer
 import patient_db
 import patient_context
+import drug_allergy
 import text_fold
 import doc_index
 import profile_db
@@ -2176,6 +2177,23 @@ def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optiona
 # hiện nguyên văn cho bác sĩ. Đó cũng là cách tự kiểm: tên bệnh nhân mà lọt vào
 # thì nó hiện ngay trên màn hình, không phải đào nhật ký agent mới thấy.
 
+def _doi_chieu_di_ung(patient_id: Optional[str],
+                      medications: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """Đối chiếu ô dị ứng của bệnh nhân với danh sách thuốc vừa gợi ý.
+
+    Trả None khi bác sĩ không chọn hồ sơ nào — không có bệnh án thì không có gì
+    để đối chiếu, và một khối "chưa kiểm" ở đường tra tự do chỉ là tiếng ồn.
+    Có hồ sơ mà ô dị ứng bỏ trống thì KHÔNG trả None: đó chính là trạng thái
+    "chưa kiểm" cần phải hiện ra.
+    """
+    if not patient_id:
+        return None
+    patient = patient_db.get_patient(patient_id)
+    if not patient:
+        return None
+    return drug_allergy.kiem_tra(patient.get("allergies"), medications)
+
+
 class GenerateTreeRequest(BaseModel):
     description: str
     patient_id: Optional[str] = None
@@ -2257,6 +2275,17 @@ def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key
         result = generate_treatment_suggestion(request.diagnoses, request.exam_notes or "",
                                                x_deepseek_key or "", patient_block=patient_block)
         result["patient_context"] = patient_ctx
+        # Đối chiếu dị ứng chạy SAU mô hình và ĐỘC LẬP với nó: mô hình đã được
+        # nhắc tránh thuốc chống chỉ định, nhưng lời nhắc là lời khuyên chứ
+        # không phải ràng buộc — đo được là mô hình bỏ qua tool 11,8-20,6% số
+        # lần ngay cả khi tác vụ bắt buộc phải gọi. Lớp này là mã tất định nên
+        # nó không phụ thuộc vào việc mô hình có chịu nghe hay không.
+        #
+        # Chạy ở backend vì ô dị ứng nằm trong bệnh án, và bệnh án không rời
+        # khỏi máy. Kết quả trả ra chỉ chứa chữ trong ô dị ứng và tên thuốc —
+        # không có tên người bệnh, không có mã hồ sơ.
+        result["allergy_check"] = _doi_chieu_di_ung(request.patient_id,
+                                                    result.get("medications"))
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

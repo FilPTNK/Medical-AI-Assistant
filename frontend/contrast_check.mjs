@@ -169,6 +169,34 @@ const PAIRS = [
   ['node-med-text', 'node-med-bg', 4.5, 'nút cây chẩn đoán — vừa'],
   ['node-low-text', 'node-low-bg', 4.5, 'nút cây chẩn đoán — thấp'],
   ['node-root-text', 'node-root-bg', 4.5, 'nút cây chẩn đoán — gốc'],
+
+  // Đợt 5 — khối đối chiếu dị ứng trên phiếu khám.
+  // Khối tự tô nền theo mức khớp, nên chữ nằm trên nền TINH chứ không phải
+  // nền thẻ. Đó đúng là chỗ đợt giao diện trước đã bắt được lỗi: một màu chữ
+  // đạt trên nền thẻ vẫn có thể tụt xuống dưới ngưỡng trên nền có sắc độ.
+  ['pp-red-text-strong', 'pp-red-bg', 4.5, 'tiêu đề khối dị ứng mức trùng hoạt chất'],
+  ['text-secondary', 'pp-red-bg', 4.5, 'dòng "bệnh án ghi:" trên nền đỏ nhạt'],
+  ['text-primary', 'pp-red-bg', 4.5, 'chữ nguyên văn ô dị ứng trên nền đỏ nhạt'],
+  // KHÔNG có cặp text-muted trên nền tinh. Đã thử và đo: 4,14:1 trên nền đỏ
+  // nhạt, 4,10:1 trên nền cam nhạt — cả hai trượt. Nền tinh sáng hơn nền thẻ
+  // nên chữ nhạt tụt qua ngưỡng ở đúng chỗ này; khối dùng text-secondary.
+  ['text-primary', 'pp-orange-bg', 4.5, 'tiêu đề khối dị ứng mức chéo nhóm'],
+  ['text-secondary', 'pp-orange-bg', 4.5, 'dòng "bệnh án ghi:" trên nền cam nhạt'],
+  ['text-primary', 'pp-neutral-bg', 4.5, 'tiêu đề khối "chưa đối chiếu được"'],
+  ['text-secondary', 'pp-neutral-bg', 4.5, 'lời giải thích khối "chưa đối chiếu được"'],
+  ['pp-neutral-icon', 'pp-neutral-bg', 4.5, 'biểu tượng khối "chưa đối chiếu được"'],
+  ['text-muted', 'bg-sunk', 4.5, 'chữ mờ khối "không khớp gì trong phần đọc được"'],
+  // Dòng từng thuốc tự tô nền bg-card ĐÈ LÊN nền tinh của khối, nên nhãn mức
+  // phải đo trên bg-card chứ không phải trên nền khối.
+  ['pp-red-text', 'bg-card', 4.5, 'nhãn "TRÙNG HOẠT CHẤT" / "CÙNG NHÓM"'],
+  ['pp-orange-icon', 'bg-card', 4.5, 'nhãn "CHÉO NHÓM" trên dòng thuốc'],
+  ['text-primary', 'bg-card', 4.5, 'tên thuốc và tỉ lệ chéo đo được'],
+  ['text-secondary', 'bg-card', 4.5, 'lý do khớp trên dòng thuốc'],
+  ['text-muted', 'bg-card', 4.5, 'nguồn y văn trên dòng thuốc'],
+  // Vòng tiêu điểm của nút gập nằm trên nền tinh của khối.
+  ['border-active', 'pp-red-bg', 3.0, 'vòng tiêu điểm nút gập trên nền đỏ nhạt'],
+  ['border-active', 'pp-orange-bg', 3.0, 'vòng tiêu điểm nút gập trên nền cam nhạt'],
+  ['border-active', 'pp-neutral-bg', 3.0, 'vòng tiêu điểm nút gập trên nền trung tính'],
 ];
 
 let failed = 0;
