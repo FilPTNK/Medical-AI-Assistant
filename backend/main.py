@@ -1775,6 +1775,38 @@ def _invalidate_book_metadata() -> None:
     _book_metadata_cache = None
 
 
+# Thứ tự mục khi bác sĩ gõ đúng tên một thuốc: cái cần đọc trước đứng trước.
+_SECTION_ORDER = ["INDICATIONS", "DOSAGE", "CONTRAINDICATION", "WARNINGS", "ADR",
+                  "INTERACTION", "PREGNANCY", "LACTATION", "OVERDOSE", "DOSAGE_FORM"]
+# Nối mảnh tới khoảng chừng này ký tự mỗi mục: đủ một mục liều điển hình, mà
+# sáu mục cộng lại không phình prompt báo cáo thuốc quá vài nghìn token.
+_SECTION_MAX_CHARS = 3000
+
+
+def _group_sections(matches: List[tuple]) -> List[tuple]:
+    """Một nguồn cho mỗi mục của mỗi chuyên luận khớp tên.
+
+    Chunk trong tệp nằm theo thứ tự trang, nên lấy N chunk đầu của một chuyên
+    luận là lấy "Dạng thuốc" cùng bốn mảnh liền nhau của "Dược lực học" — năm
+    thẻ cùng một trang, và báo cáo không có phần liều hay chống chỉ định nào.
+    Các mảnh liền nhau của cùng mục được nối lại thành một nguồn (giữ trang của
+    mảnh đầu), rồi xếp mục theo _SECTION_ORDER.
+    """
+    groups: Dict[tuple, Dict[str, Any]] = {}
+    for pos, (score, entry) in enumerate(matches):
+        key = (entry.get("_doc_name"), (entry.get("generic_name") or "").lower(),
+               entry.get("field_type") or entry.get("field_name"))
+        g = groups.get(key)
+        if g is None:
+            groups[key] = {"score": score, "pos": pos, "entry": dict(entry)}
+        elif len(g["entry"].get("content") or "") < _SECTION_MAX_CHARS:
+            g["entry"]["content"] = (g["entry"].get("content") or "") + "\n" + (entry.get("content") or "")
+    rank = {s: i for i, s in enumerate(_SECTION_ORDER)}
+    ordered = sorted(groups.values(), key=lambda g: (
+        -g["score"], rank.get(g["entry"].get("field_type"), len(rank)), g["pos"]))
+    return [(g["score"], g["entry"]) for g in ordered]
+
+
 def search_drug_book(query: str, top_k: int = 6, exclude_doc_names: Optional[set] = None) -> List[Dict[str, Any]]:
     excluded = set(exclude_doc_names or ())
     meta_entries = [e for e in get_book_metadata() if e.get("_doc_name") not in excluded]
@@ -1809,7 +1841,7 @@ def search_drug_book(query: str, top_k: int = 6, exclude_doc_names: Optional[set
             elif score >= 0.5:
                 content_matches.append((score, entry))
                 
-    exact_matches.sort(key=lambda x: x[0], reverse=True)
+    exact_matches = _group_sections(exact_matches)
     content_matches.sort(key=lambda x: x[0], reverse=True)
     
     # 2. Vector DB search as fallback / supplemental

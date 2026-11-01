@@ -3159,7 +3159,7 @@ export default function App() {
                             <h4 className="drug-resource-doc-name" title={sourceCitation(src)}>
                               {sourceTitle(src)}
                             </h4>
-                            <span className="drug-resource-meta">{src.file_size || 'PDF'}</span>
+                            <span className="drug-resource-meta">{src.field_name || src.file_size || 'PDF'}</span>
                           </div>
                           <div className="drug-resource-page-badge">
                             {src.page_num || `Trang ${idx + 1}`}

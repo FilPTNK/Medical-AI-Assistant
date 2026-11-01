@@ -1140,7 +1140,17 @@ class VectorDB:
         # Under Parent-Child Indexing, the RAG assistant returns the PARENT_TEXT (richer context)
         # as the primary text, but keeps details of the document and page.
         results = []
-        chosen = candidates[:top_k]
+        # Bỏ đoạn trùng chữ y hệt một đoạn đã chọn: sách in lặp một đoạn ở hai
+        # trang (vd. "Chống chỉ định" của paracetamol tr. 1273 và 1274), lấy cả
+        # hai thì mất một chỗ trong năm nguồn mà bác sĩ đọc hai lần cùng một ý.
+        chosen, seen_text = [], set()
+        for c in candidates:
+            if len(chosen) >= top_k:
+                break
+            if c["parent_text"] in seen_text:
+                continue
+            seen_text.add(c["parent_text"])
+            chosen.append(c)
 
         # E. Bảng kiểm điều kiện: mỗi cặp (thuốc, điều kiện) phải có đoạn bằng
         # chứng trong danh sách nguồn; đoạn nào chưa có thì chèn thêm vào cuối.

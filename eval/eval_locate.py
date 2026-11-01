@@ -35,6 +35,7 @@ import page_locate   # noqa: E402
 import query_plan    # noqa: E402
 import text_fold     # noqa: E402
 import vector_store  # noqa: E402
+import vi_syllable   # noqa: E402
 
 SEED = 11
 
@@ -66,8 +67,9 @@ def main():
 
     db = vector_store.VectorStore(args.persist_dir or config.VECTOR_DB_DIR)
     texts, metas, _ids, _ = db._get_corpus_and_bm25()
-    by_page = {}
+    by_page, page_text = {}, {}
     for t, m in zip(texts, metas):
+        page_text.setdefault((m.get("doc_name"), int(m.get("pdf_page") or 0)), []).append(t)
         if str(m.get("doc_name", "")).startswith("DTQG") and m.get("field_type") == "DOSAGE":
             by_page.setdefault((m["doc_name"], int(m.get("pdf_page") or 0)), []).append(t)
     pages = sorted(k for k in by_page if k[1] > 0)
@@ -83,19 +85,57 @@ def main():
         for chunk in by_page[(doc, pdf_page)]:
             for s in query_plan.sentences(query_plan.body_of(chunk)):
                 if numbers(s) and len(s) <= 320:
-                    cases.append((words, s))
+                    cases.append((words, s, (doc, pdf_page)))
         print(f"\r  OCR {n}/{len(pages)} trang, {len(cases)} câu", end="", flush=True)
     print()
 
     for label, on in (("chỉ chữ (cũ)", False), ("neo bằng số", True)):
         page_locate.ANCHOR_NUMBERS = on
         tally = {"ok": 0, "wrong": 0, "miss": 0}
-        for words, s in cases:
-            tally[judge(words, s, page_locate.locate(words, s))] += 1
+        per_page = {}
+        for words, s, key in cases:
+            verdict = judge(words, s, page_locate.locate(words, s))
+            tally[verdict] += 1
+            per_page.setdefault(key, []).append(verdict == "ok")
         n = max(1, len(cases))
         print(f"  {label:<14} neo đúng số {tally['ok'] / n:6.1%}   tô lệch {tally['wrong'] / n:6.1%}   "
               f"không tô {tally['miss'] / n:6.1%}   ({len(cases)} câu)")
     page_locate.ANCHOR_NUMBERS = True
+    quality_report(per_page, page_text)
+
+
+def _ranks(x):
+    order = sorted(range(len(x)), key=lambda i: x[i])
+    r = [0.0] * len(x)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and x[order[j + 1]] == x[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            r[order[k]] = (i + j) / 2
+        i = j + 1
+    return r
+
+
+def quality_report(per_page, page_text):
+    """Điểm âm tiết của trang (vi_syllable, tính trên chữ OCR đã lập chỉ mục) có
+    dự báo được trang nào tô câu hỏng không."""
+    keys = [k for k in per_page if k in page_text]
+    rate = [vi_syllable.page_score(" ".join(page_text[k]))["invalid_rate"] for k in keys]
+    ok = [sum(per_page[k]) / len(per_page[k]) for k in keys]
+    ra, rb = _ranks(rate), _ranks(ok)
+    n = len(keys)
+    ma, mb = sum(ra) / n, sum(rb) / n
+    cov = sum((a - ma) * (b - mb) for a, b in zip(ra, rb))
+    sd = (sum((a - ma) ** 2 for a in ra) * sum((b - mb) ** 2 for b in rb)) ** 0.5
+    rho = cov / sd if sd else 0.0
+    cut = sorted(rate)[n // 2]
+    hi = [o for r, o in zip(rate, ok) if r > cut]
+    lo = [o for r, o in zip(rate, ok) if r <= cut]
+    print(f"  điểm âm tiết ↔ tô đúng theo trang: Spearman ρ = {rho:+.2f} ({n} trang)")
+    print(f"     nửa trang âm tiết tốt: tô đúng {sum(lo) / max(1, len(lo)):6.1%} ({len(lo)} trang)   "
+          f"nửa xấu: {sum(hi) / max(1, len(hi)):6.1%} ({len(hi)} trang)")
 
 
 if __name__ == "__main__":
