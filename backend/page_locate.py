@@ -216,6 +216,11 @@ def locate(words: List[Dict[str, Any]], quote: str) -> Dict[str, Any]:
         need = MIN_MATCHED
     if len(best) < need:
         return {"rects": [], "confidence": 0.0, "matched": len(best)}
+    # Câu liều mà vùng tô thiếu quá nửa con số của nó là tô nhầm sang câu khác
+    # có chữ giống ("suy thận … 30 ml/phút" thay cho bảng 10–30 ml/phút, 500 mg…).
+    # Tô sai tệ hơn không tô. Chỉ đòi một nửa vì câu có thể tràn sang trang sau.
+    if ANCHOR_NUMBERS and len(quote_nums) >= 2 and 2 * numbers_in(best) < len(quote_nums):
+        return {"rects": [], "confidence": 0.0, "matched": len(best)}
 
     start, end = owner[best[0]], owner[best[-1]]
     span = best[-1] - best[0] + 1

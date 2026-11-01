@@ -10,8 +10,11 @@ highlighted on the scan, so he can check it against the original.
 > trích dẫn trang, cây chẩn đoán, thư viện thuốc. Lõi truy xuất được thiết kế
 > riêng cho cách bác sĩ Việt gõ và cho cấu trúc cố định của Dược thư.
 
-<!-- DEMO -->
-_Demo video: coming soon._
+| Evidence checklist for a two-condition question | The quoted sentence highlighted on the scanned page |
+|---|---|
+| ![Checklist: each condition checked against the book, with verbatim quotes](docs/screenshots/checklist.png) | ![The cited sentence highlighted on the scanned formulary page](docs/screenshots/page-highlight.png) |
+
+![Diagnosis screen with an optional prior-history box](docs/screenshots/diagnosis.png)
 
 ## What it does
 
@@ -77,6 +80,7 @@ changes were rolled back when the numbers showed they hurt.
 | Two-condition questions with evidence for **both** conditions (55) | 90.9% | **100%** |
 | Conditions reported "not in the library" that were actually present | — | **0 of 26** |
 | Quoted sentence highlighted with all of its numbers on the scan (471) | 67.9% | 70.1% |
+| Quoted sentence highlighted in the **wrong place** | 13.4% | **6.2%** |
 
 Known limits: quotes are copied from OCR text and can contain OCR typos (which
 is why every quote opens the page image); sentences that continue onto the

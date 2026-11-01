@@ -112,6 +112,12 @@ class LocateTests(unittest.TestCase):
         self.assertIn('15', span_text)
         self.assertNotIn('10', span_text)
 
+    def test_no_highlight_when_numbers_missing(self):
+        # Trang chỉ có câu chữ giống nhưng gần như không có số của câu trích: không tô.
+        words = _words('Hiệu chỉnh liều thích hợp khi suy thận nặng (mức lọc dưới 30 ml/phút) hoặc thẩm tách.')
+        r = page_locate.locate(words, 'Hiệu chỉnh liều khi suy thận: 10 - 30 ml/phút, sau đó 500 - 1000 mg mỗi 12 giờ.')
+        self.assertEqual(r['rects'], [])
+
 
 class CoverageNotesTests(unittest.TestCase):
     def setUp(self):
