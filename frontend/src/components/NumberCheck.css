@@ -1,0 +1,62 @@
+.numcheck {
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.numcheck svg { flex-shrink: 0; }
+
+.numcheck-ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.numcheck-ok svg { color: #007f3b; }
+
+.numcheck-warn,
+.numcheck-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+
+.numcheck-warn { background: #fff4e5; border-color: #f0b75a; color: #5c3b00; }
+.numcheck-note { background: var(--bg-sunk, #f3f4f6); border-color: var(--border); color: var(--text-primary); }
+
+.numcheck-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.numcheck ul { margin: 0; padding-left: 26px; }
+.numcheck li { margin: 2px 0; }
+
+:root.dark .numcheck-warn { background: #3a2a10; border-color: #8a6420; color: #f5deb3; }
+:root.dark .numcheck-ok svg { color: #4cc38a; }
+
+/* Dòng "Đã tra theo: …" khi câu hỏi được gỡ Telex / khôi phục dấu. */
+.bubble-normalized {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.bubble-normalized strong { color: var(--text-primary); font-weight: 600; }
+
+/* Dòng "Đã hiểu: thuốc · mục · điều kiện" (QueryUnderstood.jsx). */
+.bubble-understood {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.bubble-understood strong { color: var(--text-primary); font-weight: 600; }
+.bubble-understood-note { color: var(--text-secondary); }
+
+.bubble-actions button.is-on { color: var(--primary); }
+.bubble-actions button:disabled { opacity: 0.4; cursor: default; }

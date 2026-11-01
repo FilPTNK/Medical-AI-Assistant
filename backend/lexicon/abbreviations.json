@@ -1,0 +1,119 @@
+{
+  "_ghi_chu": "Chữ viết tắt được mở rộng khi tra cứu. Chỉ dòng \"approved\": true mới được dùng. Ứng viên mới do lexicon_mine.py khai thác từ sách nằm ở abbreviation_candidates.csv — chép sang đây sau khi duyệt. Không thêm viết tắt đa nghĩa (HC = hội chứng / hồng cầu; STC = suy tim cấp / suy thận cấp). Khi tra, chỉ nhận chữ viết HOA (THA) hoặc chữ thường từ 4 ký tự trở lên (copd), để không nhầm với âm tiết tiếng Việt ('tha').",
+  "entries": [
+    {
+      "abbr": "ĐTĐ",
+      "expansion": "đái tháo đường",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt; dùng trong QĐ 5481/QĐ-BYT về đái tháo đường típ 2"
+    },
+    {
+      "abbr": "THA",
+      "expansion": "tăng huyết áp",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "BPTNMT",
+      "expansion": "bệnh phổi tắc nghẽn mạn tính",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tương ứng bảng viết tắt MSD Manuals tiếng Việt (msdmanuals.com/vi/professional/resourcespages/abbreviations)"
+    },
+    {
+      "abbr": "COPD",
+      "expansion": "bệnh phổi tắc nghẽn mạn tính",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tương ứng bảng viết tắt MSD Manuals tiếng Việt (msdmanuals.com/vi/professional/resourcespages/abbreviations)"
+    },
+    {
+      "abbr": "NMCT",
+      "expansion": "nhồi máu cơ tim",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tương ứng bảng viết tắt MSD Manuals tiếng Việt (msdmanuals.com/vi/professional/resourcespages/abbreviations)"
+    },
+    {
+      "abbr": "TBMMN",
+      "expansion": "tai biến mạch máu não",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "NKTN",
+      "expansion": "nhiễm khuẩn tiết niệu",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tương ứng bảng viết tắt MSD Manuals tiếng Việt (msdmanuals.com/vi/professional/resourcespages/abbreviations)"
+    },
+    {
+      "abbr": "STM",
+      "expansion": "suy thận mạn",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "RLLP",
+      "expansion": "rối loạn lipid máu",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "NSAID",
+      "expansion": "thuốc chống viêm không steroid",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "CVKS",
+      "expansion": "thuốc chống viêm không steroid",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "TDKMM",
+      "expansion": "tác dụng không mong muốn",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "CCĐ",
+      "expansion": "chống chỉ định",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "ORS",
+      "expansion": "oresol bù nước điện giải",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: khai thác từ Dược thư Quốc gia (định nghĩa trong ngoặc ngay trong sách)"
+    },
+    {
+      "abbr": "VNNB",
+      "expansion": "viêm não Nhật Bản",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: khai thác từ Dược thư Quốc gia (định nghĩa trong ngoặc ngay trong sách)"
+    },
+    {
+      "abbr": "TCMR",
+      "expansion": "tiêm chủng mở rộng",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: khai thác từ Dược thư Quốc gia (định nghĩa trong ngoặc ngay trong sách)"
+    },
+    {
+      "abbr": "RLLM",
+      "expansion": "rối loạn lipid máu",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "BTM",
+      "expansion": "bệnh thận mạn",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cách viết tắt thông dụng trong bệnh án / tài liệu y khoa tiếng Việt"
+    },
+    {
+      "abbr": "HC",
+      "expansion": "hội chứng / hồng cầu",
+      "approved": false,
+      "reviewed_by": "đa nghĩa — không dùng"
+    }
+  ]
+}

@@ -3,9 +3,9 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Switch from '@radix-ui/react-switch';
 import {
-  Palette, Bell, Sparkles, Plug, AudioLines, Database, HardDrive,
+  Palette, Sparkles, Plug, AudioLines, Database, HardDrive,
   ShieldCheck, Lock, UserRound, Keyboard, Search, X, ChevronDown, Check,
-  Trash2, Download, Info, AlertTriangle, Archive, KeyRound,
+  Trash2, Download, AlertTriangle, Archive, KeyRound,
 } from 'lucide-react';
 import { ACCENT_COLORS, measureStorage, formatBytes } from './useSettings';
 import { ProfileAvatar } from './AccountMenu';
@@ -93,7 +93,6 @@ function Segmented({ value, onChange, options }) {
 
 const SECTIONS = [
   { value: 'general', label: 'Chung', icon: Palette, keywords: 'giao diện theme sáng tối màu nhấn ngôn ngữ bố cục gợi ý' },
-  { value: 'notifications', label: 'Thông báo', icon: Bell, keywords: 'thông báo chuông nhắc tái khám tương tác thuốc' },
   { value: 'personalization', label: 'Cá nhân hóa', icon: Sparkles, keywords: 'hướng dẫn tùy chỉnh bộ nhớ ghi nhớ lịch sử chi tiết trả lời' },
   { value: 'integrations', label: 'Tích hợp', icon: Plug, keywords: 'api key deepseek mô hình nguồn tri thức vector' },
   { value: 'voice', label: 'Giọng nói', icon: AudioLines, keywords: 'micro giọng nói đọc chính tả nhận dạng' },
@@ -286,40 +285,6 @@ export default function SettingsDialog({
               </>
             ))}
 
-            {/* ---------------- Notifications ---------------- */}
-            {panel('notifications', 'Thông báo', (
-              <>
-                <Row
-                  label="Thông báo hệ thống"
-                  desc="Hiện chuông thông báo trên thanh tiêu đề."
-                >
-                  <Toggle checked={settings.notifyEnabled} onCheckedChange={settings.setNotifyEnabled} />
-                </Row>
-                <Row
-                  label="Nhắc lịch tái khám"
-                  desc="Báo trước khi bệnh nhân đến hạn tái khám."
-                >
-                  <Toggle
-                    checked={settings.notifyRecheck}
-                    onCheckedChange={settings.setNotifyRecheck}
-                    disabled={!settings.notifyEnabled}
-                  />
-                </Row>
-                <Row
-                  label={<>Cảnh báo tương tác thuốc <span className="badge-beta" style={{ background: 'rgba(148, 163, 184, 0.15)', color: 'var(--text-secondary)', marginLeft: '6px' }}>Sắp ra mắt</span></>}
-                  desc="Thông báo khi đơn thuốc có cặp hoạt chất chống chỉ định. Tính năng đang được xây dựng."
-                >
-                  <Toggle checked={false} onCheckedChange={() => {}} disabled />
-                </Row>
-                {!settings.notifyEnabled && (
-                  <div className="st-note">
-                    <Info size={16} />
-                    <span>Đang tắt toàn bộ thông báo. Bật “Thông báo hệ thống” để dùng lại nhắc lịch tái khám.</span>
-                  </div>
-                )}
-              </>
-            ))}
-
             {/* ---------------- Personalization ---------------- */}
             {panel('personalization', 'Cá nhân hóa', (
               <>
@@ -408,12 +373,6 @@ export default function SettingsDialog({
                 <Row
                   label="Cơ sở dữ liệu thuốc"
                   desc="Tra cứu hoạt chất, biệt dược, liều dùng và chống chỉ định."
-                >
-                  <span className="st-readonly">Đang hoạt động</span>
-                </Row>
-                <Row
-                  label="Hồ sơ bệnh nhân"
-                  desc={`${actions.patientCount} hồ sơ lưu trên máy chủ nội bộ.`}
                 >
                   <span className="st-readonly">Đang hoạt động</span>
                 </Row>
@@ -550,22 +509,10 @@ export default function SettingsDialog({
             {panel('safety', 'An toàn', (
               <>
                 <Row
-                  label="Hiện khuyến cáo miễn trừ trách nhiệm"
-                  desc="Nhắc rằng thông tin chỉ mang tính tham khảo, quyết định cuối cùng thuộc về bác sĩ."
-                >
-                  <Toggle checked={settings.showDisclaimer} onCheckedChange={settings.setShowDisclaimer} />
-                </Row>
-                <Row
                   label="Cảnh báo vượt liều tối đa"
                   desc="Đánh dấu khi liều đề xuất vượt ngưỡng an toàn trong tài liệu."
                 >
                   <Toggle checked={settings.doseWarning} onCheckedChange={settings.setDoseWarning} />
-                </Row>
-                <Row
-                  label="Xác nhận trước khi lưu đơn thuốc"
-                  desc="Yêu cầu một bước xác nhận trước khi ghi đơn vào hồ sơ bệnh nhân."
-                >
-                  <Toggle checked={settings.confirmPrescription} onCheckedChange={settings.setConfirmPrescription} />
                 </Row>
                 <div className="st-note st-note-danger">
                   <AlertTriangle size={16} />
@@ -667,8 +614,8 @@ export default function SettingsDialog({
                 <Row
                   label="Email liên hệ"
                   desc={profile?.email_verified
-                    ? 'Đã xác nhận khi đăng ký. Dùng để ghi tên người lập hồ sơ bệnh nhân.'
-                    : 'Dùng để ghi tên người lập hồ sơ bệnh nhân.'}
+                    ? 'Đã xác nhận khi đăng ký.'
+                    : 'Dùng để đăng nhập và khôi phục tài khoản.'}
                   stack
                 >
                   <input
@@ -683,7 +630,7 @@ export default function SettingsDialog({
 
                 <Row
                   label="Xóa toàn bộ dữ liệu cục bộ"
-                  desc="Xóa cài đặt và cuộc trò chuyện khỏi trình duyệt này. Hồ sơ bệnh nhân trên máy chủ không bị ảnh hưởng."
+                  desc="Xóa cài đặt và cuộc trò chuyện khỏi trình duyệt này. Tài liệu trên máy chủ không bị ảnh hưởng."
                 >
                   <button type="button" className="st-btn st-btn-danger" onClick={actions.onResetLocalData}>
                     Xóa dữ liệu

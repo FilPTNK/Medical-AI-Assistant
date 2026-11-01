@@ -94,6 +94,7 @@ ampicilin/ampicillin). Không có cặp nào là hai thuốc khác nhau bị tr�
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+import drug_alias
 from text_fold import fold
 
 # --------------------------------------------------------------------------
@@ -625,7 +626,9 @@ def kiem_tra(allergies: Optional[str],
     tong_khop = 0
     if muc["trang_thai"] == "doc_duoc":
         for i, m in enumerate(meds):
-            khop = _doi_chieu_mot_thuoc(m["name"], muc)
+            # Biệt dược được viết kèm tên hoạt chất ("Zinnat (Cefuroxim)") để
+            # nhận ra nhóm dị ứng — chỉ THÊM khả năng cảnh báo, không bớt.
+            khop = _doi_chieu_mot_thuoc(drug_alias.with_resolved_name(m["name"]), muc)
             tong_khop += len(khop)
             if khop:
                 ket_qua.append({"index": i, "ten": m["name"], "khop": khop})

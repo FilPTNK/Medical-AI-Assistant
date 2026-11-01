@@ -1,0 +1,131 @@
+{
+  "_ghi_chu": "Cặp tên KHÔNG suy ra được bằng quy tắc chính tả của drug_alias.inn_key: tên Mỹ (USAN) ↔ INN, và vài biệt dược phổ biến ở Việt Nam không có trong sách. Chỉ dòng có \"approved\": true mới được dùng. 'canonical' phải trùng tên một chuyên luận trong kho. Nguồn đã kiểm ghi ở 'reviewed_by'; bác sĩ sửa 'approved' thành false nếu thấy sai.",
+  "pairs": [
+    {
+      "alias": "acetaminophen",
+      "canonical": "Paracetamol",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "albuterol",
+      "canonical": "Salbutamol",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "meperidine",
+      "canonical": "Pethidin",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "glyburide",
+      "canonical": "Glibenclamid",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "rifampin",
+      "canonical": "Rifampicin",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "isoproterenol",
+      "canonical": "Isoprenalin",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cặp USAN↔INN trong danh sách của Wikipedia 'United States Adopted Name' (en.wikipedia.org/wiki/United_States_Adopted_Name)"
+    },
+    {
+      "alias": "adrenaline",
+      "canonical": "Epinephrin",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tên BAN/INN cũ của epinephrin"
+    },
+    {
+      "alias": "noradrenaline",
+      "canonical": "Norepinephrin",
+      "kind": "usan",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: tên BAN/INN cũ của norepinephrin"
+    },
+    {
+      "alias": "natri valproat",
+      "canonical": "Acid Valproic",
+      "kind": "salt",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: muối natri của acid valproic; Dược thư không có chuyên luận riêng cho dạng muối"
+    },
+    {
+      "alias": "Efferalgan",
+      "canonical": "Paracetamol",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: paracetamol (UPSA). Có dạng phối hợp codein — kho chỉ THÊM tên paracetamol vào câu tra, không thay tên gốc"
+    },
+    {
+      "alias": "Panadol",
+      "canonical": "Paracetamol",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: paracetamol (Haleon/GSK). Có dạng phối hợp — kho chỉ THÊM tên, không thay"
+    },
+    {
+      "alias": "Hapacol",
+      "canonical": "Paracetamol",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: paracetamol, DHG Pharma (dhgpharma.com.vn). Có dạng phối hợp (Hapacol CS Day + phenylephrin, Hapacol Prime + ibuprofen) — kho chỉ THÊM tên, không thay"
+    },
+    {
+      "alias": "Ventolin",
+      "canonical": "Salbutamol",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: salbutamol (GSK)"
+    },
+    {
+      "alias": "Lasix",
+      "canonical": "Furosemid",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: furosemid (danh mục thuốc Bộ Y tế Liban, moph.gov.lb)"
+    },
+    {
+      "alias": "Glucophage",
+      "canonical": "Metformin Hydroclorid",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: metformin hydroclorid (danh mục biệt dược gốc, vnras.com)"
+    },
+    {
+      "alias": "Losec",
+      "canonical": "Omeprazol",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: omeprazol (danh mục biệt dược gốc, vnras.com)"
+    },
+    {
+      "alias": "Zinnat",
+      "canonical": "Cefuroxim",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: cefuroxim axetil (danh mục biệt dược gốc, vnras.com)"
+    },
+    {
+      "alias": "Medrol",
+      "canonical": "Methylprednisolon",
+      "kind": "brand",
+      "approved": true,
+      "reviewed_by": "Đã kiểm 2026-10-31: methylprednisolon (Pfizer)"
+    }
+  ]
+}

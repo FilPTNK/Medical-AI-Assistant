@@ -1,7 +1,12 @@
 # Bàn giao — Antigravity Medical Assistant
 
-Cập nhật: 2026-09-23 (đợt 5 — đối chiếu dị ứng). Nhánh: `fix/retrieval-and-stability`.
-Toàn bộ số liệu dưới đây là **đo được**, không phải ước lượng, trừ chỗ ghi rõ.
+Cập nhật: 2026-09-24 (WP7 — khớp mã WP1–WP6 và trạng thái kho được bàn giao).
+Nhánh được ghi trong bản bàn giao gốc: `fix/retrieval-and-stability`;
+trạng thái nhánh trên máy bác sĩ **chưa kiểm chứng**.
+Các số đo trước đây được giữ theo **mốc đo cũ**. Kho 3 cuốn / 33.490 child
+chunk là số trong `CHATGPT_WORK_PROMPTS.md` do người dùng bàn giao, không có
+dữ liệu sách trong ZIP để đo lại. Số nào không có trong mã hoặc tài liệu gốc
+được ghi **chưa đo lại**.
 
 Đợt 2026-09-12 làm **giao diện** (mục 2b). Đợt 2026-09-05 làm **#4, #5, #2**
 và ý tưởng "cân RRF" của bàn giao trước.
@@ -16,19 +21,37 @@ Kế hoạch bốn đợt đã chốt với bác sĩ sau năm vòng phỏng vấ
 
 FastAPI + React/Vite + Chroma + DeepSeek. RAG tiếng Việt cho phòng khám.
 
-- Kho: **25.852 child chunk**, **3.816 thuốc**, 2 nguồn:
-  - `THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf` — tra theo *tên biệt dược*
-  - `DTQGVN-2022-Q1` — Dược thư Quốc gia, **chỉ quyển 1, chữ A–H** (352 thuốc)
+- Kho được bàn giao: **33.490 child chunk / 3 cuốn** (số theo prompt nền,
+  **chưa đo lại** từ Chroma của máy bác sĩ):
+  - `THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf`: **18.708 chunk**, tra tên biệt dược.
+  - `DTQGVN-2022-Q1`: **7.144 chunk**, Dược thư Quốc gia quyển 1,
+    **A–Hydroxyzin**.
+  - `DTQGVN-2022-Q2`: **7.638 chunk**, quyển 2,
+    **Ibuprofen–Zolpidem**, trang in thân sách **885–1778**; số trang PDF
+    và dải trang thực của từng cuốn phải lấy từ manifest trên máy.
+  Số **3.816 thuốc** trong các phép quét cũ là số đo trên kho cũ,
+  **chưa đo lại** trên cả ba cuốn.
 - Truy xuất lai: dense (Chroma HNSW, **cosine**) + BM25 + hợp nhất RRF (k=60, 1:1)
 - Embedding: **`intfloat/multilingual-e5-small`**, 384 chiều, `max_seq_length=512`,
   vector chuẩn hoá, tiền tố `query:` / `passage:`
-- Chạy: `python run.py` (backend 8000, Vite 3000). Backend riêng: `python backend/dev_server.py`
+- Chạy: `python run.py` (backend 8000, Vite 3000). Backend riêng:
+  `python backend/dev_server.py`; không mở cả hai cùng lúc.
+- Tab **Thư viện đã gộp Đối chiếu**: chọn nhiều tài liệu và thao tác nổi;
+  tài liệu PDF tự tải lên dùng `generic_ingest.py` + SSE qua `ingest_jobs.py`,
+  chia trang, OCR trang cần thiết rồi dùng lại `ingest_book.py`. Pipeline
+  giới hạn 64 MiB / 300 trang, một worker OCR, job giữ trong RAM;
+  cần đối chiếu trang gốc sau khi nạp.
+- `config.py` ép `HF_HOME` vào `backend/data/hf_cache`, tránh cache trên ổ
+  D: rời; khi cache đã có snapshot, đặt offline. Chỉ mục/model **chưa có**
+  trong ZIP, kiểm trên máy theo `RUNBOOK.md`.
 
 ---
 
-## 2. Chất lượng truy xuất — trạng thái hiện tại
+## 2. Chất lượng truy xuất — lần đo cũ, chưa đo lại kho ba cuốn
 
-P@5 trên hai bộ truy vấn trong `eval/`. "Trước" = đầu đợt này, "sau" = hiện tại.
+P@5 trên hai bộ truy vấn trong `eval/`, đo khi kho **hai cuốn / 25.852
+chunk**. "Trước" và "sau" dưới đây chỉ là hai mốc của đợt 2026-09-05;
+**không đại diện P@5 hiện tại** với Q2 và mã WP1–WP6. Chạy lại theo mục 5.
 
 | | bộ chính: trước | bộ chính: sau | bộ giữ riêng: trước | bộ giữ riêng: sau |
 |---|---|---|---|---|
@@ -37,14 +60,17 @@ P@5 trên hai bộ truy vấn trong `eval/`. "Trước" = đầu đợt này, "s
 | **RRF (kết quả thật)** | **90,0%** | **100,0%** | **80,0%** | **98,0%** |
 | bẫy-nhầm (RRF) | 4,0% | **0,0%** | 0,0% | 0,0% |
 
-Truy vấn "thuốc hạ sốt" — bài toán gốc của cả hai đợt — nay **100%**, không còn
+Trong lần đo cũ, truy vấn "thuốc hạ sốt" đạt **100%**, không còn
 thuốc sốt rét nào trong top-5.
 
 **Điểm liên quan** (`similarity_search_with_relevance_scores`):
 `-1,897 … -2,211` kèm cảnh báo *"must be between 0 and 1"* → **`0,913 … 0,896`**,
 hết cảnh báo.
 
-Backend sẵn sàng phục vụ sau **17,2s** (đợt trước 27,1s).
+Bản bàn giao cũ ghi **17,2s** để backend sẵn sàng (đợt trước 27,1s);
+trên kho ba cuốn và bản WP1–WP6 **chưa đo lại**. `/api/auth/status`
+trả HTTP chỉ báo máy chủ nhận request; cần xem `/api/index/health` sau
+đăng nhập để biết BM25/model đã nạp xong (xem `RUNBOOK.md`).
 
 ---
 
@@ -54,12 +80,17 @@ Backend sẵn sàng phục vụ sau **17,2s** (đợt trước 27,1s).
 
 ```
 node frontend/contrast_check.mjs      # 33 cặp màu x 2 chế độ, thoát 1 nếu hỏng
-cd frontend && npm run build          # dựng thật, bắt lỗi cú pháp JSX/CSS
+cd frontend
+npm run build                          # dựng thật, bắt lỗi cú pháp JSX/CSS
+cd ..
 ```
 
-Hiện **66/66 cặp đạt WCAG AA**, không bỏ sót cặp nào. Script đọc thẳng token
-trong `index.css` nên đổi màu là chạy lại có số ngay. Đây là phép kiểm **duy
-nhất** cho giao diện — không có test React nào.
+Ở đợt 2026-09-12, **66/66 cặp đạt WCAG AA**; đợt 5 đã mở rộng thành
+85 cặp × 2 chế độ. Chạy lại `node frontend/contrast_check.mjs` trên bản
+WP1–WP6 ngày 2026-09-24: **Hỏng: 0; Bỏ qua: 0**; số cặp hiện tại
+**chưa đếm lại**. WP5 đã thêm test React/Vitest và tách component nên câu
+"không có test React" trong bàn giao cũ không còn đúng. Script màu chỉ kiểm
+cặp token định nghĩa trong tệp, không chứng nhận toàn giao diện.
 
 ### Bảng màu
 
@@ -138,11 +169,11 @@ một tiến trình backend **cũ** còn sống vẫn giữ cổng đó (runner 
 nạp mô hình nên mọi request đều treo. Nay đợi một **phản hồi HTTP thật** từ
 `/api/auth/status`.
 
-### Chưa làm trong đợt này
+### Chưa làm trong đợt 2026-09-12 (ghi nhận lịch sử)
 
-- **Chưa tách file.** `App.jsx` vẫn 6.7k dòng. Thay đổi đợt này gần như toàn bộ
+- **Chưa tách file vào thời điểm đó.** `App.jsx` vẫn 6.7k dòng. Thay đổi đợt này gần như toàn bộ
   nằm ở CSS cộng vài chỗ JSX nhỏ, nên tách file sẽ là tách thứ mình không sửa —
-  đúng cái bác sĩ đã bảo đừng làm.
+  đúng cái bác sĩ đã bảo đừng làm. **WP5 về sau đã tách các view**; xem mục 2d.
 - **`DashboardView.css` giữ nguyên bảng màu biểu đồ** (10 mã màu). Tab Thống kê
   không nằm trong ba tab của đợt này, và màu chuỗi biểu đồ là một hệ riêng cần
   đo lại theo nền mới.
@@ -166,10 +197,12 @@ có hình gì.
 python eval/allergy_run.py           # 46 phép kiểm, thoát 1 nếu hỏng
 python eval/allergy_run.py --sweep   # thêm 9 phép quét cả 3.816 tên
 node frontend/contrast_check.mjs     # nay 85 cặp x 2 chế độ
-cd frontend && npm run build
+cd frontend
+npm run build
+cd ..
 ```
 
-**55/55 đạt.** `backend/drug_allergy.py` không import gì ngoài `text_fold`, nên
+**55/55 đạt ở lần đo 2026-09-23 (kho cũ). Chưa đo lại sau Q2.** `backend/drug_allergy.py` không import gì ngoài `text_fold`, nên
 bộ kiểm chạy được cả khi máy chưa cài thư viện backend.
 
 ### Không dùng ATC, dù kho có sẵn 329 mã
@@ -304,7 +337,7 @@ nền tinh chỉ đạt **4,14:1** (đỏ nhạt) và **4,10:1** (cam nhạt), �
 Nền tinh sáng hơn nền thẻ nên chữ nhạt tụt qua ngưỡng ở đúng chỗ đó. Khối dùng
 `--text-secondary` (6,7:1).
 
-### Chưa làm
+### Chưa làm trong đợt 2026-09-23; cần kiểm lại trên máy thật
 
 - **Chỉ gắn vào `/api/diagnosis-tree/treatment`.** Đường `ai-diagnosis` và
   agent ReAct chưa có đối chiếu. Cùng hàm `_doi_chieu_di_ung()` dùng lại được.
@@ -317,8 +350,45 @@ Nền tinh sáng hơn nền thẻ nên chữ nhạt tụt qua ngưỡng ở đú
   có mã và chuyển tiếp cho dược sĩ.
 - **Backend không chạy được trên máy này lúc viết mã**: `python` hệ thống chưa
   cài `dotenv`/`fastapi`/`chromadb`, nên `eval/deid_run.py` và endpoint thật
-  chưa chạy lại được sau thay đổi. `python run.py --reinstall` là cách cài.
+  chưa chạy lại được sau thay đổi. `python run.py --reinstall` là cách cài
+  ở thời điểm đó; đây không phải kết quả thử backend WP1–WP6.
   Phần đối chiếu đã kiểm đầy đủ vì nó không phụ thuộc thư viện nào.
+
+---
+
+## 2d. Cập nhật từ mã WP1–WP6 (2026-09-24)
+
+### Truy xuất và giới hạn máy 7 GB
+
+- Khi Chroma không đọc được chỉ mục, trả lỗi chỉ mục; khi corpus thực sự rỗng,
+  trả lỗi kho rỗng; khi có corpus nhưng truy vấn không khớp, báo không khớp.
+  Nếu embedding lỗi nhưng BM25 có corpus, `search()` trả kết quả BM25 với
+  `degraded=true` và lý do. Các đường tra cứu, báo cáo, đối chiếu không còn
+  tự biến lỗi hạ tầng thành câu trả lời "không có tài liệu".
+- `VectorStore.db` có khóa trong tiến trình; dữ liệu Chroma được lấy theo lô
+  **500** để tránh lỗi `too many SQL variables` trên kho ~33k; cache BM25
+  lưu corpus/token và kiểm vân tay trước khi đọc. Mục tiêu khởi động <30s
+  **chưa đo lại** trên máy thật.
+- Server giữ `backend/data/vector_db/.writer.lock` trong vòng đời;
+  `ingest_book.py` phải lấy khóa đó trước khi ghi từ CLI. **Không chạy CLI ghi
+  Chroma khi server đang chạy**. Sự cố FTS5 `malformed inverted index` đã
+  từng xảy ra khi chạy đồng thời; cách sao lưu/dựng lại ở `RUNBOOK.md`.
+- `page_map.py` kẹp offset trang in theo `pdf_pages`, tránh tính sai
+  quyển đánh số liên tục. Cache HF đã đưa vào `backend/data/hf_cache`; khi
+  chỉ mục chưa warm, chat không được gọi đó là không khớp y văn.
+
+### Tài liệu và giao diện
+
+- Tab Thư viện kiêm Đối chiếu; PDF tự tải lên qua `generic_ingest.py`, theo
+  dõi SSE. WP3 giới hạn **64 MiB / 300 trang**, xác nhận PDF thật,
+  tuần tự OCR một worker, kiểm trang OCR đọc kém và dọn manifest dở;
+  job vẫn lưu trong RAM và không tự tiếp tục sau khi khởi động lại.
+- WP4 đã rà soát UX trong báo cáo riêng; WP5 đã tách `App.jsx` thành các
+  view/component và thêm phép thử React/Vitest. Mốc dòng 6.7k ở mục 2b
+  là ảnh chụp lịch sử, không phải tình trạng file hiện tại.
+- WP6 đã chỉnh prompt y khoa bám nguồn và giữ lối báo thiếu nguồn. Quy tắc
+  prompt không phải phép kiểm đầu ra LLM; xem mục 6 về nguồn chẩn đoán và
+  dữ liệu bệnh án tự do. Chưa thử với mô hình/API và bệnh án thật.
 
 ---
 
@@ -331,7 +401,7 @@ cho *số kết quả trả về* thay vì cho 5. BM25 chỉ trả nổi 1 chunk
 nên được chấm 1/1 = 100% — tức là **thưởng cho việc không tìm ra gì**. Bộ đo mới
 luôn chia cho 5.
 
-### Cân RRF + mở rộng từ ghép hiếm (không cần index lại)
+### Cân RRF + mở rộng từ ghép hiếm (đo trên kho cũ, không cần index lại)
 
 - pyvi gộp "thuốc ho" thành một token `thuốc_ho` có **df = 1** trên 25.852
   chunk, nên cả truy vấn còn đúng một token hiếm và BM25 chỉ trả nổi 1 chunk.
@@ -371,8 +441,8 @@ một cái tên đọc không ra. Nên việc thật sự làm:
   rác như `3AMBUTEROL` y hệt một tên thuốc có thật.
 
 > Chưa làm: hiện cảnh báo trên giao diện. `to_search_result()` dựng
-> `SearchResultItem` theo từng trường nên cờ chưa lọt ra API — thêm vào model đó
-> là xong.
+> `SearchResultItem` theo từng trường nên cờ chưa lọt ra API ở đợt cũ.
+> WP1–WP6 hiện cần kiểm lại luồng API/giao diện bằng dữ liệu thật.
 
 ### #4 + #2 — cosine, vector chuẩn hoá, đổi embedding (một lần index lại)
 
@@ -417,17 +487,21 @@ mình; nghiêng về BM25 nâng bộ giữ riêng từ 80% lên 92%. **Số li�
 đúng gốc rồi thì phải gỡ vá ra, nếu không nó quay lại làm hỏng.
 
 Đổi model lần nữa thì quét lại: `python eval/eval_run.py --sweep`.
+Khi đổi kho và logic truy vấn (WP2), số cũ **chưa đo lại**.
 
 ---
 
 ## 5. Cách đo
 
 Bộ đo nay **nằm trong kho** (`eval/`), không còn ở scratchpad của phiên.
+`eval/eval_run.py` hiện mặc định `--set all` (có cả bộ WP2); muốn chỉ
+so hai bộ cũ dùng `--set both`. Chạy đánh giá là tải chỉ mục/model;
+trên máy bác sĩ **chưa đo lại**.
 
 ```
-python eval/eval_run.py                            # cả hai bộ, chỉ mục đang chạy
-python eval/eval_run.py --sweep                    # quét trọng số RRF
-python eval/eval_run.py --persist-dir <thư mục>    # chấm một chỉ mục dựng thử
+python eval/eval_run.py --set both                 # hai bộ cũ, chỉ mục đang chạy
+python eval/eval_run.py --set both --sweep         # quét trọng số RRF
+python eval/eval_run.py --persist-dir <thư mục>    # mọi bộ, chấm chỉ mục dựng thử
 python eval/calibrate_similarity.py                # chọn ngưỡng "câu hỏi tương tự"
 ```
 
@@ -445,13 +519,13 @@ python eval/calibrate_similarity.py                # chọn ngưỡng "câu hỏ
 
 ## 6b. Máy này sắp không chạy nổi app
 
-**Backend bị hệ điều hành giết hai lần trong một phiên làm việc**, mã thoát
+**Trong lần đo cũ, backend bị hệ điều hành giết hai lần trong một phiên làm việc**, mã thoát
 `4294967295` (tức là bị kết liễu từ ngoài, không phải tự thoát). Đo được:
 
 | | |
 |---|---|
 | RAM tổng | 7,3 GB |
-| RAM trống khi app chạy | **1,01 GB** |
+| RAM trống khi app chạy (lần đo cũ) | **1,01 GB** |
 
 Backend phải nạp torch + `multilingual-e5-small` + Chroma, nhiều hơn 1 GB. Cuối
 phiên Chrome cũng treo, không chụp nổi màn hình nữa.
@@ -464,56 +538,49 @@ bớt chương trình trước khi mở app, hoặc thêm RAM.
 
 ## 6. Còn phải làm
 
-### Quan trọng nhất: nạp nốt Dược thư quyển 2 trở đi
+### Đã giải quyết từ sau bàn giao cũ
 
-Đang thiếu monograph của **Paracetamol, Ibuprofen, Omeprazol…** — Dược thư mới
-có chữ A–H. `generic_name` chứa "PARACETAMOL": **0 / 3.816 thuốc**. Không thuật
-toán nào tìm được tài liệu không tồn tại; đây giờ là trần chất lượng thật sự,
-không còn nằm ở khâu truy xuất.
+Quyển 2 đã nạp theo trạng thái người dùng bàn giao: không còn ghi
+"thiếu Paracetamol/Ibuprofen" như một kết luận hiện tại. Mã mới còn có
+chế độ BM25 khi embedding lỗi, trạng thái lỗi chỉ mục và health (WP1),
+điều chỉnh truy vấn theo triệu chứng cùng bộ đánh giá mở rộng **gắn nhãn cần
+dược sĩ duyệt** (WP2), giới hạn/tuần tự hoá nạp PDF (WP3), rà soát UX có
+dẫn chứng (WP4), tách view và test giao diện (WP5), chỉnh prompt bám nguồn
+và ghi nhận đường dữ liệu bệnh nhân (WP6). Đây là **đọc mã và patch**, hiệu quả
+trên dữ liệu thật và thời gian khởi động máy 7 GB **chưa đo lại**.
 
-### Ba đợt còn lại đã chốt với bác sĩ
+### Cần đo hoặc sửa tiếp
 
-**Đợt 2 — không bao giờ treo.** `/api/search` hiện **không timeout, không hủy
-được, không stream**: DeepSeek treo là vòng xoay quay vĩnh viễn. Đã chốt: timeout
-10s cho khâu tìm và 60s cho LLM; đo thời gian từng khâu; chuyển sang SSE như
-`/api/drugs/report` đã làm; nút hủy, không tự thử lại. Hỏng thì **vẫn trả nguồn
-trích dẫn** kèm câu báo máy chủ tạm thời không hoạt động — bác sĩ không bao giờ
-ra về tay trắng; chi tiết kỹ thuật chỉ hiện ở chế độ phát triển.
-Xoá luôn dòng chữ nói dối ở `main.py:1512`: kết quả tra y văn vẫn tự xưng được
-xếp hạng bởi Cross-Encoder, mà reranker đã gỡ từ lâu (`vector_store.py:139`).
-
-**Đợt 3 — tiền sử vào chẩn đoán.** `App.jsx:6139` có ô chọn bệnh nhân và tooltip
-ghi "kết hợp tiền sử bệnh", nhưng `handleGenerateTree` (`App.jsx:2411`) **chỉ
-gửi đúng `description`**. Tooltip đang nói sai sự thật. Ngược lại
-`agent.run_diagnostic_agent` thì đã đọc tiền sử rồi — hai đường không nối nhau.
-Đã chốt: tiền sử **nạp sẵn**, không để agent tự quyết có gọi tool hay không
-(câu lệnh hệ thống chỉ *dặn* "luôn gọi", đó là lời khuyên chứ không phải ràng
-buộc; quên đọc dị ứng penicillin là một dạng hỏng im lặng). Đi vào **cả bốn
-bước**. **Bỏ tên và mã hồ sơ trước khi gửi ra DeepSeek** — áp dụng cho cả đường
-`ai-diagnosis` đang có. Hiện rõ AI đã đọc gì. Bác sĩ bấm nút mới ghi vào bệnh án.
-
-**Đợt 4 — trình xem tài liệu.** Hộp thoại hiện có đúng sáu nút: tải xuống, đóng,
-đánh dấu, ghi chú, hai mũi tên. **Trên quyển 913 trang.** Thứ tự đã chốt:
-nhảy tới trang và tìm chữ trong tài liệu **trước** (không tới được trang thì
-không có gì để kiểm chứng), rồi hai cột ảnh scan + text OCR, rồi trích dẫn mở
-thẳng đúng trang. Endpoint ảnh scan đã có sẵn (`main.py:1967`) nhưng giao diện
-chưa dùng tới.
-
-### Nhỏ hơn
-
-- Gắn đối chiếu dị ứng vào đường `ai-diagnosis` và agent ReAct (xem mục 2c).
-- Hiện cờ `name_suspect` trên giao diện (thêm trường vào `SearchResultItem`).
-- Chất lượng OCR trong **nội dung** (không phải tên): "Giảm dau", "Ha nhiệt",
-  "Thdn trong". Một mẫu dò thận trọng bắt được 3,9% chunk, **soi tay cho thấy tỉ
-  lệ thật cao hơn, chưa đo chính xác.** Chưa đụng tới đợt này.
-- Hai truy vấn còn dưới 100% ở bộ giữ riêng: "bị đau đầu thì uống thuốc gì"
-  (60%) và "trẻ em bị tiêu chảy dùng thuốc nào" (80%).
-- Bộ đo mới có 20 truy vấn — đủ để bắt hồi quy, **quá nhỏ để tin vào chênh lệch
-  1–2 điểm**. Muốn tinh chỉnh tiếp thì phải mở rộng bộ đo trước.
+- Đo lại P@5 theo nhóm trên **ba cuốn**, đo cold start/RAM trên máy thật;
+  truy vấn triệu chứng và các nhãn kỳ vọng trong WP2 **cần dược sĩ duyệt**.
+  Số P@5 cũ, 17,2s và 55/55 không phải số đo mới.
+- `GET /api/index/health` có đăng nhập, báo corpus/BM25/model/suy giảm;
+  xác nhận trực tiếp sau khi nhận patch. `run.py` chỉ chờ HTTP của endpoint
+  xác thực, không chờ warmup tìm kiếm.
+- Kiểm trích dẫn, OCR, bản đồ trang in ↔ trang PDF của từng quyển; đặc biệt
+  Q2 đánh số tiếp 885–1778. Số trang PDF/dải thân sách của quyển mới lấy từ
+  manifest thực, không suy từ số trang in.
+- WP6 phát hiện: trường tự do bệnh án và truy vấn tự gõ có thể chứa tên,
+  số điện thoại, địa chỉ; phần bỏ tên/id trong dữ liệu có cấu trúc **chưa**
+  khử danh các đoạn tự do trước khi gửi DeepSeek. Cần khắc phục và thử với
+  dữ liệu giả trước khi dựa vào cam kết bảo mật.
+- Prompt y khoa mới yêu cầu bám nguồn nhưng các endpoint cây chẩn đoán hiện
+  gọi `context_chunks=None` và có thể trả danh sách trống; cần nối nguồn,
+  kiểm chứng trích dẫn và đánh giá bởi bác sĩ trước khi dùng cho quyết định.
+- Đối chiếu dị ứng trong phiếu bác sĩ tự gõ và các đường ngoài
+  `/api/diagnosis-tree/treatment` vẫn cần đối chiếu; tên biệt dược chưa được
+  phân nhóm bằng bảng tên hoạt chất. Các phép quét cũ là lịch sử.
+- Chất lượng OCR nội dung, hai truy vấn giữ riêng và cờ tên nghi ngờ cần
+  đo lại theo kho mới. Nếu cảnh báo đã hiện trong nguồn, kiểm UX thực tế
+  trước khi coi vấn đề là giải quyết hoàn toàn.
 
 ---
 
 ## 7. Trạng thái git & dữ liệu
+
+Các hash dưới đây thuộc lần bàn giao cũ. Bản ZIP chỉ gồm mã nguồn;
+nhánh/commit/dữ liệu thực trên máy bác sĩ **chưa kiểm chứng**. WP1–WP6 và WP7
+được bàn giao bằng patch; trạng thái áp dụng trên máy bác sĩ **chưa đo lại**.
 
 ```
 f0cc98c  Đo sau khi index lại: gỡ trọng số RRF, chốt ngưỡng tương tự 0,92
@@ -524,9 +591,9 @@ cf7c6d0  #5 Chuẩn hoá tên thuốc và gắn cờ tên hỏng OCR — không 
 2780ef4  Thêm HANDOFF.md — báo cáo bàn giao        <- đầu đợt này
 ```
 
-Nhánh `fix/retrieval-and-stability`, **chưa merge vào `master`**.
+Ở thời điểm ghi bản cũ: nhánh `fix/retrieval-and-stability`, chưa merge vào `master`; **chưa kiểm tra lại trên máy bác sĩ**.
 
-**Chỉ mục cũ giữ lại để lùi được:**
+**Bản bàn giao cũ ghi có chỉ mục để lùi; ZIP không chứa thư mục đó, chưa kiểm tra lại:**
 `backend/data/vector_db_minilm_backup_20260905_154559/` (304 MB). Xoá được khi
 đã yên tâm — nhưng muốn lùi thì phải đổi **cả** `config.EMBEDDING_MODEL` về
 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, vì chỉ mục đó
@@ -536,13 +603,12 @@ sinh bằng model cũ.
 
 ## 8. Việc còn treo từ đợt trước
 
-**Khoá API `sk-b877...` vẫn chưa thu hồi trên dashboard DeepSeek.** Khoá đã
-không còn trong mã nguồn lẫn lịch sử git, nhưng xoá lịch sử trên máy này **không
-thu hồi được khoá** nếu nó từng lọt ra ngoài. *(Vẫn chưa làm.)*
+**Bản bàn giao cũ ghi có khoá API bị lộ; trạng thái thu hồi hiện nay chưa xác minh trên dashboard.** Khoá đã
+không còn trong mã nguồn hiện tại; xoá lịch sử git **không thu hồi được khoá** nếu nó từng lọt ra ngoài. Cần người quản lý xác minh đã thu hồi và đổi khoá.
 
 Bản sao lưu sự cố mất mã nguồn:
-`C:\Users\HP\Desktop\Project\_RECOVERY_Antigravity_20260905_122647\` (135 MB) —
-xoá được khi đã yên tâm.
+`C:\Users\HP\Desktop\Project\_RECOVERY_Antigravity_20260905_122647\` (135 MB theo bản cũ) —
+**chưa xác minh còn tồn tại**, không xoá nếu chưa kiểm tra bản sao hiện hành.
 
 Quy tắc git giữ nguyên:
 
@@ -551,7 +617,7 @@ Quy tắc git giữ nguyên:
 
 ---
 
-## 9. Cạm bẫy đã gặp trên máy này
+## 9. Cạm bẫy đã gặp trên máy này (ghi nhận từ bàn giao cũ)
 
 | Bẫy | Cách tránh |
 |---|---|

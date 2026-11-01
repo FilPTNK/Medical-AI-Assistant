@@ -9,299 +9,73 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
-import IntroExperience from './components/IntroExperience';
 import { readSseStream } from './lib/sse';
 import { findMatches, bestAnchor } from './lib/fold';
 import SettingsDialog from './components/SettingsDialog';
 import AccountMenu from './components/AccountMenu';
-import AuthedImage from './components/AuthedImage';
+import PageViewer from './components/PageViewer';
+import AttachmentCard from './components/AttachmentCard';
+import NumberCheck from './components/NumberCheck';
+import QueryUnderstood from './components/QueryUnderstood';
+import CoverageChecklist from './components/CoverageChecklist';
 import EditProfileDialog from './components/EditProfileDialog';
 import useSettings from './components/useSettings';
 import useProfiles from './components/useProfiles';
-import DocumentAnnotator from './components/DocumentAnnotator';
-import CompareView from './components/CompareView';
-import { SimilarQuestions, SearchHistoryDialog } from './components/SearchHistory';
+import Pagination from './components/Pagination';
+import LibraryView from './components/LibraryView';
 import useAuth from './components/useAuth';
 import LoginScreen from './components/LoginScreen';
-import DashboardView from './components/DashboardView';
-import RemindersView from './components/RemindersView';
-import ExportPdfDialog from './components/ExportPdfDialog';
 import ClinicAdminDialog, { ChangePasswordDialog } from './components/ClinicAdmin';
 import DiagnosisTreeView from './components/DiagnosisTreeView';
-import AllergyCheckPanel from './components/AllergyCheckPanel';
-import { apiSend, apiDownload } from './lib/apiClient';
+import { apiSend } from './lib/apiClient';
 import {
-  Activity,
   AlertCircle,
+  ArrowUp,
   Ban,
-  BarChart3,
-  Bell,
-  BellRing,
   BookOpen,
-  Calendar,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  ClipboardList,
-  Clock,
-  Columns,
   Copy,
   Download,
   ExternalLink,
-  Eye,
+  Globe,
   FileText,
-  FlaskConical,
-  GitBranch,
-  GitCompareArrows,
-  Heart,
   History,
-  Image as ImageIcon,
-  Info,
-  KeyRound,
-  LayoutGrid,
   Library,
-  List,
   Loader2,
-  Lock,
-  Mail,
-  MapPin,
-  Maximize2,
+  MessageSquare,
   Mic,
-  Minus,
   Moon,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-  Paperclip,
   PencilLine,
-  Phone,
   Pill,
   Pin,
   PinOff,
   Plus,
-  Printer,
-  RotateCcw,
-  Ruler,
-  Scale,
   ScanLine,
   Search,
-  Send,
   Share2,
-  ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Square,
+  SquarePen,
   Stethoscope,
   Sun,
-  Target,
-  Thermometer,
   ThumbsDown,
+  Flag,
   ThumbsUp,
   Trash2,
-  Upload,
-  UserRound,
-  Users,
-  UsersRound,
-  Utensils,
-  Waves,
   X,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-/**
- * Trường lâm sàng này có nội dung thật hay chỉ là chỗ trống?
- *
- * Không thể chỉ kiểm tra chuỗi rỗng. Trong cơ sở dữ liệu hiện có bệnh nhân với
- * `allergies` bằng đúng chuỗi "Không có" — một chuỗi truthy. Nếu chỉ xét truthy
- * thì bệnh nhân KHÔNG dị ứng vẫn hiện ô đỏ, và màu đỏ lại mất hết sức cảnh báo
- * đúng như trước khi sửa.
- *
- * Cố ý KHÔNG đoán xa hơn: chỉ những câu phủ định nguyên vẹn, viết trọn, mới bị
- * coi là trống. "Không dị ứng penicillin đã biết" vẫn là thông tin lâm sàng
- * thật và phải giữ nguyên màu cảnh báo.
- */
-const NO_DATA_PHRASES = new Set([
-  '', '-', '--', 'n/a', 'na',
-  'không', 'không có', 'khong', 'khong co',
-  'chưa có', 'chua co', 'chưa ghi', 'chua ghi',
-  'chưa có tiền sử bệnh', 'chua co tien su benh',
-  'không rõ', 'khong ro',
-]);
-
-const hasClinicalValue = (value) => {
-  if (value == null) return false;
-  const text = String(value).trim();
-  if (!text) return false;
-  const normalized = text.toLowerCase().replace(/[.,;:!]+$/, '').trim();
-  return !NO_DATA_PHRASES.has(normalized);
-};
 const MAX_PINNED_CONVERSATIONS = 3;
-
-// --- Hồ sơ bệnh nhân (patient profile) helpers ---
-const formatDateVN = (isoDate) => {
-  if (!isoDate) return '--';
-  const d = new Date(isoDate.length === 10 ? `${isoDate}T00:00:00` : isoDate);
-  if (Number.isNaN(d.getTime())) return isoDate;
-  return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-};
-
-const formatFollowupDueLabel = (daysDiff) => {
-  if (daysDiff < 0) return `Quá hạn ${Math.abs(daysDiff)} ngày`;
-  if (daysDiff === 0) return 'Hôm nay';
-  if (daysDiff === 1) return 'Ngày mai';
-  return `Còn ${daysDiff} ngày`;
-};
-
-const formatTimeVN = (isoDateTime) => {
-  if (!isoDateTime || isoDateTime.length <= 10) return '';
-  const d = new Date(isoDateTime);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-};
-
-const TREATMENT_STATUS_META = {
-  in_progress: { label: 'Đang điều trị', className: 'pp-status-progress' },
-  completed: { label: 'Hoàn thành', className: 'pp-status-done' },
-};
-
-// Confidence-score → label/color mapping shared by the primary diagnosis badge and the
-// Chẩn đoán phân biệt (Top 5) table's "Độ tin cậy" column.
-const confidenceMeta = (score) => {
-  const n = score || 0;
-  if (n >= 70) return { label: 'Cao', className: 'pp-confidence-high' };
-  if (n >= 40) return { label: 'Trung bình', className: 'pp-confidence-mid' };
-  return { label: 'Thấp', className: 'pp-confidence-low' };
-};
-
-// Splits a primary diagnosis string like "Viêm họng cấp không đặc hiệu (J02.9)" into
-// its ICD-10 code and disease name for the Kế hoạch điều trị diagnosis card.
-const parseDiagnosisPrimary = (str) => {
-  const s = (str || '').trim();
-  const m = s.match(/^(.*)\(([A-Z][0-9][0-9A-Z.]*)\)\s*$/);
-  return m ? { name: m[1].trim(), code: m[2].trim() } : { name: s, code: '' };
-};
-
-const PATIENT_PROFILE_TABS = [
-  { id: 'overview', label: 'Tổng quan' },
-  { id: 'history', label: 'Lịch sử khám bệnh' },
-  { id: 'treatment', label: 'Kế hoạch điều trị' },
-  { id: 'documents', label: 'Tài liệu đính kèm' },
-  { id: 'notes', label: 'Ghi chú' },
-];
-
-const NOTES_VITALS_FIELDS = [
-  { key: 'pulse', label: 'Mạch', unit: 'lần / phút', placeholder: '88' },
-  { key: 'blood_pressure', label: 'Huyết áp', unit: 'mm Hg', placeholder: '120 / 80' },
-  { key: 'resp_rate', label: 'Nhịp thở', unit: 'lần / phút', placeholder: '18' },
-  { key: 'temperature', label: 'Nhiệt độ', unit: '°C', placeholder: '37' },
-];
-
-const NOTES_EXAM_FIELDS = [
-  { key: 'general_exam', label: 'Khám tổng quát', placeholder: 'Bệnh nhân tỉnh, tiếp xúc tốt, da niêm hồng, hạch ngoại vi không sờ chạm, không phù, tuyến giáp không to.' },
-  { key: 'cardio_exam', label: 'Khám tim mạch', placeholder: 'Tim T1, T2 đều rõ, không âm thổi bệnh lý.' },
-  { key: 'resp_exam', label: 'Khám hô hấp', placeholder: 'Phổi trong, không rales.' },
-  { key: 'abdomen_exam', label: 'Khám bụng', placeholder: 'Bụng mềm, không điểm đau khu trú.' },
-  { key: 'other_exam', label: 'Các cơ quan khác', placeholder: 'Hiện tại chưa ghi nhận bất thường.' },
-];
-
-const NOTES_ENT_FIELDS = [
-  { key: 'ent_ear', label: 'Tai', placeholder: 'Đau tai, chảy nước tai, ngứa tai, ù tai, nghe kém, tiếng vo ve.' },
-  { key: 'ent_nose', label: 'Mũi', placeholder: 'Sổ mũi (nếu có sổ mũi, nước mũi màu gì), nghẹt mũi, ngứa mũi, hắt xì, mất mùi.' },
-  { key: 'ent_throat', label: 'Họng', placeholder: 'Đau họng, vướng đàm, ho (khan hay có đàm, nếu có đàm thì đàm màu gì), khô họng, rát họng, nuốt vướng, khàn tiếng (nếu có, thì bao lâu rồi).' },
-  { key: 'ent_other', label: 'Hỏi thêm', placeholder: 'Nhức đầu, chóng mặt, buồn nôn.' },
-  { key: 'ent_scope_nose', label: 'Nội soi mũi', placeholder: 'Niêm mạc sung huyết, dịch nhầy, mủ khe mũi giữa, vòm mũi họng sung huyết, dịch nhầy, mủ. V.A.' },
-  { key: 'ent_scope_ear', label: 'Nội soi tai', placeholder: 'Ống tai, màng nhĩ.' },
-  { key: 'ent_scope_throat', label: 'Nội soi họng', placeholder: 'Dây thanh, xoang lê, amidan, đáy lưỡi có lympho quá phát.' },
-];
-
-const NOTES_DRAFT_DEFAULT = {
-  visit_date: '',
-  reason_for_visit: '',
-  vitals: { pulse: '', blood_pressure: '', resp_rate: '', temperature: '' },
-  general_exam: '', cardio_exam: '', resp_exam: '', abdomen_exam: '', other_exam: '',
-  ent_ear: '', ent_nose: '', ent_throat: '', ent_other: '', ent_scope_nose: '', ent_scope_ear: '', ent_scope_throat: '',
-};
-
-const NOTE_STATUS_META = {
-  draft: { label: 'Nháp', className: 'pp-status-progress' },
-  final: { label: 'Đã lưu', className: 'pp-status-done' },
-};
-
-// Converts a saved clinical-note record (from the API) into the flat draft shape the
-// "Ghi chú" form/state uses — the two already share field names, this just fills gaps.
-const noteToDraft = (note) => ({
-  visit_date: note.visit_date || '',
-  reason_for_visit: note.reason_for_visit || '',
-  vitals: {
-    pulse: note.vitals?.pulse || '', blood_pressure: note.vitals?.blood_pressure || '',
-    resp_rate: note.vitals?.resp_rate || '', temperature: note.vitals?.temperature || '',
-  },
-  general_exam: note.general_exam || '', cardio_exam: note.cardio_exam || '', resp_exam: note.resp_exam || '',
-  abdomen_exam: note.abdomen_exam || '', other_exam: note.other_exam || '',
-  ent_ear: note.ent_ear || '', ent_nose: note.ent_nose || '', ent_throat: note.ent_throat || '', ent_other: note.ent_other || '',
-  ent_scope_nose: note.ent_scope_nose || '', ent_scope_ear: note.ent_scope_ear || '', ent_scope_throat: note.ent_scope_throat || '',
-});
-
-const stripDiacriticsVN = (str) => (str || '')
-  .normalize('NFD')
-  .replace(/[̀-ͯ]/g, '')
-  .replace(/đ/g, 'd')
-  .replace(/Đ/g, 'D')
-  .toLowerCase();
-
-const DOC_CATEGORY_META = {
-  lab: { label: 'Xét nghiệm', icon: FlaskConical, pill: 'pp-pill-orange' },
-  imaging: { label: 'Hình ảnh', icon: ImageIcon, pill: 'pp-pill-green' },
-  xray: { label: 'X-quang', icon: ScanLine, pill: 'pp-pill-blue' },
-  endoscopy: { label: 'Nội soi', icon: Stethoscope, pill: 'pp-pill-purple' },
-  ultrasound: { label: 'Siêu âm', icon: Waves, pill: 'pp-pill-pink' },
-  other: { label: 'Tài liệu khác', icon: FileText, pill: 'pp-pill-slate' },
-};
-
-const DOC_CATEGORY_ORDER = ['lab', 'imaging', 'xray', 'endoscopy', 'ultrasound', 'other'];
-
-const classifyAttachmentCategory = (att) => {
-  const name = stripDiacriticsVN(att.original_name || '');
-  const ext = (att.file_type || '').toUpperCase();
-  if (name.includes('x-quang') || name.includes('x quang') || name.includes('xquang') || name.includes('x-ray') || name.includes('xray')) return 'xray';
-  if (name.includes('sieu am')) return 'ultrasound';
-  if (name.includes('noi soi')) return 'endoscopy';
-  if (name.includes('xet nghiem') || name.includes('ket qua xn') || name.includes('ket qua xet')) return 'lab';
-  if (['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF'].includes(ext)) return 'imaging';
-  return 'other';
-};
-
-const DOC_FILE_HUE = {
-  PDF: 'red',
-  DOC: 'blue',
-  DOCX: 'blue',
-  XLS: 'green',
-  XLSX: 'green',
-};
-
-const getDocFileHue = (ext) => DOC_FILE_HUE[(ext || '').toUpperCase()] || 'slate';
-
-const VITAL_META = {
-  pulse: { label: 'Mạch', unit: 'lần/phút', icon: Heart, color: '#ec4899' },
-  blood_pressure: { label: 'Huyết áp', unit: 'mmHg', icon: Activity, color: '#ef4444' },
-  resp_rate: { label: 'Nhịp thở', unit: 'lần/phút', icon: Waves, color: '#3b82f6' },
-  temperature: { label: 'Nhiệt độ', unit: '°C', icon: Thermometer, color: '#f59e0b' },
-};
-
-const formatFileSize = (bytes) => {
-  if (!bytes && bytes !== 0) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
 
 const DRUG_QUICK_SUGGESTIONS = [
   "Amoxicilin",
@@ -313,123 +87,23 @@ const DRUG_QUICK_SUGGESTIONS = [
   "Cephalosporin"
 ];
 
-const DEFAULT_PARACETAMOL_REPORT = {
-  drug_name: 'Paracetamol (Acetaminophen)',
-  subtitle: 'Thuốc giảm đau – hạ sốt không opioid',
-  created_at: '29/08/2026 14:30',
-  model_used: 'Deepseek',
-  confidence_overall: 'Cao',
-  sections: [
-    {
-      id: '1',
-      title: '1. Tổng quan',
-      confidence: 'Cao',
-      content: 'Paracetamol (Acetaminophen) là thuốc giảm đau và hạ sốt thuộc nhóm thuốc giảm đau – hạ sốt không opioid [1]. Thuốc có tác dụng chủ yếu trên hệ thần kinh trung ương, ít tác dụng chống viêm [1][2].'
-    },
-    {
-      id: '2',
-      title: '2. Chỉ định',
-      confidence: 'Cao',
-      content: '• Giảm đau nhẹ đến vừa: đau đầu, đau răng, đau cơ, đau bụng kinh, đau do cảm cúm [1][3].\n• Hạ sốt trong các trường hợp sốt do nhiễm virus, cảm cúm, sau tiêm chủng [2].\n• Thay thế cho Aspirin ở bệnh nhân không dung nạp NSAID [1].'
-    },
-    {
-      id: '3',
-      title: '3. Liều dùng',
-      confidence: 'Cao',
-      content: '**Người lớn và trẻ em ≥ 12 tuổi:**\n• Liều thông thường: 500 – 1.000 mg/lần, mỗi 4–6 giờ khi cần thiết [1][2].\n• Liều tối đa: 4.000 mg/ngày (không vượt quá 8 viên 500 mg) [3].\n\n**Trẻ em (dưới 12 tuổi):**\n• 10 – 15 mg/kg/lần, cách nhau 4–6 giờ (tối đa không quá 60 mg/kg/ngày) [1].'
-    },
-    {
-      id: '4',
-      title: '4. Chống chỉ định',
-      confidence: 'Cao',
-      content: '• Quá mẫn cảm với Paracetamol hoặc bất kỳ thành phần nào của thuốc [1].\n• Bệnh nhân suy gan nặng, bệnh gan tiến triển hoặc viêm gan virus cấp [2][3].\n• Bệnh nhân thiếu hụt enzym Glucose-6-phosphate dehydrogenase (G6PD) [1].'
-    },
-    {
-      id: '5',
-      title: '5. Tác dụng phụ',
-      confidence: 'Cao',
-      content: '• Thường gặp: Ban da nhẹ, mày đay, ngứa [2].\n• Hiếm gặp: Giảm bạch cầu trung tính, giảm tiểu cầu, phản ứng da nghiêm trọng (hội chứng Stevens-Johnson, TEN) [1].\n• Độc tính trên gan: Nguy cơ hoại tử tế bào gan cấp tính khi dùng quá liều hoặc dùng kèm rượu [3].'
-    },
-    {
-      id: '6',
-      title: '6. Tương tác thuốc',
-      confidence: 'Cao',
-      content: '• **Rượu (Ethanol):** Uống nhiều rượu làm tăng cảm ứng enzym CYP2E1 tạo chất độc NAPQI gây tổn thương gan nặng [1][2].\n• **Thuốc chống đông (Warfarin):** Dùng Paracetamol liều cao kéo dài làm tăng nhẹ tác dụng chống đông và nguy cơ chảy máu [3].\n• **Thuốc cảm ứng enzym gan (Phenobarbital, Phenytoin, Carbamazepine, Isoniazid):** Tăng độc tính trên gan của Paracetamol [2].'
-    },
-    {
-      id: '7',
-      title: '7. Thận trọng',
-      confidence: 'Cao',
-      content: '• **Tránh quá liều trùng lặp:** Kiểm tra thành phần các biệt dược điều trị cảm cúm phối hợp để tránh dùng quá liều Paracetamol vô ý [1].\n• **Bệnh nhân nguy cơ:** Thận trọng ở người suy gan nhẹ/vừa, suy thận nặng, người nghiện rượu mãn tính, suy dinh dưỡng hoặc mất nước [3].\n• **Phụ nữ có thai:** Được coi là thuốc giảm đau, hạ sốt lựa chọn hàng đầu an toàn trong thai kỳ khi dùng ở liều điều trị thấp nhất có hiệu quả và thời gian ngắn nhất (FDA Category B) [1][2].\n• **Phụ nữ cho con bú:** Thuốc bài tiết qua sữa mẹ với nồng độ rất thấp, an toàn khi cho con bú [2].'
-    },
-    {
-      id: '8',
-      title: '8. Dạng bào chế',
-      confidence: 'Cao',
-      content: '• Viên nén, viên nang: 325 mg, 500 mg, 650 mg [1].\n• Viên sủi bọt: 500 mg, 1.000 mg (Efferalgan, Panadol) [1].\n• Gói bột/cốm sủi pha hỗn dịch: 80 mg, 150 mg, 250 mg (chuyên biệt cho trẻ nhỏ) [2].\n• Dung dịch tiêm truyền: 10 mg/ml (Chai 100 ml tương đương 1.000 mg) [3].\n• Viên đạn đặt trực tràng: 80 mg, 150 mg, 300 mg [1].'
-    },
-    {
-      id: '9',
-      title: '9. Bảo quản',
-      confidence: 'Cao',
-      content: '• Bảo quản ở nhiệt độ dưới 30°C, nơi khô ráo, tránh ánh sáng trực tiếp và ẩm ướt [1].\n• Để xa tầm tay trẻ em [1].'
-    }
-  ],
-  quick_summary: [
-    { type: 'success', text: 'Giảm đau, hạ sốt hiệu quả' },
-    { type: 'success', text: 'An toàn nếu dùng đúng liều' },
-    { type: 'warning', text: 'Nguy cơ độc gan khi quá liều' },
-    { type: 'danger', text: 'Tránh dùng chung với rượu' }
-  ],
-  sources: [
-    {
-      id: '1',
-      doc_name: 'THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf',
-      file_size: 'PDF • 61.8 MB',
-      page_num: 'Trang 21',
-      snippet: 'Chuyên luận Dược học & Biệt dược: Paracetamol (Acetaminophen) phối hợp và đơn chất. Chỉ định hạ sốt, giảm đau nhẹ đến vừa. Liều người lớn 500-1000mg/lần, tối đa 4g/ngày. Chống chỉ định suy gan nặng, thiếu hụt men G6PD.',
-      text: '### PARACETAMOL - DƯỢC THƯ BIỆT DƯỢC VÀ CÁCH SỬ DỤNG (Trang 21)\n\n**Tác dụng - Dược lý:** Thuốc giảm đau - hạ sốt hữu hiệu thay thế aspirin. Không gây kích ứng niêm mạc dạ dày hoặc ức chế kết tập tiểu cầu.\n\n**Chỉ định:** Các chứng đau từ nhẹ đến trung bình (nhức đầu, đau răng, đau nhức cơ xương khớp, đau sau phẫu thuật) và các trường hợp sốt do mọi nguyên nhân.\n\n**Liều dùng - Cách dùng:** Người lớn và trẻ em trên 12 tuổi: uống 500–1.000 mg mỗi 4–6 giờ khi cần; không quá 4.000 mg/24 giờ.\n\n**Chống chỉ định:** Người bệnh quá mẫn với paracetamol; suy giảm chức năng tế bào gan nặng; thiếu máu nhiều lần.',
-      score: 0.98
-    },
-    {
-      id: '2',
-      doc_name: 'THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf',
-      file_size: 'PDF • 61.8 MB',
-      page_num: 'Trang 18',
-      snippet: 'Dạng thuốc - Trình bày: Viên nén 500mg, viên sủi bọt, bột cốm hòa tan. Thận trọng không dùng cùng lúc nhiều biệt dược chứa cùng hoạt chất để tránh ngộ độc gan cấp tính do quá liều.',
-      text: '### PARACETAMOL - DẠNG THUỐC VÀ TRÌNH BÀY (Trang 18)\n\n**Dạng thuốc:** Viên nén, viên nang 325mg, 500mg; viên sủi bọt Efferalgan/Panadol 500mg, 1000mg; gói thuốc cốm/bột sủi 80mg, 150mg, 250mg cho trẻ em.\n\n**Lưu ý:** Tuyệt đối không dùng chung với rượu hoặc các biệt dược cảm cúm khác chứa paracetamol để tránh tích lũy độc tố NAPQI gây hoại tử tế bào gan.',
-      score: 0.95
-    },
-    {
-      id: '3',
-      doc_name: 'THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf',
-      file_size: 'PDF • 61.8 MB',
-      page_num: 'Trang 19',
-      snippet: 'Lưu ý - Thận trọng: Phụ nữ có thai và cho con bú có thể sử dụng ở liều điều trị ngắn nhất có hiệu quả. Cần thận trọng điều chỉnh liều ở người suy gan, suy thận nặng.',
-      text: '### PARACETAMOL - THẬN TRỌNG VÀ TƯƠNG TÁC (Trang 19)\n\n**Phụ nữ có thai & Cho con bú:** Thuốc qua được hàng rào nhau thai và bài tiết vào sữa mẹ với lượng rất nhỏ; là lựa chọn ưu tiên an toàn trong thai kỳ và thời kỳ nuôi con bú khi dùng đúng liều chỉ định.\n\n**Tương tác thuốc:** Dùng dài ngày liều cao có thể làm tăng nhẹ tác dụng chống đông của coumarin và dẫn chất indandion.',
-      score: 0.92
-    },
-    {
-      id: '4',
-      doc_name: 'THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf',
-      file_size: 'PDF • 61.8 MB',
-      page_num: 'Trang 178',
-      snippet: 'Biệt dược phối hợp: Paracetamol kết hợp Cafein, Codein, kháng histamin. Cần kiểm tra kỹ thành phần tổng liều tránh vượt quá ngưỡng an toàn điều trị.',
-      text: '### PARACETAMOL - CÁC BIỆT DƯỢC PHỐI HỢP (Trang 178)\n\nCác biệt dược phối hợp phổ biến: Paracetamol + Cafein (giảm mệt mỏi, tăng hấp thu), Paracetamol + Codein (giảm đau bậc 2), Paracetamol + Chlorpheniramin (điều trị triệu chứng cảm sổ mũi).',
-      score: 0.89
-    }
-  ]
-};
+// Ba chức năng duy nhất của app. `match` gom các tab con: "Tra cứu thuốc" gồm cả
+// tra thuốc lẫn kệ sách tài liệu gốc.
+const MAIN_TABS = [
+  { id: 'chat', label: 'Cuộc trò chuyện mới', Icon: SquarePen, match: ['chat'] },
+  { id: 'diagnosisTree', label: 'Chẩn đoán', Icon: Stethoscope, match: ['diagnosisTree'] },
+  { id: 'medicine', label: 'Tra cứu thuốc', Icon: Pill, match: ['medicine', 'library'] },
+];
 
 export default function App() {
   // Read-only "shared conversation" route: /?share=<id> (query-based so any static host works)
   const shareViewId = new URLSearchParams(window.location.search).get('share');
 
   // Navigation & Page state
-  const [activeTab, setActiveTab] = useState('medicine'); // Default to 'medicine' tab per user focus
+  const [activeTab, setActiveTab] = useState('chat'); // Mở thẳng vào Hỏi đáp y khoa, không màn giới thiệu
   // Every persisted preference behind the settings dialog lives in this hook.
   const settings = useSettings();
-  const { isDarkMode, libraryViewMode, setLibraryViewMode, notifyEnabled, notifyRecheck } = settings;
+  const { isDarkMode, libraryViewMode, setLibraryViewMode } = settings;
   // Phiên đăng nhập & phân quyền — quyết định thấy hồ sơ của ai, sửa được gì.
   const auth = useAuth();
   const { user: currentUser, permissions } = auth;
@@ -438,7 +112,6 @@ export default function App() {
   const doctorName = currentUser?.display_name || profiles.activeProfile?.display_name || 'BS. Hà Thanh Hùng';
   const [clinicAdminOpen, setClinicAdminOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const [exportPdfOpen, setExportPdfOpen] = useState(false);
   const toggleTheme = () => settings.setAppearance(isDarkMode ? 'light' : 'dark');
 
   // Gỡ màn hình khởi động nằm trong index.html. Nó phải sống cho tới khi biết
@@ -455,14 +128,13 @@ export default function App() {
     if (auth.status !== 'ready') return;
     profiles.refresh();
     fetchDocuments();
-    fetchPatients();
-    fetchNotifications();
   }, [auth.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showSourcesPanel, setShowSourcesPanel] = useState(true);
 
   // Core Data State
   const [documents, setDocuments] = useState([]);
+  const [documentsError, setDocumentsError] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -472,11 +144,24 @@ export default function App() {
   const [librarySortBy, setLibrarySortBy] = useState('newest'); // 'newest' | 'oldest' | 'name' | 'pages'
   const [deleteDocTarget, setDeleteDocTarget] = useState(null); // doc_name | null
   const [libraryPreview, setLibraryPreview] = useState(null); // { doc_name, page_num, text } | null
-  // Reader: xem ảnh scan trang gốc thay cho văn bản OCR (đối chiếu trích dẫn)
-  const [readerShowScan, setReaderShowScan] = useState(false);
-  // Đợt 4 — hai cột: ảnh scan bên trái, chữ OCR bên phải. readerShowScan vẫn
-  // giữ nguyên và trở thành cách xem khi màn hình hẹp, chỗ không đủ cho hai cột.
-  const [readerTwoCol, setReaderTwoCol] = useState(true);
+  // Đợt 6 — gộp tab "Đối chiếu" vào Thư viện: chọn nhiều thẻ rồi so sánh ngay
+  // tại chỗ, thay vì phải nhảy sang một tab riêng để chọn lại từ đầu.
+  const [librarySelectMode, setLibrarySelectMode] = useState(false);
+  const [librarySelectedDocs, setLibrarySelectedDocs] = useState([]); // [doc_name]
+  const [showComparePanel, setShowComparePanel] = useState(false);
+  const compareViewRef = useRef(null);
+  // Tiến độ các lượt nạp PDF đang chạy nền (bác sĩ tự tải lên), theo dõi qua SSE —
+  // xem handleFileUpload và backend/generic_ingest.py.
+  const [uploadJobs, setUploadJobs] = useState([]); // [{jobId, docName, fileName, stage, current, total, status, error}]
+  // Reader: mặc định xem TRANG GỐC có tô sáng đoạn trích dẫn (PageViewer);
+  // bật cái này để đọc bản chữ OCR thay vì ảnh.
+  const [readerShowText, setReaderShowText] = useState(false);
+  // Đoạn trích dẫn đang được tô trên trang: { doc_name, page_num, quote }.
+  // Chỉ áp cho đúng trang đó — lật sang trang khác thì không tô gì.
+  const [readerQuote, setReaderQuote] = useState(null);
+  // "Hỏi về tài liệu này": khi khác null, câu hỏi chỉ tra trong tài liệu này.
+  // { doc_name, doc_title, page_num }
+  const [chatScope, setChatScope] = useState(null);
   // Ô gõ số trang. Giữ riêng với activePage.page_num vì lúc bác sĩ đang gõ "40"
   // trên đường tới "400" thì chưa được nhảy trang.
   const [readerPageInput, setReaderPageInput] = useState('');
@@ -490,11 +175,19 @@ export default function App() {
   const [readerHighlight, setReaderHighlight] = useState('');
 
   // Lịch sử tra cứu (tái sử dụng kết quả cũ thay vì hỏi lại AI)
-  const [historyOpen, setHistoryOpen] = useState(false);
   // { doc_name: số đoạn đã tô sáng }
   const [highlightCounts, setHighlightCounts] = useState({});
   const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('deepseek_api_key') || '');
+  // "Tìm thêm trên web": danh sách công cụ máy chủ bật (rỗng = ẩn nút), và lựa
+  // chọn của bác sĩ — nhớ theo trình duyệt, mặc định tắt.
+  const [webSearchTools, setWebSearchTools] = useState([]);
+  const [webSearchOn, setWebSearchOn] = useState(() => {
+    try { return localStorage.getItem('web_search_on') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('web_search_on', webSearchOn ? '1' : '0'); } catch { /* chế độ riêng tư */ }
+  }, [webSearchOn]);
   const [bannerMessage, setBannerMessage] = useState('');
   const [backendHasKey, setBackendHasKey] = useState(false);
 
@@ -502,7 +195,6 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState('general');
-  const doctorNamePlain = doctorName.replace(/^BS\.?\s*/i, '').trim(); // "doctor_name" fields store the bare name, no "BS." prefix
 
   const openSettings = (section) => {
     if (section) setSettingsSection(section);
@@ -516,130 +208,16 @@ export default function App() {
   const [activePage, setActivePage] = useState(null);
   const [activeSources, setActiveSources] = useState([]);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
-
-  // Dynamic state for patients (hồ sơ bệnh nhân)
-  const [patients, setPatients] = useState([]);
-  const [selectedPatientId, setSelectedPatientId] = useState(null);
-  const [selectedPatient, setSelectedPatient] = useState(null);
-  const [patientDetailLoading, setPatientDetailLoading] = useState(false);
-  const [patientSearchQuery, setPatientSearchQuery] = useState('');
-  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
-  const [patientSearchResults, setPatientSearchResults] = useState([]);
-  const [patientProfileTab, setPatientProfileTab] = useState('overview');
-  const [isAddPatientOpen, setIsAddPatientOpen] = useState(false);
-  const [nextPatientCode, setNextPatientCode] = useState('');
-  const [isEditingQuickNote, setIsEditingQuickNote] = useState(false);
-  const [quickNoteDraft, setQuickNoteDraft] = useState('');
-
-  // "Ghi chú" tab (clinical visit notes, backed by /api/patients/{id}/notes) state
-  const [activeNoteId, setActiveNoteId] = useState(null);
-  const [isNoteFormOpen, setIsNoteFormOpen] = useState(false); // full form: creating new, or bulk-editing an existing note
-  const [noteFormDraft, setNoteFormDraft] = useState(NOTES_DRAFT_DEFAULT);
-  const [isSavingNote, setIsSavingNote] = useState(false);
-
-  // Notification bell (nhắc lịch tái khám)
-  const [notifications, setNotifications] = useState([]);
-  const [notifLoading, setNotifLoading] = useState(false);
-  const [dismissedNotifIds, setDismissedNotifIds] = useState(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem('notif_dismissed_ids') || '[]'));
-    } catch {
-      return new Set();
-    }
-  });
-
-  // "Lịch sử khám bệnh" tab state
-  const [historyDateRange, setHistoryDateRange] = useState('all');
-  const [historyStatus, setHistoryStatus] = useState('all');
-  const [historyDiagnosisSearch, setHistoryDiagnosisSearch] = useState('');
-  const [historyDoctor, setHistoryDoctor] = useState('all');
-  const [expandedHistoryVisitId, setExpandedHistoryVisitId] = useState(null);
-
-  // "Tạo kế hoạch mới" side panel state — mirrors the 4 feature cards on the "Kế hoạch điều trị" tab
-  const [isAddVisitOpen, setIsAddVisitOpen] = useState(false);
-  const [isSavingVisit, setIsSavingVisit] = useState(false);
-  const [newVisitDate, setNewVisitDate] = useState('');
-  const [newVisitDoctor, setNewVisitDoctor] = useState('');
-  const [newVisitTitle, setNewVisitTitle] = useState('');
-  // 1. Chẩn đoán
-  const [newVisitSymptomInput, setNewVisitSymptomInput] = useState('');
-  const [newVisitSymptoms, setNewVisitSymptoms] = useState([]);
-  const [newVisitDiagnosis, setNewVisitDiagnosis] = useState('');
-  const [newVisitDiagnosisSecondary, setNewVisitDiagnosisSecondary] = useState('');
-  const [newVisitExamFindings, setNewVisitExamFindings] = useState('');
-  // 2. Kế hoạch điều trị
-  const [newVisitGoals, setNewVisitGoals] = useState('');
-  const [newVisitTreatmentMethod, setNewVisitTreatmentMethod] = useState('');
-  const [newVisitProtocolDuration, setNewVisitProtocolDuration] = useState('');
-  const [newVisitDietRegimen, setNewVisitDietRegimen] = useState('');
-  const [newVisitPrecautions, setNewVisitPrecautions] = useState('');
-  const [newVisitFollowupPurpose, setNewVisitFollowupPurpose] = useState('');
-  const [newVisitFollowupDate, setNewVisitFollowupDate] = useState('');
-  const [newVisitTreatmentInstructions, setNewVisitTreatmentInstructions] = useState('');
-  // 3. Đơn thuốc
-  const [newVisitMedications, setNewVisitMedications] = useState([]);
-  const [isAddingVisitMedication, setIsAddingVisitMedication] = useState(false);
-  const [visitMedDraft, setVisitMedDraft] = useState({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' });
-  const [newVisitNoDrugRecommendations, setNewVisitNoDrugRecommendations] = useState('');
-  // 4. Hướng dẫn cho bệnh nhân
-  const [newVisitCareInstructions, setNewVisitCareInstructions] = useState('');
-
-  // "Tài liệu đính kèm" tab state
-  const [docSearch, setDocSearch] = useState('');
-  const [docCategory, setDocCategory] = useState('all');
-  const [docDateRange, setDocDateRange] = useState('all');
-  const [docStatus, setDocStatus] = useState('all');
-  const [docSort, setDocSort] = useState('newest');
-  const [docView, setDocView] = useState('grid');
-  const [docVisibleCount, setDocVisibleCount] = useState(8);
-
-  // "Điều trị" tab (treatment plan) state
-  const [activeTreatmentVisitId, setActiveTreatmentVisitId] = useState(null);
-  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
-  const [aiReasoningNote, setAiReasoningNote] = useState('');
-  const [aiAgentTrace, setAiAgentTrace] = useState([]);
-  const [aiAgentSources, setAiAgentSources] = useState([]);
-  const [aiAgentTraceExpanded, setAiAgentTraceExpanded] = useState(false);
-  const [isEditingDiagnosis, setIsEditingDiagnosis] = useState(false);
-  const [diagnosisDraft, setDiagnosisDraft] = useState({ primary: '', differentials: '', exam: '' });
-  const [isEditingDiagnosisNote, setIsEditingDiagnosisNote] = useState(false);
-  const [diagnosisNoteDraft, setDiagnosisNoteDraft] = useState('');
-  const [showDiagnosisReasoning, setShowDiagnosisReasoning] = useState(false);
-  const [isEditingNoDrug, setIsEditingNoDrug] = useState(false);
-  const [noDrugDraft, setNoDrugDraft] = useState('');
-  const [isEditingCare, setIsEditingCare] = useState(false);
-  const [careDraft, setCareDraft] = useState('');
-  const [isEditingFollowup, setIsEditingFollowup] = useState(false);
-  const [followupDraft, setFollowupDraft] = useState({ date: '', purpose: '' });
-  const [isEditingPlan, setIsEditingPlan] = useState(false);
-  const [planDraft, setPlanDraft] = useState({ goals: '', protocol_duration: '', treatment_method: '', diet_regimen: '', precautions: '' });
-  const [isAddingMedication, setIsAddingMedication] = useState(false);
-  const [medDraft, setMedDraft] = useState({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' });
-
-  // Form states for the "Thêm bệnh nhân" panel
-  const [newPatName, setNewPatName] = useState('');
-  const [newPatGender, setNewPatGender] = useState('Nam');
-  const [newPatPhone, setNewPatPhone] = useState('');
-  const [newPatEmail, setNewPatEmail] = useState('');
-  const [newPatAddress, setNewPatAddress] = useState('');
-  const [newPatBloodType, setNewPatBloodType] = useState('');
-  const [newPatHeight, setNewPatHeight] = useState(170);
-  const [newPatWeight, setNewPatWeight] = useState(60);
-  const [newPatDiagnosis, setNewPatDiagnosis] = useState('');
-  const [newPatMedHistory, setNewPatMedHistory] = useState('');
-  const [newPatFamilyHistory, setNewPatFamilyHistory] = useState('');
-  const [newPatAllergiesNotes, setNewPatAllergiesNotes] = useState('');
-  const [newPatMedications, setNewPatMedications] = useState([]);
-  const [isAddingPatMedication, setIsAddingPatMedication] = useState(false);
-  const [patMedDraft, setPatMedDraft] = useState({ name: '', dosage: '', form: '', frequency: '', instructions: '' });
-  const [newPatNoDrugRecommendations, setNewPatNoDrugRecommendations] = useState('');
-  const [newPatCareInstructions, setNewPatCareInstructions] = useState('');
-  const [isSavingPatient, setIsSavingPatient] = useState(false);
+  // Lượt tra (feedback_db) của danh sách nguồn đang mở — để "mở trang" và
+  // "Báo sai trang" gắn đúng vào câu hỏi đã sinh ra các trang đó.
+  const [activeLogId, setActiveLogId] = useState(null);
+  const [wrongPages, setWrongPages] = useState(() => new Set());
 
   // "Thuốc" (medicine lookup & AI report) state
   const [drugQuery, setDrugQuery] = useState('');
   const [drugLoading, setDrugLoading] = useState(false);
-  const [drugReport, setDrugReport] = useState(DEFAULT_PARACETAMOL_REPORT);
+  // null = chưa tra cứu gì — hiện trạng thái rỗng thay vì báo cáo mẫu.
+  const [drugReport, setDrugReport] = useState(null);
   const [activeDrugTocId, setActiveDrugTocId] = useState('1');
   const [selectedFactCheckDoc, setSelectedFactCheckDoc] = useState(null);
   const [showAllResourcesDialog, setShowAllResourcesDialog] = useState(false);
@@ -678,25 +256,16 @@ export default function App() {
   const [selectedDiagnosisIds, setSelectedDiagnosisIds] = useState(new Set());
   const [isPreparingHandoff, setIsPreparingHandoff] = useState(false);
 
-  // "Bệnh nhân" linking section on the Diagnosis Tree tab — lets the doctor tie this
-  // diagnosis session to an existing patient record (or flag it as a new patient),
-  // then hand the results off to the Patients tab via "Cập nhật bệnh".
-  const [diagPatientQuery, setDiagPatientQuery] = useState('');
-  const [diagPatientSearchOpen, setDiagPatientSearchOpen] = useState(false);
-  const [diagPatientResults, setDiagPatientResults] = useState([]);
-  const [diagSelectedPatient, setDiagSelectedPatient] = useState(null);
+  // Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — gửi kèm cả bốn bước
+  // của cây chẩn đoán. App không lưu hồ sơ bệnh nhân; chữ này chỉ sống trong phiên.
+  const [patientHistory, setPatientHistory] = useState('');
   // Nguyên văn khối tiền sử backend đã gửi ra DeepSeek, trả ngược về để hiện
-  // cho bác sĩ. Không tự dựng lại ở frontend: dựng lại là có phiên bản thứ hai,
-  // và phiên bản thứ hai thì không chứng minh được điều gì về cái đã gửi thật.
+  // cho bác sĩ.
   const [patientContextSent, setPatientContextSent] = useState(null);
   const [allergyCheck, setAllergyCheck] = useState(null);
-  // Gập sẵn. Y văn về mệt mỏi cảnh báo và về giải thích dài bị bỏ qua đều
-  // chống lại một panel luôn mở: tỉ lệ bỏ qua cảnh báo CDSS đo được 46,2–96,2%.
   const [patientContextOpen, setPatientContextOpen] = useState(false);
-  // Non-null while a diagnosis session is being handed off to the Patients tab — read by
-  // handleSaveNewVisit to know it should redirect into the Điều trị tab instead of the
-  // regular "expand this visit in Lịch sử" behavior.
-  const [diagHandoffPayload, setDiagHandoffPayload] = useState(null);
+  // Gợi ý điều trị cho các chẩn đoán bác sĩ đã chọn, hiện ngay trong tab Chẩn đoán.
+  const [treatmentResult, setTreatmentResult] = useState(null);
 
   // Multi-conversation state (ChatGPT-style): each conversation is its own thread with
   // a title, message list, and pin flag. Conversations persist to localStorage.
@@ -710,12 +279,8 @@ export default function App() {
   const [sharing, setSharing] = useState(false);
   const renameInputRef = useRef(null);
 
-  const makeWelcomeMessage = () => ({
-    role: 'assistant',
-    text: 'Ba đọc phần "Giới thiệu" để biết cách sử dụng web.',
-    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
-  });
-  const [draftWelcome, setDraftWelcome] = useState(() => [makeWelcomeMessage()]);
+  // Cuộc trò chuyện mới bắt đầu trống — không còn tin nhắn chào mẫu.
+  const [draftWelcome, setDraftWelcome] = useState(() => []);
 
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
   const messages = activeConversation ? activeConversation.messages : draftWelcome;
@@ -724,11 +289,19 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   // Suggested queries for Vietnamese UI
-  const suggestions = [
-    "Dấu hiệu đe dọa tính mạng của cơn hen phế quản cấp là gì?",
-    "Phác đồ xử trí ban đầu cho bệnh nhân nhồi máu cơ tim STEMI?",
-    "Khi nào chỉ định insulin ngay cho bệnh nhân đái tháo đường typ 2?"
-  ];
+  const [greeting] = useState(() => {
+    const options = [
+      'Hôm nay bác sĩ cần tra cứu gì?',
+      'Tôi có thể giúp gì cho bác sĩ?',
+      'Bác sĩ muốn hỏi điều gì?',
+    ];
+    return options[Math.floor(Math.random() * options.length)];
+  });
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const [convSearchOpen, setConvSearchOpen] = useState(false);
+  const [convSearch, setConvSearch] = useState('');
+  const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [recentsOpen, setRecentsOpen] = useState(true);
 
   // The dark-mode class and accent variable are applied by useSettings().
 
@@ -783,6 +356,7 @@ export default function App() {
         if (data && data.has_api_key) {
           setBackendHasKey(true);
         }
+        setWebSearchTools(data?.web_search_tools || []);
       })
       .catch(err => console.error("Error fetching config status:", err));
   }, []);
@@ -800,7 +374,7 @@ export default function App() {
   // Sync API warning banner
   useEffect(() => {
     if (!apiKey && !backendHasKey) {
-      setBannerMessage("Cảnh báo: Chưa cấu hình DeepSeek API Key. Hãy cấu hình API Key trong backend hoặc mục Cài đặt để sử dụng tính năng Chat AI phản hồi đầy đủ.");
+      setBannerMessage("Chưa cấu hình khóa AI: câu trả lời AI sẽ không hiển thị, chỉ hiện trang sách.");
     } else {
       setBannerMessage("");
     }
@@ -826,17 +400,18 @@ export default function App() {
   }, [renamingConvId]);
 
   const fetchDocuments = async () => {
+    setDocumentsError('');
     try {
       const res = await fetch('/api/documents');
       if (res.ok) {
         const data = await res.json();
         setDocuments(data || []);
       } else {
-        setDocuments([]);
+        setDocumentsError('Không tải được thư viện. Vui lòng thử lại.');
       }
     } catch (err) {
       console.error("Error fetching documents:", err);
-      setDocuments([]);
+      setDocumentsError('Không kết nối được với thư viện. Vui lòng thử lại.');
     }
   };
 
@@ -849,732 +424,6 @@ export default function App() {
       console.error("Error fetching highlight counts:", err);
     }
   };
-
-  const fetchPatients = async (search) => {
-    try {
-      const url = search ? `/api/patients?search=${encodeURIComponent(search)}` : '/api/patients';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setPatients(data || []);
-        return data || [];
-      }
-    } catch (err) {
-      console.error("Error fetching patients:", err);
-    }
-    return [];
-  };
-
-  const fetchPatientDetail = async (id) => {
-    if (!id) { setSelectedPatient(null); return; }
-    setPatientDetailLoading(true);
-    try {
-      const res = await fetch(`/api/patients/${id}`);
-      if (res.ok) {
-        setSelectedPatient(await res.json());
-      } else {
-        setSelectedPatient(null);
-      }
-    } catch (err) {
-      console.error("Error fetching patient detail:", err);
-      setSelectedPatient(null);
-    } finally {
-      setPatientDetailLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (selectedPatientId) fetchPatientDetail(selectedPatientId);
-    else setSelectedPatient(null);
-  }, [selectedPatientId]);
-
-  // Auto-select the most recent patient once the list has loaded, if none chosen yet
-  useEffect(() => {
-    if (!selectedPatientId && patients.length > 0) {
-      setSelectedPatientId(patients[0].id);
-    }
-  }, [patients]);
-
-  const handlePatientSearchChange = async (value) => {
-    setPatientSearchQuery(value);
-    setPatientSearchOpen(true);
-    if (!value.trim()) { setPatientSearchResults([]); return; }
-    try {
-      const res = await fetch(`/api/patients?search=${encodeURIComponent(value)}`);
-      if (res.ok) setPatientSearchResults((await res.json()) || []);
-    } catch (err) {
-      console.error("Error searching patients:", err);
-    }
-  };
-
-  const handleSelectSearchedPatient = (id) => {
-    setSelectedPatientId(id);
-    setPatientSearchQuery('');
-    setPatientSearchResults([]);
-    setPatientSearchOpen(false);
-  };
-
-  const fetchNotifications = async () => {
-    setNotifLoading(true);
-    try {
-      const res = await fetch('/api/notifications');
-      const data = await res.json();
-      setNotifications(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Error fetching notifications:", err);
-    } finally {
-      setNotifLoading(false);
-    }
-  };
-
-  const dismissNotification = (visitId) => {
-    setDismissedNotifIds((prev) => {
-      const next = new Set(prev);
-      next.add(visitId);
-      localStorage.setItem('notif_dismissed_ids', JSON.stringify([...next]));
-      return next;
-    });
-  };
-
-  /** Hoãn / đánh dấu đã khám ngay trên chuông, không phải mở trang nhắc lịch. */
-  const actOnNotification = async (n, action, body) => {
-    if (!n.reminder_id) { dismissNotification(n.visit_id); return; }
-    try {
-      await apiSend(`/api/reminders/${n.reminder_id}/${action}`, 'POST', body);
-      await fetchNotifications();
-    } catch (err) {
-      showStatus('error', err.message || 'Không cập nhật được lời nhắc.');
-    }
-  };
-
-  const handleNotificationClick = (n) => {
-    dismissNotification(n.visit_id);
-    setSelectedPatientId(n.patient_id);
-    setActiveTab('patients');
-  };
-
-  const visibleNotifications = notifyRecheck
-    ? notifications.filter((n) => !dismissedNotifIds.has(n.visit_id))
-    : [];
-
-  const resetAddPatientForm = () => {
-    setNewPatName(''); setNewPatGender('Nam');
-    setNewPatPhone(''); setNewPatEmail(''); setNewPatAddress('');
-    setNewPatBloodType(''); setNewPatHeight(170); setNewPatWeight(60);
-    setNewPatDiagnosis(''); setNewPatMedHistory(''); setNewPatFamilyHistory(''); setNewPatAllergiesNotes('');
-    setNewPatMedications([]); setIsAddingPatMedication(false);
-    setPatMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '' });
-    setNewPatNoDrugRecommendations(''); setNewPatCareInstructions('');
-  };
-
-  const handleAddPatMedication = () => {
-    if (!patMedDraft.name.trim()) return;
-    setNewPatMedications(prev => [...prev, { ...patMedDraft }]);
-    setPatMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '' });
-    setIsAddingPatMedication(false);
-  };
-
-  const handleRemovePatMedication = (idx) => {
-    setNewPatMedications(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  // handoffPayload, when present, comes from a Diagnosis-Tree handoff for a patient that
-  // doesn't exist yet (see handleUpdateDisease) — prefills "Chẩn đoán" and "Điều trị ban đầu"
-  // so the doctor isn't re-typing what the diagnosis pipeline already produced.
-  const openAddPatientModal = async (handoffPayload = null) => {
-    resetAddPatientForm();
-    setDiagHandoffPayload(handoffPayload);
-    if (handoffPayload) {
-      setNewPatDiagnosis([handoffPayload.diagnosisPrimary, handoffPayload.diagnosisSecondary].filter(Boolean).join('\n'));
-      setNewPatMedications(handoffPayload.medications || []);
-      setNewPatNoDrugRecommendations(handoffPayload.noDrugRecommendations || '');
-      setNewPatCareInstructions(handoffPayload.careInstructions || '');
-    }
-    setIsAddPatientOpen(true);
-    try {
-      const res = await fetch('/api/patients/next-code');
-      if (res.ok) setNextPatientCode((await res.json()).code);
-    } catch (err) {
-      console.error("Error fetching next patient code:", err);
-    }
-  };
-
-  const handleAddPatient = async (e) => {
-    e.preventDefault();
-    if (!newPatName.trim()) return;
-    setIsSavingPatient(true);
-    try {
-      const res = await fetch('/api/patients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newPatName.trim(),
-          gender: newPatGender,
-          phone: newPatPhone,
-          email: newPatEmail,
-          address: newPatAddress,
-          blood_type: newPatBloodType,
-          height_cm: newPatHeight ? parseFloat(newPatHeight) : null,
-          weight_kg: newPatWeight ? parseFloat(newPatWeight) : null,
-          chronic_conditions: newPatDiagnosis,
-          surgical_history: newPatMedHistory,
-          family_history: newPatFamilyHistory,
-          allergies: newPatAllergiesNotes,
-          notes: newPatAllergiesNotes,
-          created_by: doctorName
-        })
-      });
-
-      if (res.ok) {
-        const created = await res.json();
-        showStatus('success', `Đã thêm hồ sơ bệnh nhân "${created.name}" thành công.`);
-
-        // If the doctor filled in "Điều trị ban đầu" (and this isn't the diagnosis-tree handoff,
-        // which creates its own visit right after), save it as the patient's first visit — same
-        // mechanism as "+ Thêm lần khám".
-        const hasInitialTreatment = newPatMedications.length > 0
-          || newPatNoDrugRecommendations.trim()
-          || newPatCareInstructions.trim();
-        if (hasInitialTreatment && !diagHandoffPayload) {
-          try {
-            await fetch(`/api/patients/${created.id}/visits`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                visit_date: new Date().toISOString().slice(0, 10),
-                title: 'Khám ban đầu',
-                doctor_name: doctorNamePlain,
-                diagnosis_primary: newPatDiagnosis.trim(),
-                medications: newPatMedications,
-                no_drug_recommendations: newPatNoDrugRecommendations.trim(),
-                care_instructions: newPatCareInstructions.trim(),
-                status: 'in_progress',
-              })
-            });
-          } catch (err) {
-            console.error("Error creating initial treatment visit:", err);
-          }
-        }
-
-        resetAddPatientForm();
-        setIsAddPatientOpen(false);
-        await fetchPatients();
-        setSelectedPatientId(created.id);
-        if (diagHandoffPayload) {
-          prefillVisitFromHandoff(diagHandoffPayload);
-          setIsAddVisitOpen(true);
-        }
-      } else {
-        const data = await res.json();
-        throw new Error(data.detail || "Không thể thêm bệnh nhân.");
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    } finally {
-      setIsSavingPatient(false);
-    }
-  };
-
-  const handleDeletePatient = async (id) => {
-    if (!confirm("Bạn có chắc chắn muốn xóa hồ sơ bệnh nhân này?")) return;
-    try {
-      const res = await fetch(`/api/patients/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        showStatus('success', "Đã xóa hồ sơ bệnh nhân thành công.");
-        if (selectedPatientId === id) setSelectedPatientId(null);
-        fetchPatients();
-      } else {
-        throw new Error("Không thể xóa bệnh nhân.");
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    }
-  };
-
-  const handleSaveQuickNote = async () => {
-    if (!selectedPatient) return;
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/note`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: quickNoteDraft, updated_by: doctorName })
-      });
-      if (res.ok) {
-        await res.json();
-        await fetchPatientDetail(selectedPatient.id);
-        setIsEditingQuickNote(false);
-      } else {
-        throw new Error("Không thể lưu ghi chú.");
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    }
-  };
-
-  // --- "Ghi chú" tab (clinical visit notes) handlers ---
-  const openCreateNote = () => {
-    setActiveNoteId(null);
-    setNoteFormDraft(NOTES_DRAFT_DEFAULT);
-    setIsNoteFormOpen(true);
-  };
-
-  // Opens the full form to bulk-edit an existing note (draft or already-finalized) — there is
-  // no more per-field editing, editing means editing everything at once.
-  const openEditNote = (note) => {
-    setActiveNoteId(note.id);
-    setNoteFormDraft(noteToDraft(note));
-    setIsNoteFormOpen(true);
-  };
-
-  // Dropdown selection: a draft has no read-only view, so picking one opens it straight into
-  // the full form; a finalized note is shown read-only until "Sửa" is clicked (openEditNote).
-  const selectNote = (noteId) => {
-    const note = (selectedPatient?.notes || []).find(n => n.id === noteId);
-    if (note && note.status === 'draft') {
-      openEditNote(note);
-    } else {
-      setActiveNoteId(noteId);
-      setIsNoteFormOpen(false);
-    }
-  };
-
-  const handleNoteFormFieldChange = (key, value) => {
-    setNoteFormDraft(d => ({ ...d, [key]: value }));
-  };
-
-  const handleNoteFormVitalChange = (key, value) => {
-    setNoteFormDraft(d => ({ ...d, vitals: { ...d.vitals, [key]: value } }));
-  };
-
-  const handleCancelNoteForm = () => {
-    const note = activeNoteId ? (selectedPatient?.notes || []).find(n => n.id === activeNoteId) : null;
-    if (note && note.status === 'draft') {
-      // A draft has no read-only view, so cancelling just discards unsaved edits in place.
-      setNoteFormDraft(noteToDraft(note));
-    } else {
-      // Editing an already-finalized note, or a brand-new not-yet-saved one: cancel drops
-      // back to the read-only view (or the empty state, for a brand-new note).
-      setIsNoteFormOpen(false);
-      setNoteFormDraft(NOTES_DRAFT_DEFAULT);
-    }
-  };
-
-  const buildNotePayload = () => ({
-    visit_date: noteFormDraft.visit_date,
-    reason_for_visit: noteFormDraft.reason_for_visit.trim(),
-    vital_pulse: noteFormDraft.vitals.pulse.trim(),
-    vital_blood_pressure: noteFormDraft.vitals.blood_pressure.trim(),
-    vital_resp_rate: noteFormDraft.vitals.resp_rate.trim(),
-    vital_temperature: noteFormDraft.vitals.temperature.trim(),
-    general_exam: noteFormDraft.general_exam.trim(),
-    cardio_exam: noteFormDraft.cardio_exam.trim(),
-    resp_exam: noteFormDraft.resp_exam.trim(),
-    abdomen_exam: noteFormDraft.abdomen_exam.trim(),
-    other_exam: noteFormDraft.other_exam.trim(),
-    ent_ear: noteFormDraft.ent_ear.trim(),
-    ent_nose: noteFormDraft.ent_nose.trim(),
-    ent_throat: noteFormDraft.ent_throat.trim(),
-    ent_other: noteFormDraft.ent_other.trim(),
-    ent_scope_nose: noteFormDraft.ent_scope_nose.trim(),
-    ent_scope_ear: noteFormDraft.ent_scope_ear.trim(),
-    ent_scope_throat: noteFormDraft.ent_scope_throat.trim(),
-  });
-
-  const saveNoteForm = async (status) => {
-    if (!selectedPatient) return;
-    if (status === 'final' && !noteFormDraft.visit_date) {
-      showStatus('error', 'Vui lòng nhập ngày khám trước khi lưu ghi chú.');
-      return;
-    }
-    setIsSavingNote(true);
-    try {
-      const isNew = !activeNoteId;
-      const res = await fetch(
-        isNew ? `/api/patients/${selectedPatient.id}/notes` : `/api/patients/${selectedPatient.id}/notes/${activeNoteId}`,
-        {
-          method: isNew ? 'POST' : 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...buildNotePayload(), status }),
-        }
-      );
-      if (res.ok) {
-        const saved = await res.json();
-        showStatus('success', status === 'draft' ? 'Đã lưu nháp ghi chú.' : 'Đã lưu ghi chú thăm khám.');
-        setActiveNoteId(saved.id);
-        if (status === 'final') setIsNoteFormOpen(false);
-        await fetchPatientDetail(selectedPatient.id);
-      } else {
-        const data = await res.json();
-        throw new Error(data.detail || 'Không thể lưu ghi chú.');
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    } finally {
-      setIsSavingNote(false);
-    }
-  };
-
-  const handleSaveNoteDraft = () => saveNoteForm('draft');
-  const handleSaveNoteFinal = () => saveNoteForm('final');
-
-  const handleDeleteNote = async (noteId) => {
-    if (!selectedPatient) return;
-    if (!confirm('Bạn có chắc chắn muốn xóa ghi chú này?')) return;
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/notes/${noteId}`, { method: 'DELETE' });
-      if (res.ok) {
-        showStatus('success', 'Đã xóa ghi chú.');
-        if (activeNoteId === noteId) { setActiveNoteId(null); setIsNoteFormOpen(false); }
-        await fetchPatientDetail(selectedPatient.id);
-      } else {
-        throw new Error('Không thể xóa ghi chú.');
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    }
-  };
-
-  const handleUploadAttachment = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedPatient) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/attachments`, {
-        method: 'POST',
-        body: formData
-      });
-      if (res.ok) {
-        fetchPatientDetail(selectedPatient.id);
-      } else {
-        throw new Error("Không thể tải lên tệp đính kèm.");
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    } finally {
-      e.target.value = '';
-    }
-  };
-
-  // Tệp đính kèm phải tải qua fetch để mang được header Authorization; thẻ <a href>
-  // trần luôn nhận 401. Kèm theo đó, lỗi không còn tứ hiện thành trang lỗi của trình
-  // duyệt nữa nên phải tự báo ra.
-  const handleDownloadAttachment = async (att) => {
-    if (!selectedPatient) return;
-    try {
-      await apiDownload(`/api/patients/${selectedPatient.id}/attachments/${att.id}/download`);
-    } catch (err) {
-      console.error('Error downloading attachment:', err);
-      showStatus('error', `Không tải được "${att.original_name}": ${err.message}`);
-    }
-  };
-
-  const handleDeleteAttachment = async (attachmentId) => {
-    if (!selectedPatient) return;
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/attachments/${attachmentId}`, { method: 'DELETE' });
-      if (res.ok) fetchPatientDetail(selectedPatient.id);
-    } catch (err) {
-      console.error("Error deleting attachment:", err);
-    }
-  };
-
-  // --- "Điều trị" tab: "Tạo kế hoạch mới" side panel handlers (creates the underlying visit) ---
-
-  const resetAddVisitForm = () => {
-    setNewVisitDate(new Date().toISOString().slice(0, 10));
-    setNewVisitDoctor(doctorNamePlain);
-    setNewVisitTitle('');
-    setNewVisitSymptomInput('');
-    setNewVisitSymptoms([]);
-    setNewVisitDiagnosis('');
-    setNewVisitDiagnosisSecondary('');
-    setNewVisitExamFindings('');
-    setNewVisitGoals('');
-    setNewVisitTreatmentMethod('');
-    setNewVisitProtocolDuration('');
-    setNewVisitDietRegimen('');
-    setNewVisitPrecautions('');
-    setNewVisitFollowupPurpose('');
-    setNewVisitFollowupDate('');
-    setNewVisitTreatmentInstructions('');
-    setNewVisitMedications([]);
-    setIsAddingVisitMedication(false);
-    setVisitMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' });
-    setNewVisitNoDrugRecommendations('');
-    setNewVisitCareInstructions('');
-  };
-
-  const openAddVisitPanel = () => {
-    resetAddVisitForm();
-    setDiagHandoffPayload(null);
-    setIsAddVisitOpen(true);
-  };
-
-  // Prefills the "Tạo kế hoạch mới" form from a Diagnosis-Tree handoff payload (see
-  // handleUpdateDisease) — used for both the existing-patient path and the new-patient
-  // path (chained right after the patient record is created).
-  const prefillVisitFromHandoff = (payload) => {
-    setNewVisitDate(new Date().toISOString().slice(0, 10));
-    setNewVisitDoctor(doctorNamePlain);
-    setNewVisitTitle('Khám bệnh theo Sơ đồ chẩn đoán');
-    setNewVisitSymptomInput('');
-    setNewVisitSymptoms(payload.symptoms);
-    setNewVisitDiagnosis(payload.diagnosisPrimary);
-    setNewVisitDiagnosisSecondary(payload.diagnosisSecondary);
-    setNewVisitExamFindings(payload.exam);
-    setNewVisitGoals((payload.goals || []).join('\n'));
-    setNewVisitTreatmentMethod(payload.treatmentMethod || '');
-    setNewVisitProtocolDuration(payload.protocolDuration || '');
-    setNewVisitDietRegimen(payload.dietRegimen || '');
-    setNewVisitPrecautions(payload.precautions || '');
-    setNewVisitFollowupPurpose('');
-    setNewVisitFollowupDate('');
-    setNewVisitTreatmentInstructions('');
-    setNewVisitMedications(payload.medications || []);
-    setIsAddingVisitMedication(false);
-    setVisitMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' });
-    setNewVisitNoDrugRecommendations(payload.noDrugRecommendations || '');
-    setNewVisitCareInstructions(payload.careInstructions || '');
-  };
-
-  const handleAddVisitSymptom = () => {
-    const val = newVisitSymptomInput.trim();
-    if (!val) return;
-    setNewVisitSymptoms(prev => [...prev, val]);
-    setNewVisitSymptomInput('');
-  };
-
-  const handleRemoveVisitSymptom = (idx) => {
-    setNewVisitSymptoms(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const handleAddVisitMedication = () => {
-    if (!visitMedDraft.name.trim()) return;
-    setNewVisitMedications(prev => [...prev, { ...visitMedDraft }]);
-    setVisitMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' });
-    setIsAddingVisitMedication(false);
-  };
-
-  const handleRemoveVisitMedication = (idx) => {
-    setNewVisitMedications(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const handleSaveNewVisit = async () => {
-    if (!selectedPatient || !newVisitDate) return;
-    setIsSavingVisit(true);
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/visits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          visit_date: newVisitDate,
-          title: newVisitTitle.trim() || 'Khám bệnh',
-          doctor_name: newVisitDoctor.trim() || doctorNamePlain,
-          symptoms: newVisitSymptoms.join('\n'),
-          diagnosis_primary: newVisitDiagnosis.trim(),
-          diagnosis_secondary: newVisitDiagnosisSecondary.trim(),
-          exam_findings: newVisitExamFindings.trim(),
-          goals: newVisitGoals.split('\n').map(s => s.trim()).filter(Boolean),
-          protocol_duration: newVisitProtocolDuration.trim(),
-          treatment_method: newVisitTreatmentMethod.trim(),
-          diet_regimen: newVisitDietRegimen.trim(),
-          precautions: newVisitPrecautions.trim(),
-          followup_purpose: newVisitFollowupPurpose.trim(),
-          followup_date: newVisitFollowupDate,
-          treatment: newVisitTreatmentInstructions.trim(),
-          medications: newVisitMedications,
-          no_drug_recommendations: newVisitNoDrugRecommendations.trim(),
-          care_instructions: newVisitCareInstructions.trim(),
-          status: 'in_progress',
-          // Structured Top-5 differentials from the Diagnosis-Tree handoff don't have their own
-          // inputs in this form (see prefillVisitFromHandoff) — carry them straight through so
-          // the Treatment tab can render them.
-          ...(diagHandoffPayload ? {
-            diagnosis_confidence: diagHandoffPayload.diagnosisConfidence || null,
-            differential_diagnoses: diagHandoffPayload.differentialDiagnoses || [],
-          } : {}),
-        })
-      });
-      if (res.ok) {
-        const created = await res.json();
-        showStatus('success', 'Đã thêm lần khám mới.');
-        setIsAddVisitOpen(false);
-        await fetchPatientDetail(selectedPatient.id);
-        if (diagHandoffPayload) {
-          setAiReasoningNote(diagHandoffPayload.reasoning || '');
-          setDiagHandoffPayload(null);
-        }
-        setPatientProfileTab('treatment');
-        setActiveTreatmentVisitId(created.id);
-      } else {
-        const data = await res.json();
-        throw new Error(data.detail || 'Không thể thêm lần khám.');
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    } finally {
-      setIsSavingVisit(false);
-    }
-  };
-
-  const handleDeleteVisit = async (visitId) => {
-    if (!selectedPatient) return;
-    if (!confirm('Bạn có chắc chắn muốn xóa lần khám này?')) return;
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/visits/${visitId}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        showStatus('success', 'Đã xóa lần khám.');
-        if (expandedHistoryVisitId === visitId) setExpandedHistoryVisitId(null);
-        if (activeTreatmentVisitId === visitId) setActiveTreatmentVisitId(null);
-        await fetchPatientDetail(selectedPatient.id);
-      } else {
-        throw new Error('Không thể xóa lần khám.');
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    }
-  };
-
-  // --- "Điều trị" tab (treatment plan) handlers ---
-
-  const updateTreatmentVisit = async (visitId, patch) => {
-    if (!selectedPatient) return false;
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/visits/${visitId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch)
-      });
-      if (res.ok) {
-        await fetchPatientDetail(selectedPatient.id);
-        return true;
-      }
-      throw new Error('Không thể cập nhật kế hoạch điều trị.');
-    } catch (err) {
-      showStatus('error', err.message);
-      return false;
-    }
-  };
-
-  const handleAiSuggestDiagnosis = async (visit) => {
-    if (!visit || !selectedPatient) return;
-    if (!visit.symptoms || !visit.symptoms.trim()) {
-      showStatus('error', 'Cần nhập triệu chứng trước khi dùng AI gợi ý chẩn đoán.');
-      return;
-    }
-    setAiSuggestLoading(true);
-    setAiAgentTrace([]);
-    setAiAgentSources([]);
-    setAiAgentTraceExpanded(false);
-    try {
-      const res = await fetch(`/api/patients/${selectedPatient.id}/visits/${visit.id}/ai-diagnosis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symptoms: visit.symptoms })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAiReasoningNote(data.ai_reasoning || '');
-        setAiAgentTrace(data.ai_agent_trace || []);
-        setAiAgentSources(data.ai_agent_sources || []);
-        await fetchPatientDetail(selectedPatient.id);
-      } else {
-        const errData = await res.json();
-        throw new Error(errData.detail || 'Không thể gợi ý chẩn đoán.');
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    } finally {
-      setAiSuggestLoading(false);
-    }
-  };
-
-  const openDiagnosisEdit = (visit) => {
-    setDiagnosisDraft({
-      primary: visit.diagnosis_primary || '',
-      differentials: visit.diagnosis_secondary || '',
-      exam: visit.exam_findings || '',
-    });
-    setIsEditingDiagnosis(true);
-  };
-
-  const handleSaveDiagnosis = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, {
-      diagnosis_primary: diagnosisDraft.primary,
-      diagnosis_secondary: diagnosisDraft.differentials,
-      exam_findings: diagnosisDraft.exam,
-    });
-    if (ok) setIsEditingDiagnosis(false);
-  };
-
-  const openDiagnosisNoteEdit = (visit) => { setDiagnosisNoteDraft(visit.diagnosis_note || ''); setIsEditingDiagnosisNote(true); };
-  const handleSaveDiagnosisNote = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, { diagnosis_note: diagnosisNoteDraft });
-    if (ok) setIsEditingDiagnosisNote(false);
-  };
-
-  const openPlanEdit = (visit) => {
-    setPlanDraft({
-      goals: (visit.goals || []).join('\n'),
-      protocol_duration: visit.protocol_duration || '',
-      treatment_method: visit.treatment_method || '',
-      diet_regimen: visit.diet_regimen || '',
-      precautions: visit.precautions || '',
-    });
-    setIsEditingPlan(true);
-  };
-  const handleSavePlan = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, {
-      goals: planDraft.goals.split('\n').map(s => s.trim()).filter(Boolean),
-      protocol_duration: planDraft.protocol_duration.trim(),
-      treatment_method: planDraft.treatment_method.trim(),
-      diet_regimen: planDraft.diet_regimen.trim(),
-      precautions: planDraft.precautions.trim(),
-    });
-    if (ok) setIsEditingPlan(false);
-  };
-
-  const openNoDrugEdit = (visit) => { setNoDrugDraft(visit.no_drug_recommendations || ''); setIsEditingNoDrug(true); };
-  const handleSaveNoDrug = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, { no_drug_recommendations: noDrugDraft });
-    if (ok) setIsEditingNoDrug(false);
-  };
-
-  const openCareEdit = (visit) => { setCareDraft(visit.care_instructions || ''); setIsEditingCare(true); };
-  const handleSaveCare = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, { care_instructions: careDraft });
-    if (ok) setIsEditingCare(false);
-  };
-
-  const openFollowupEdit = (visit) => { setFollowupDraft({ date: visit.followup_date || '', purpose: visit.followup_purpose || '' }); setIsEditingFollowup(true); };
-  const handleSaveFollowup = async (visitId) => {
-    const ok = await updateTreatmentVisit(visitId, { followup_date: followupDraft.date, followup_purpose: followupDraft.purpose });
-    if (ok) setIsEditingFollowup(false);
-  };
-
-  const openAddMedication = () => { setMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' }); setIsAddingMedication(true); };
-  const handleSaveMedication = async (visit) => {
-    if (!medDraft.name.trim()) return;
-    const updated = [...(visit.medications || []), { ...medDraft }];
-    const ok = await updateTreatmentVisit(visit.id, { medications: updated });
-    if (ok) setIsAddingMedication(false);
-  };
-  const handleDeleteMedication = async (visit, index) => {
-    const updated = visit.medications.filter((_, i) => i !== index);
-    await updateTreatmentVisit(visit.id, { medications: updated });
-  };
-
-  const handleToggleTreatmentStatus = async (visit) => {
-    const next = visit.status === 'completed' ? 'in_progress' : 'completed';
-    await updateTreatmentVisit(visit.id, { status: next });
-  };
-
-  const handlePrintTreatmentPlan = () => window.print();
 
   const showStatus = (type, text) => {
     setStatusMsg({ type, text });
@@ -1614,10 +463,46 @@ export default function App() {
     }));
   };
 
+  /** Gửi một nhãn phản hồi; lỗi mạng thì bỏ qua — đây là đo lường, không chặn bác sĩ. */
+  const sendFeedback = (logId, kind, sourceIndex = null) => {
+    if (!logId) return Promise.resolve(false);
+    return fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ log_id: logId, kind, source_index: sourceIndex }),
+    }).then(r => r.ok).catch(() => false);
+  };
+
+  const rateMessage = (convId, index, rating) => {
+    const conv = conversations.find(c => c.id === convId);
+    const msg = conv?.messages[index];
+    if (!msg?.logId) return;
+    const next = msg.rating === rating ? null : rating;
+    setConversations(prev => prev.map(c => {
+      if (c.id !== convId) return c;
+      const messages = c.messages.slice();
+      messages[index] = { ...messages[index], rating: next };
+      return { ...c, messages };
+    }));
+    if (next) sendFeedback(msg.logId, next);
+  };
+
+  const reportWrongPage = () => {
+    const key = `${activeLogId}:${selectedSourceIndex}`;
+    if (!activeLogId || wrongPages.has(key)) return;
+    sendFeedback(activeLogId, 'wrong_page', selectedSourceIndex).then(ok => {
+      if (!ok) return;
+      setWrongPages(prev => new Set(prev).add(key));
+      showStatus('success', 'Đã ghi nhận: trang này không đúng câu hỏi.');
+    });
+  };
+
   const handleNewChat = () => {
+    setChatScope(null);
     setActiveConversationId(null);
-    setDraftWelcome([makeWelcomeMessage()]);
+    setDraftWelcome([]);
     setActiveSources([]);
+    setActiveLogId(null);
     setActivePage(null);
     setSelectedSourceIndex(0);
     setQuery('');
@@ -1632,9 +517,11 @@ export default function App() {
     const lastWithSources = conv ? [...conv.messages].reverse().find(m => m.sources && m.sources.length > 0) : null;
     if (lastWithSources) {
       setActiveSources(lastWithSources.sources);
+      setActiveLogId(lastWithSources.logId || null);
       setSelectedSourceIndex(0);
     } else {
       setActiveSources([]);
+      setActiveLogId(null);
     }
     setActivePage(null);
   };
@@ -1710,30 +597,78 @@ export default function App() {
     }
   };
 
-  // Groups conversations the way ChatGPT's sidebar does: pinned first, then by recency
-  const groupConversationsByDate = (list) => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const sevenDaysAgo = startOfToday - 6 * 86400000;
-    const thirtyDaysAgo = startOfToday - 29 * 86400000;
+  const renderConvItem = (conv) => (
+        <motion.div
+          key={conv.id}
+          layout
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.16 }}
+          className={`conv-item ${conv.id === activeConversationId ? 'active' : ''}`}
+          onClick={() => handleSelectConversation(conv.id)}
+        >
+                    {renamingConvId === conv.id ? (
+            <input
+              ref={renameInputRef}
+              className="conv-item-rename-input"
+              value={renameDraft}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onBlur={commitRenameConversation}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitRenameConversation(); }
+                else if (e.key === 'Escape') { e.preventDefault(); cancelRenameConversation(); }
+              }}
+            />
+          ) : (
+            <span className="conv-item-title" title={conv.title}>{conv.title}</span>
+          )}
 
-    const groups = { pinned: [], today: [], last7: [], last30: [], older: [] };
-    [...list].sort((a, b) => b.updatedAt - a.updatedAt).forEach(c => {
-      if (c.pinned) { groups.pinned.push(c); return; }
-      if (c.updatedAt >= startOfToday) groups.today.push(c);
-      else if (c.updatedAt >= sevenDaysAgo) groups.last7.push(c);
-      else if (c.updatedAt >= thirtyDaysAgo) groups.last30.push(c);
-      else groups.older.push(c);
-    });
-
-    return [
-      { key: 'pinned', label: 'Đã ghim', items: groups.pinned },
-      { key: 'today', label: 'Hôm nay', items: groups.today },
-      { key: 'last7', label: '7 ngày qua', items: groups.last7 },
-      { key: 'last30', label: '30 ngày qua', items: groups.last30 },
-      { key: 'older', label: 'Cũ hơn', items: groups.older }
-    ].filter(g => g.items.length > 0);
-  };
+          {renamingConvId !== conv.id && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  className="conv-item-menu-btn"
+                  onClick={(e) => e.stopPropagation()}
+                  title="Tùy chọn cuộc trò chuyện"
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="dropdown-menu-content"
+                  align="start"
+                  sideOffset={4}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleTogglePin(conv.id)}>
+                    {conv.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    {conv.pinned ? 'Bỏ ghim' : 'Ghim'}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => startRenameConversation(conv)}>
+                    <PencilLine size={14} />
+                    Đổi tên
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleShareConversation(conv)}>
+                    <Share2 size={14} />
+                    Chia sẻ
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="dropdown-menu-separator" />
+                  <DropdownMenu.Item
+                    className="dropdown-menu-item danger"
+                    onSelect={() => setDeleteTargetId(conv.id)}
+                  >
+                    <Trash2 size={14} />
+                    Xóa
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
+        </motion.div>
+  );
 
   // Chat search (uses LLM) — creates a new conversation on the first message of a draft chat
   const handleSearch = async (searchQuery) => {
@@ -1744,7 +679,12 @@ export default function App() {
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    const userMsg = { role: 'user', text: q, time: timeStr };
+    // Tài liệu đính kèm thuộc về CÂU HỎI NÀY (như ChatGPT): gửi xong thì thẻ
+    // trong ô nhập biến mất, còn tin nhắn đã gửi giữ thẻ để biết câu nào hỏi
+    // riêng trong sách nào.
+    const attachment = chatScope;
+    const userMsg = { role: 'user', text: q, time: timeStr, ...(attachment ? { attachment } : {}) };
+    setChatScope(null);
 
     let convId = activeConversationId;
     if (!convId) {
@@ -1789,7 +729,13 @@ export default function App() {
       const res = await fetch('/api/search', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query: q, created_by: doctorName }),
+        body: JSON.stringify({
+          query: q,
+          created_by: doctorName,
+          web: webSearchOn && webSearchTools.length > 0,
+          doc_name: attachment?.doc_name || null,
+          near_page: attachment?.page_num || null,
+        }),
         signal: controller.signal
       });
 
@@ -1809,13 +755,29 @@ export default function App() {
         } else if (event === 'sources') {
           const sources = data.sources || [];
           patchLastMessage(convId, m => ({ ...m, sources, statusNote: null }));
+          setActiveLogId(null);
           if (sources.length > 0) {
+            // Trình đọc trang chỉ mở được trang sách; nguồn web mở ở tab mới.
+            const firstBook = sources.findIndex(s => !isWebSource(s));
             setActiveSources(sources);
-            setSelectedSourceIndex(0);
-            setActivePage(sources[0]);
+            setSelectedSourceIndex(Math.max(firstBook, 0));
+            setActivePage(firstBook >= 0 ? sources[firstBook] : null);
           } else {
             setActiveSources([]);
             setActivePage(null);
+          }
+        } else if (event === 'query_normalized') {
+          patchLastMessage(convId, m => ({ ...m, normalized: data }));
+        } else if (event === 'query_understood') {
+          patchLastMessage(convId, m => ({ ...m, understood: data }));
+        } else if (event === 'coverage') {
+          patchLastMessage(convId, m => ({ ...m, coverage: data.items || [] }));
+        } else if (event === 'verify') {
+          patchLastMessage(convId, m => ({ ...m, verify: data }));
+        } else if (event === 'done') {
+          if (data.log_id) {
+            patchLastMessage(convId, m => ({ ...m, logId: data.log_id }));
+            setActiveLogId(data.log_id);
           }
         } else if (event === 'delta') {
           patchLastMessage(convId, m => ({ ...m, text: m.text + data.text }));
@@ -1854,52 +816,6 @@ export default function App() {
   /** Bác sĩ bấm dừng. Đóng kết nối là server dừng gọi mô hình thật. */
   const handleCancelSearch = () => {
     if (searchAbortRef.current) searchAbortRef.current.abort();
-  };
-
-  /**
-   * Đưa lại một lượt tra cứu cũ vào cuộc trò chuyện hiện tại — dùng chính câu
-   * trả lời và nguồn đã lưu, không gọi lại LLM (tiết kiệm thời gian & chi phí).
-   */
-  const handleReuseHistory = (record) => {
-    if (!record) return;
-    setActiveTab('chat');
-    setHistoryOpen(false);
-
-    const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    const userMsg = { role: 'user', text: record.query, time: timeStr };
-    const assistantMsg = {
-      role: 'assistant',
-      text: record.answer || '',
-      sources: record.sources || [],
-      time: timeStr,
-      reused: true,
-      reusedAt: record.created_at
-    };
-
-    let convId = activeConversationId;
-    if (!convId) {
-      convId = uid();
-      setConversations(prev => [{
-        id: convId,
-        title: createConversationTitle(record.query),
-        messages: [userMsg, assistantMsg],
-        pinned: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      }, ...prev]);
-      setActiveConversationId(convId);
-    } else {
-      appendMessageToConversation(convId, userMsg);
-      appendMessageToConversation(convId, assistantMsg);
-    }
-
-    setQuery('');
-    if (record.sources?.length > 0) {
-      setActiveSources(record.sources);
-      setSelectedSourceIndex(0);
-      setActivePage(record.sources[0]);
-    }
-    showStatus('success', 'Đã dùng lại kết quả tra cứu đã lưu.');
   };
 
   // AI Drug Lookup (Generates comprehensive clinical report with NotebookLM-style citations)
@@ -2010,7 +926,7 @@ export default function App() {
     if (!drugReport) return;
     let text = `# BÁO CÁO Y KHOA: ${drugReport.drug_name || 'TRA CỨU THUỐC'}\n`;
     if (drugReport.subtitle) text += `*${drugReport.subtitle}*\n`;
-    text += `Được tạo bởi mô hình Deepseek • Cập nhật: ${drugReport.created_at || 'Hôm nay'}\n\n`;
+    text += `\n`;
 
     if (drugReport.quick_summary && drugReport.quick_summary.length > 0) {
       text += `## TÓM TẮT NHANH:\n`;
@@ -2026,7 +942,6 @@ export default function App() {
       });
     }
 
-    text += `\n---\n*Lưu ý: Thông tin chỉ mang tính tham khảo, không thay thế chẩn đoán và chỉ định của bác sĩ.*`;
 
     navigator.clipboard.writeText(text);
     setCopiedDrugToast(true);
@@ -2080,43 +995,78 @@ export default function App() {
     );
   };
 
+  // Đợt 6 — nạp PDF không còn chờ một request duy nhất tới lúc xong (có thể
+  // mất nhiều phút với PDF scan dày, phải OCR): tải lên trả về ngay job_id,
+  // rồi theo dõi tiến độ thật qua SSE và hiện một thẻ tiến độ trong lưới Thư
+  // viện — xem backend/generic_ingest.py + /api/documents/ingest.
+  const updateUploadJob = (jobId, patch) => {
+    setUploadJobs(prev => prev.map(j => (j.jobId === jobId ? { ...j, ...patch } : j)));
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      showStatus('error', 'Chỉ hỗ trợ tải lên tài liệu định dạng PDF.');
+    if (!file.name.toLowerCase().endsWith('.pdf') || file.size > 64 * 1024 * 1024) {
+      showStatus('error', 'Chỉ hỗ trợ PDF tối đa 64 MiB và 300 trang.');
       return;
     }
 
     setUploading(true);
-    showStatus('info', `Đang xử lý phân tích và chỉ mục hóa tài liệu "${file.name}"...`);
-
     const formData = new FormData();
     formData.append('file', file);
 
+    let jobId, docName, visibility;
     try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      });
-
+      const res = await fetch('/api/documents/ingest', { method: 'POST', body: formData });
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail || "Tải lên và xử lý tệp thất bại.");
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Tải lên tệp thất bại.');
       }
-
-      const data = await res.json();
-      showStatus('success', `Tải lên thành công "${file.name}" (${data.pages} trang, ${data.chunks} phân đoạn văn bản)!`);
-      fetchDocuments();
+      ({ job_id: jobId, doc_name: docName, visibility } = await res.json());
     } catch (err) {
       console.error(err);
       showStatus('error', err.message);
+      setUploading(false);
+      return;
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+
+    setUploadJobs(prev => [
+      ...prev,
+      { jobId, docName, fileName: file.name, stage: 'Đang chờ xử lý...', current: 0, total: 0, status: 'queued' },
+    ]);
+
+    try {
+      const res = await fetch(`/api/documents/ingest/${encodeURIComponent(jobId)}/events`);
+      await readSseStream(res, (event, data) => {
+        if (event === 'error') {
+          updateUploadJob(jobId, { status: 'error', error: data?.message || 'Lỗi không rõ.' });
+          return;
+        }
+        // event === 'progress': dữ liệu là job dict của backend/ingest_jobs.py
+        updateUploadJob(jobId, {
+          stage: data.stage, current: data.current, total: data.total,
+          status: data.status, error: data.error, warnings: data.warnings || [],
+        });
+        if (data.status === 'done') {
+          const scope = visibility === 'private' ? 'vào kho riêng của bạn' : 'vào thư viện chung của phòng khám';
+          showStatus('success', `Đã nạp xong "${file.name}" (${data.total || '?'} trang) ${scope}.`);
+          fetchDocuments();
+          setTimeout(() => setUploadJobs(prev => prev.filter(j => j.jobId !== jobId)), 2000);
+        } else if (data.status === 'error') {
+          showStatus('error', `Nạp "${file.name}" thất bại: ${data.error || 'lỗi không rõ.'}`);
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      updateUploadJob(jobId, { status: 'error', error: err.message });
     }
   };
+
+  const dismissUploadJob = (jobId) => setUploadJobs(prev => prev.filter(j => j.jobId !== jobId));
 
   const handleDeleteDoc = async (docName) => {
     try {
@@ -2168,40 +1118,9 @@ export default function App() {
     }
   };
 
-  const formatLibraryDate = (epochSeconds) => {
-    if (!epochSeconds) return '';
-    return new Date(epochSeconds * 1000).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
-
-  const handleOpenLibraryPreview = async (docName, pageNum = 1) => {
-    try {
-      const res = await fetch(`/api/documents/${encodeURIComponent(docName)}/pages/${pageNum}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLibraryPreview(data);
-      } else {
-        const errData = await res.json();
-        showStatus('error', errData.detail || "Không thể đọc nội dung trang.");
-      }
-    } catch (err) {
-      showStatus('error', "Lỗi kết nối khi tải trang tài liệu.");
-    }
-  };
-
-  const handleLibraryPrevPage = () => {
-    if (!libraryPreview) return;
-    const prevPage = libraryPreview.page_num - 1;
-    if (prevPage < 1) return;
-    handleOpenLibraryPreview(libraryPreview.doc_name, prevPage);
-  };
-
-  const handleLibraryNextPage = () => {
-    if (!libraryPreview) return;
-    const nextPage = libraryPreview.page_num + 1;
-    const docInfo = documents.find(d => d.doc_name === libraryPreview.doc_name);
-    const maxPage = docInfo ? docInfo.page_count : 1;
-    if (nextPage > maxPage) return;
-    handleOpenLibraryPreview(libraryPreview.doc_name, nextPage);
+  // Xem sách = ảnh trang PDF gốc (PageViewer tự tải ảnh), không cần lấy text.
+  const handleOpenLibraryPreview = (docName, pageNum = 1) => {
+    setLibraryPreview({ doc_name: docName, page_num: pageNum });
   };
 
   // Biên chuyển trang của reader. Số trang trong trích dẫn là số trang IN, mà
@@ -2227,6 +1146,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setActivePage(data);
+        if (quoteToHighlight) setReaderQuote({ doc_name: docName, page_num: pageNum, quote: quoteToHighlight });
         if (quoteToHighlight) {
           // Neo được thì tô sáng, không neo được thì thôi — thà không tô gì còn
           // hơn tô nhầm chỗ.
@@ -2640,6 +1560,8 @@ export default function App() {
     setExamNotes('');
     setFinalDiagnoses([]);
     setSelectedDiagnosisIds(new Set());
+    setTreatmentResult(null);
+    setAllergyCheck(null);
     try {
       const res = await fetch('/api/diagnosis-tree/generate', {
         method: 'POST',
@@ -2647,7 +1569,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ description: patientDesc, patient_id: diagSelectedPatient?.id || null })
+        body: JSON.stringify({ description: patientDesc, patient_history: patientHistory.trim() || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2656,8 +1578,8 @@ export default function App() {
       const data = await res.json();
       setDiagnosisTree(data);
       setPatientContextSent(data.patient_context || null);
-      showStatus('success', diagSelectedPatient
-        ? "Đã tạo cây chẩn đoán từ mô tả bệnh nhân và tiền sử trong bệnh án."
+      showStatus('success', patientHistory.trim()
+        ? "Đã tạo cây chẩn đoán từ mô tả bệnh nhân và tình trạng trước đó."
         : "Đã tạo cây chẩn đoán từ mô tả bệnh nhân.");
     } catch (err) {
       console.error(err);
@@ -2731,7 +1653,7 @@ export default function App() {
         ) : answerType === 'choice' ? (
           <div className={`decision-node-card ${status ? 'active-yes' : ''}`}>
             <div className="card-header-row">
-              <Stethoscope size={15} style={{ color: status ? '#2563eb' : 'var(--primary)', flexShrink: 0 }} />
+              <Stethoscope size={15} style={{ color: status ? 'var(--primary)' : 'var(--primary)', flexShrink: 0 }} />
               <span className="card-title">{node.label}</span>
             </div>
             {selectedOption?.hypothetical_focus && <span className="card-suggest">{selectedOption.hypothetical_focus}</span>}
@@ -2751,7 +1673,7 @@ export default function App() {
         ) : answerType === 'text' ? (
           <div className={`decision-node-card ${(status || '').trim() ? 'active-yes' : ''}`}>
             <div className="card-header-row">
-              <Stethoscope size={15} style={{ color: (status || '').trim() ? '#2563eb' : 'var(--primary)', flexShrink: 0 }} />
+              <Stethoscope size={15} style={{ color: (status || '').trim() ? 'var(--primary)' : 'var(--primary)', flexShrink: 0 }} />
               <span className="card-title">{node.label}</span>
             </div>
             {node.hypothetical_focus && <span className="card-suggest">{node.hypothetical_focus}</span>}
@@ -2823,7 +1745,7 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded,
-                               patient_id: diagSelectedPatient?.id || null })
+                               patient_history: patientHistory.trim() || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2857,7 +1779,7 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded, exam_notes: examNotes,
-                               patient_id: diagSelectedPatient?.id || null })
+                               patient_history: patientHistory.trim() || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -2876,32 +1798,6 @@ export default function App() {
     }
   };
 
-  // --- "Bệnh nhân" linking section (Diagnosis Tree tab) ---
-
-  const handleDiagPatientSearchChange = async (value) => {
-    setDiagPatientQuery(value);
-    setDiagPatientSearchOpen(true);
-    setDiagSelectedPatient(null);
-    setPatientContextSent(null);
-    if (!value.trim()) { setDiagPatientResults([]); return; }
-    try {
-      const res = await fetch(`/api/patients?search=${encodeURIComponent(value)}`);
-      if (res.ok) setDiagPatientResults((await res.json()) || []);
-    } catch (err) {
-      console.error("Error searching patients:", err);
-    }
-  };
-
-  const handleSelectDiagPatient = (pat) => {
-    setDiagSelectedPatient(pat);
-    // Đổi bệnh nhân thì khối tiền sử đang hiện là của người khác. Xoá ngay,
-    // đừng để nó nằm lại trên màn hình cho tới lần gọi sau.
-    setPatientContextSent(null);
-    setDiagPatientQuery(pat.name);
-    setDiagPatientSearchOpen(false);
-    setDiagPatientResults([]);
-  };
-
   const handleToggleDiagnosisSelected = (idx) => {
     setSelectedDiagnosisIds(prev => {
       const next = new Set(prev);
@@ -2911,22 +1807,14 @@ export default function App() {
     });
   };
 
-  // "Cập nhật bệnh" — hands the diagnoses the doctor picked off to the Patients tab: fetches an
-  // AI medication/care suggestion for just those, then opens "+ Thêm lần khám" pre-filled for an
-  // existing patient, or "+ Thêm bệnh nhân" (then chains into "+ Thêm lần khám" once saved) for a new one.
-  const handleUpdateDisease = async () => {
+  // "Gợi ý điều trị" — phác đồ gợi ý cho các chẩn đoán bác sĩ đã chọn, kèm đối
+  // chiếu dị ứng với ô tiền sử. Hiện ngay trong tab Chẩn đoán, không ghi đi đâu.
+  const handleSuggestTreatment = async () => {
     if (selectedDiagnosisIds.size === 0) return;
-    const { confirmed } = collectSymptoms(treeRoot, nodeStatusMap);
     const chosen = finalDiagnoses.filter((_, idx) => selectedDiagnosisIds.has(idx));
     const ranked = [...chosen].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-    const [top, ...rest] = ranked;
-    const formatDiag = (d) => (d.icd10 ? `${d.disease_name} (${d.icd10})` : d.disease_name);
-
     setIsPreparingHandoff(true);
-    let treatment = {
-      medications: [], no_drug_recommendations: '', care_instructions: '',
-      goals: [], protocol_duration: '', treatment_method: '', diet_regimen: '', precautions: '',
-    };
+    setTreatmentResult(null);
     try {
       const res = await fetch('/api/diagnosis-tree/treatment', {
         method: 'POST',
@@ -2935,61 +1823,23 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ diagnoses: ranked, exam_notes: examNotes,
-                               patient_id: diagSelectedPatient?.id || null })
+                               patient_history: patientHistory.trim() || null })
       });
-      if (res.ok) {
-        treatment = await res.json();
-        if (treatment.patient_context) setPatientContextSent(treatment.patient_context);
-        // Gán thẳng, kể cả khi null. Backend trả khối này cả khi KHÔNG có khớp
-        // nào, vì "đã đối chiếu và không thấy gì" khác hẳn "chưa đối chiếu" —
-        // và khối trên phiếu khám phải nói được cả hai trạng thái.
-        setAllergyCheck(treatment.allergy_check || null);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Gợi ý điều trị thất bại.");
       }
+      const treatment = await res.json();
+      if (treatment.patient_context) setPatientContextSent(treatment.patient_context);
+      // Gán thẳng, kể cả khi null: "đã đối chiếu và không thấy gì" khác hẳn
+      // "chưa đối chiếu".
+      setAllergyCheck(treatment.allergy_check || null);
+      setTreatmentResult({ ...treatment, diagnoses: ranked });
     } catch (err) {
       console.error("Error generating treatment suggestion:", err);
+      showStatus('error', err.message);
     } finally {
       setIsPreparingHandoff(false);
-    }
-
-    // Up to 5 differentials (everything but the top pick) with their ICD-10/confidence/reasoning
-    // preserved — feeds the "Chẩn đoán phân biệt (Top 5)" table on the Treatment tab instead of
-    // collapsing to a flat string like diagnosisSecondary (kept below for the plain-text views).
-    const differentialDiagnoses = rest.slice(0, 5).map(d => ({
-      name: d.disease_name, icd10: d.icd10 || '', confidence: d.confidence || 0,
-      note: d.red_flags || '', reasoning: d.reasoning || '',
-    }));
-
-    const payload = {
-      symptoms: confirmed,
-      diagnosisPrimary: formatDiag(top),
-      diagnosisSecondary: rest.map(formatDiag).join('\n'),
-      diagnosisConfidence: top.confidence || 0,
-      differentialDiagnoses,
-      exam: examNotes,
-      reasoning: top.reasoning || '',
-      medications: treatment.medications || [],
-      noDrugRecommendations: treatment.no_drug_recommendations || '',
-      careInstructions: treatment.care_instructions || '',
-      goals: treatment.goals || [],
-      protocolDuration: treatment.protocol_duration || '',
-      treatmentMethod: treatment.treatment_method || '',
-      dietRegimen: treatment.diet_regimen || '',
-      precautions: treatment.precautions || '',
-    };
-
-    setActiveTab('patients');
-
-    if (diagSelectedPatient) {
-      setSelectedPatientId(diagSelectedPatient.id);
-      setDiagHandoffPayload(payload);
-      prefillVisitFromHandoff(payload);
-      setIsAddVisitOpen(true);
-      // Nói rõ là CHƯA ghi. Không có câu này thì bác sĩ bị đẩy sang tab khác mà
-      // không biết mình còn phải bấm Lưu, và tưởng đã xong.
-      showStatus('info', "Đã điền sẵn phiếu khám. Soát lại rồi bấm Lưu để ghi vào bệnh án — chưa có gì được ghi.");
-    } else {
-      openAddPatientModal(payload);
-      showStatus('info', "Đã điền sẵn hồ sơ bệnh nhân mới. Soát lại rồi bấm Lưu — chưa có gì được ghi.");
     }
   };
 
@@ -3000,11 +1850,48 @@ export default function App() {
   // Nhãn hiển thị của một nguồn. Backend trả về doc_title (tên sách) và
   // citation ("Dược thư QGVN 2022, Q.1 — tr. 297"); các kết quả cũ trong lịch
   // sử tra cứu chỉ có doc_name nên vẫn phải có đường lui.
-  const sourceTitle = (src) => src?.doc_title || src?.doc_name || '';
+  const sourceTitle = (src) => src?.doc_title
+    || documents.find(d => d.doc_name === src?.doc_name)?.doc_title
+    || src?.doc_name || '';
   const sourceCitation = (src) =>
     src?.citation || `${src?.doc_name || ''} — tr. ${src?.page_num ?? '?'}`;
 
+  const isWebSource = (src) => src?.kind === 'web';
+
+  /** Mở một nguồn: trang sách vào trình đọc, nguồn web sang tab mới. */
+  const openSource = (src, idx) => {
+    setSelectedSourceIndex(idx);
+    if (activeLogId && !isWebSource(src)) sendFeedback(activeLogId, 'open', idx);
+    if (isWebSource(src)) {
+      if (src.url) window.open(src.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    handleOpenPageReader(src.doc_name, src.page_num, src, src.quote || src.text || src.snippet);
+  };
+
+  // "Hỏi về tài liệu này" — gắn tài liệu vào ô hỏi đáp; câu hỏi tiếp theo chỉ
+  // tra trong tài liệu đó, ưu tiên các trang quanh trang đang đọc.
+  const askAboutDocument = (src) => {
+    if (!src?.doc_name) return;
+    const doc = documents.find(d => d.doc_name === src.doc_name);
+    setChatScope({
+      doc_name: src.doc_name,
+      doc_title: src.doc_title || doc?.doc_title || src.doc_name,
+      page_num: src.page_num || null,
+    });
+    setSelectedFactCheckDoc(null);
+    setLibraryPreview(null);
+    setActiveTab('chat');
+    setTimeout(() => chatInputRef.current?.focus(), 0);
+  };
+
+  // Đoạn cần tô trên trang đang mở (nếu có).
+  const quoteForActivePage = () =>
+    readerQuote && activePage && readerQuote.doc_name === activePage.doc_name
+      && readerQuote.page_num === activePage.page_num ? readerQuote.quote : null;
+
   const sourcePublisher = (src) => {
+    if (isWebSource(src)) return [src.provider, src.published].filter(Boolean).join(' • ');
     const name = sourceTitle(src);
     if (name.includes('Dược thư')) return 'Bộ Y tế Việt Nam';
     if (name.includes('Hướng dẫn')) return 'Cục Quản lý Dược';
@@ -3028,10 +1915,7 @@ export default function App() {
           type="button"
           className={`citation-badge ${citationBadgeClass(num)}`}
           onClick={() => {
-            if (source) {
-              setSelectedSourceIndex(num - 1);
-              handleOpenPageReader(source.doc_name, source.page_num, source, source.text || source.snippet);
-            }
+            if (source) openSource(source, num - 1);
           }}
           title={source ? (source.citation || `${source.doc_name} - Trang ${source.page_num}`) : `Nguồn ${num}`}
         >
@@ -3056,47 +1940,6 @@ export default function App() {
     >
       {preprocessCitations(text)}
     </ReactMarkdown>
-  );
-
-
-  const showSourcesToggle = activeTab === 'chat' || activeTab === 'medicine';
-
-  const currentTreatmentVisit = selectedPatient
-    ? (selectedPatient.visits.find(v => v.id === activeTreatmentVisitId) || selectedPatient.visits[0] || null)
-    : null;
-
-  const currentNote = selectedPatient
-    ? (selectedPatient.notes || []).find(n => n.id === activeNoteId) || null
-    : null;
-
-  // Defaults the "Ghi chú" tab to the most recent note whenever the patient (or its notes)
-  // change, opening straight into the full form if that note is still a draft — a draft has
-  // no view mode. Skipped mid-creation of a brand-new, not-yet-saved note (activeNoteId null
-  // with the form already open) so we don't silently discard unsaved input.
-  useEffect(() => {
-    if (!selectedPatient) return;
-    if (isNoteFormOpen && !activeNoteId) return;
-    const notes = selectedPatient.notes || [];
-    if (activeNoteId && notes.some(n => n.id === activeNoteId)) return;
-    const first = notes[0] || null;
-    setActiveNoteId(first ? first.id : null);
-    if (first && first.status === 'draft') {
-      setNoteFormDraft(noteToDraft(first));
-      setIsNoteFormOpen(true);
-    } else {
-      setIsNoteFormOpen(false);
-    }
-  }, [selectedPatient?.id, selectedPatient?.notes]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Renders one read-only field on a finalized note's view mode — editing is bulk-only now
-  // (the "Sửa" button on the note reopens the full form), so this has no per-field controls.
-  const renderNoteReadField = (note, fieldKey, label) => (
-    <div className="pp-tp-note-box" key={fieldKey}>
-      <div className="pp-tp-note-box-head">
-        <span className="pp-tp-note-label">{label}</span>
-      </div>
-      <p className="pp-tp-note-text">{note[fieldKey] || 'Chưa ghi nhận.'}</p>
-    </div>
   );
 
   if (shareViewId) {
@@ -3134,213 +1977,119 @@ export default function App() {
     <div className="desktop-layout">
       {/* 1. Left Vertical Navigation Sidebar (ChatGPT-style expanded rail) */}
       <aside className={`left-sidebar${isSidebarCollapsed ? ' collapsed' : ''}`}>
+        {/* Thanh bên kiểu ChatGPT: tên app + tìm/thu gọn, ba mục chính, rồi
+            "Đã ghim" và "Gần đây". Số đo lấy từ chatgpt.com (28/10/2026):
+            dòng 36px, chữ 14px, biểu tượng 20px, bo 8px. */}
         <div className="sidebar-brand">
-          <div className="sidebar-brand-left">
-            <div className="brand-logo">
-              <Pill size={17} className="logo-icon" />
-            </div>
+          {!isSidebarCollapsed && <span className="sidebar-brand-name">Trợ lý Fil</span>}
+          <div className="sidebar-brand-actions">
             {!isSidebarCollapsed && (
-              <div className="brand-wordmark">
-                <strong>Trợ lý Fil</strong>
-                <span>Beta</span>
-              </div>
+              <button
+                type="button"
+                className="sidebar-icon-btn"
+                aria-label="Tìm đoạn chat"
+                title="Tìm đoạn chat"
+                aria-pressed={convSearchOpen}
+                onClick={() => { setConvSearchOpen(v => !v); setConvSearch(''); }}
+              >
+                <Search size={20} />
+              </button>
             )}
+            <button
+              type="button"
+              className="sidebar-icon-btn"
+              aria-label={isSidebarCollapsed ? 'Mở thanh bên' : 'Đóng thanh bên'}
+              title={isSidebarCollapsed ? 'Mở thanh bên' : 'Đóng thanh bên'}
+              onClick={() => setIsSidebarCollapsed(v => !v)}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+            </button>
           </div>
-          <button
-            className="btn-sidebar-collapse"
-            onClick={() => setIsSidebarCollapsed(v => !v)}
-            title={isSidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên"}
-          >
-            {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
         </div>
 
-        <button
-          className={`btn-new-chat ${activeTab === 'chat' && !activeConversationId ? 'active' : ''}`}
-          onClick={handleNewChat}
-          title="Cuộc trò chuyện mới"
-        >
-          <Plus size={16} />
-          {!isSidebarCollapsed && <span>Cuộc trò chuyện mới</span>}
-        </button>
-
-        <nav className="sidebar-nav">
-          <button
-            className={`nav-item ${activeTab === 'medicine' ? 'active' : ''}`}
-            onClick={() => setActiveTab('medicine')}
-            title="Tra cứu Thuốc"
-          >
-            <Pill size={19} />
-            <span>Thuốc</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'library' ? 'active' : ''}`}
-            onClick={() => setActiveTab('library')}
-            title="Thư viện tài liệu"
-          >
-            <Library size={19} />
-            <span>Thư viện</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'compare' ? 'active' : ''}`}
-            onClick={() => setActiveTab('compare')}
-            title="Đối chiếu nhiều nguồn tài liệu"
-          >
-            <GitCompareArrows size={19} />
-            <span>Đối chiếu</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'patients' ? 'active' : ''}`}
-            onClick={() => setActiveTab('patients')}
-            title="Bệnh nhân"
-          >
-            <Users size={19} />
-            <span>Bệnh nhân</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'reminders' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reminders')}
-            title="Nhắc lịch tái khám & theo dõi"
-          >
-            <BellRing size={19} />
-            <span>Nhắc lịch</span>
-            {visibleNotifications.length > 0 && (
-              <span className="nav-item-badge">{visibleNotifications.length}</span>
-            )}
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`}
-            onClick={() => setActiveTab('stats')}
-            title="Thống kê phòng khám"
-          >
-            <BarChart3 size={19} />
-            <span>Thống kê</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'diagnosisTree' ? 'active' : ''}`}
-            onClick={() => setActiveTab('diagnosisTree')}
-            title="Sơ đồ chẩn đoán"
-          >
-            <GitBranch size={19} />
-            <span>Chẩn đoán</span>
-          </button>
-
-          <button
-            className={`nav-item ${activeTab === 'about' ? 'active' : ''}`}
-            onClick={() => setActiveTab('about')}
-            title="Giới thiệu"
-          >
-            <Info size={19} />
-            <span>Giới thiệu</span>
-          </button>
+        <nav className="sidebar-nav" aria-label="Chức năng chính">
+          {MAIN_TABS.map(({ id, label, Icon, match }) => {
+            const isActive = id === 'chat'
+              ? activeTab === 'chat' && !activeConversationId
+              : match.includes(activeTab);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`side-item ${isActive ? 'active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => (id === 'chat' ? handleNewChat() : setActiveTab(id))}
+                title={label}
+              >
+                <Icon size={20} aria-hidden="true" />
+                {!isSidebarCollapsed && <span className="side-item-label">{label}</span>}
+              </button>
+            );
+          })}
         </nav>
-
-        <div className="sidebar-divider" />
 
         {!isSidebarCollapsed && (
           <div className="sidebar-history-section">
-            {conversations.length === 0 ? (
-              <div className="sidebar-history-empty">Chưa có cuộc trò chuyện nào.</div>
-            ) : (
-              <div className="sidebar-history-list">
-                {groupConversationsByDate(conversations.filter(c => !c.archived)).map(group => (
-                  <div className="conv-group" key={group.key}>
-                    <div className="conv-group-label">{group.label}</div>
-                    <AnimatePresence initial={false}>
-                      {group.items.map(conv => (
-                        <motion.div
-                          key={conv.id}
-                          layout
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.16 }}
-                          className={`conv-item ${conv.id === activeConversationId ? 'active' : ''}`}
-                          onClick={() => handleSelectConversation(conv.id)}
-                        >
-                          {conv.pinned && <Pin size={11} className="conv-item-pin-icon" />}
-                          {renamingConvId === conv.id ? (
-                            <input
-                              ref={renameInputRef}
-                              className="conv-item-rename-input"
-                              value={renameDraft}
-                              onClick={(e) => e.stopPropagation()}
-                              onChange={(e) => setRenameDraft(e.target.value)}
-                              onBlur={commitRenameConversation}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') { e.preventDefault(); commitRenameConversation(); }
-                                else if (e.key === 'Escape') { e.preventDefault(); cancelRenameConversation(); }
-                              }}
-                            />
-                          ) : (
-                            <span className="conv-item-title" title={conv.title}>{conv.title}</span>
-                          )}
-
-                          {renamingConvId !== conv.id && (
-                            <DropdownMenu.Root>
-                              <DropdownMenu.Trigger asChild>
-                                <button
-                                  className="conv-item-menu-btn"
-                                  onClick={(e) => e.stopPropagation()}
-                                  title="Tùy chọn cuộc trò chuyện"
-                                >
-                                  <MoreHorizontal size={15} />
-                                </button>
-                              </DropdownMenu.Trigger>
-                              <DropdownMenu.Portal>
-                                <DropdownMenu.Content
-                                  className="dropdown-menu-content"
-                                  align="start"
-                                  sideOffset={4}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleTogglePin(conv.id)}>
-                                    {conv.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-                                    {conv.pinned ? 'Bỏ ghim' : 'Ghim'}
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => startRenameConversation(conv)}>
-                                    <PencilLine size={14} />
-                                    Đổi tên
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleShareConversation(conv)}>
-                                    <Share2 size={14} />
-                                    Chia sẻ
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Separator className="dropdown-menu-separator" />
-                                  <DropdownMenu.Item
-                                    className="dropdown-menu-item danger"
-                                    onSelect={() => setDeleteTargetId(conv.id)}
-                                  >
-                                    <Trash2 size={14} />
-                                    Xóa
-                                  </DropdownMenu.Item>
-                                </DropdownMenu.Content>
-                              </DropdownMenu.Portal>
-                            </DropdownMenu.Root>
-                          )}
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                ))}
-              </div>
+            {convSearchOpen && (
+              <input
+                className="sidebar-search-input"
+                type="search"
+                autoFocus
+                placeholder="Tìm đoạn chat…"
+                aria-label="Tìm đoạn chat"
+                value={convSearch}
+                onChange={(e) => setConvSearch(e.target.value)}
+              />
             )}
+            {(() => {
+              const needle = convSearch.trim().toLowerCase();
+              const visible = conversations
+                .filter(c => !c.archived)
+                .filter(c => !needle || (c.title || '').toLowerCase().includes(needle))
+                .sort((x, y) => y.updatedAt - x.updatedAt);
+              const pinned = visible.filter(c => c.pinned);
+              const recents = visible.filter(c => !c.pinned);
+              return (
+                <>
+                  {pinned.length > 0 && (
+                    <div className="side-section">
+                      <button
+                        type="button"
+                        className="side-section-label"
+                        aria-expanded={pinnedOpen}
+                        onClick={() => setPinnedOpen(v => !v)}
+                      >
+                        Đã ghim <ChevronRight size={12} className={pinnedOpen ? 'open' : ''} aria-hidden="true" />
+                      </button>
+                      {pinnedOpen && (
+                        <AnimatePresence initial={false}>{pinned.map(renderConvItem)}</AnimatePresence>
+                      )}
+                    </div>
+                  )}
+                  <div className="side-section">
+                    <button
+                      type="button"
+                      className="side-section-label"
+                      aria-expanded={recentsOpen}
+                      onClick={() => setRecentsOpen(v => !v)}
+                    >
+                      Gần đây <ChevronRight size={12} className={recentsOpen ? 'open' : ''} aria-hidden="true" />
+                    </button>
+                    {recentsOpen && (recents.length === 0 ? (
+                      <div className="sidebar-history-empty">
+                        {needle ? 'Không có đoạn chat nào khớp.' : 'Chưa có cuộc trò chuyện nào.'}
+                      </div>
+                    ) : (
+                      <AnimatePresence initial={false}>{recents.map(renderConvItem)}</AnimatePresence>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 
         <div className="sidebar-footer">
-          <ExportPdfDialog
-            open={exportPdfOpen}
-            onOpenChange={setExportPdfOpen}
-            patient={selectedPatient}
-          />
-
           <ClinicAdminDialog
             open={clinicAdminOpen}
             onOpenChange={setClinicAdminOpen}
@@ -3445,14 +2194,6 @@ export default function App() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* Lịch sử tra cứu — duyệt lại và dùng lại kết quả cũ */}
-      <SearchHistoryDialog
-        open={historyOpen}
-        onOpenChange={setHistoryOpen}
-        onReuse={handleReuseHistory}
-        onNotify={showStatus}
-      />
-
       {/* Document preview lightbox (Thư viện) — mirrors ChatGPT Library's inline file preview */}
       <Dialog.Root open={!!libraryPreview} onOpenChange={(open) => !open && setLibraryPreview(null)}>
         <Dialog.Portal>
@@ -3463,9 +2204,17 @@ export default function App() {
                 <div className="lightbox-header">
                   <div className="lightbox-header-left">
                     <FileText size={17} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <Dialog.Title className="lightbox-title">{libraryPreview.doc_name}</Dialog.Title>
+                    <Dialog.Title className="lightbox-title">{sourceTitle(libraryPreview)}</Dialog.Title>
                   </div>
                   <div className="lightbox-header-actions">
+                    <button
+                      type="button"
+                      className="btn-ask-document"
+                      onClick={() => askAboutDocument(libraryPreview)}
+                    >
+                      <MessageSquare size={18} aria-hidden="true" />
+                      Hỏi về tài liệu này
+                    </button>
                     <button className="icon-btn-action" onClick={() => handleDownloadDocument(libraryPreview.doc_name)} title="Tải xuống">
                       <Download size={16} />
                     </button>
@@ -3475,26 +2224,21 @@ export default function App() {
                   </div>
                 </div>
                 <Dialog.Description className="sr-only">
-                  Đọc, tô sáng và ghi chú trên tài liệu {libraryPreview.doc_name}
+                  Trang gốc của tài liệu {sourceTitle(libraryPreview)}
                 </Dialog.Description>
-                <DocumentAnnotator
-                  docName={libraryPreview.doc_name}
-                  pageNum={libraryPreview.page_num}
-                  pageText={libraryPreview.text}
-                  doctorName={doctorName}
-                  onNotify={showStatus}
-                />
-                <div className="lightbox-footer reader-footer-pagination">
-                  <button onClick={handleLibraryPrevPage} disabled={libraryPreview.page_num <= 1}>
-                    <ChevronLeft size={15} />
-                  </button>
-                  <span className="pagination-text">
-                    Trang {libraryPreview.page_num} / {documents.find(d => d.doc_name === libraryPreview.doc_name)?.page_count || '?'}
-                  </span>
-                  <button onClick={handleLibraryNextPage}>
-                    <ChevronRight size={15} />
-                  </button>
+                <div className="library-page-body">
+                  <PageViewer
+                    key={`${libraryPreview.doc_name}-${libraryPreview.page_num}`}
+                    docName={libraryPreview.doc_name}
+                    pageNum={libraryPreview.page_num}
+                    alt={`${sourceTitle(libraryPreview)} — trang ${libraryPreview.page_num}`}
+                  />
                 </div>
+                <Pagination
+                  current={libraryPreview.page_num}
+                  total={documents.find(d => d.doc_name === libraryPreview.doc_name)?.page_count || libraryPreview.page_num}
+                  onChange={(p) => handleOpenLibraryPreview(libraryPreview.doc_name, p)}
+                />
               </>
             )}
           </Dialog.Content>
@@ -3550,20 +2294,37 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="factcheck-full-text-title">
-                    <BookOpen size={16} />
-                    <span>Toàn văn tài liệu tham khảo ({selectedFactCheckDoc.page_num || 'Trang'})</span>
-                  </div>
-                  <div className="factcheck-full-text-body">
-                    {renderSimpleMarkdown(selectedFactCheckDoc.text || selectedFactCheckDoc.snippet || 'Tài liệu hướng dẫn sử dụng thuốc và dược thư chuyên khảo.')}
-                  </div>
+                  {selectedFactCheckDoc.doc_name && selectedFactCheckDoc.page_num ? (
+                    <div className="factcheck-page">
+                      <PageViewer
+                        docName={selectedFactCheckDoc.doc_name}
+                        pageNum={selectedFactCheckDoc.page_num}
+                        quote={selectedFactCheckDoc.quote || selectedFactCheckDoc.text || selectedFactCheckDoc.snippet}
+                        alt={`Ảnh trang gốc ${sourceCitation(selectedFactCheckDoc)}`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="factcheck-full-text-body">
+                      {renderSimpleMarkdown(selectedFactCheckDoc.text || selectedFactCheckDoc.snippet || '')}
+                    </div>
+                  )}
                 </div>
 
                 <div className="factcheck-footer">
                   <span className="factcheck-footer-note">
                     <CheckCircle2 size={15} className="text-accent" />
-                    Dữ liệu được đối chiếu trực tiếp từ kho y văn chính thống.
+                    Kiểm tra nội dung và trang gốc trước khi sử dụng thông tin.
                   </span>
+                  {selectedFactCheckDoc.doc_name && (
+                    <button
+                      type="button"
+                      className="btn-ask-document"
+                      onClick={() => askAboutDocument(selectedFactCheckDoc)}
+                    >
+                      <MessageSquare size={18} aria-hidden="true" />
+                      Hỏi về tài liệu này
+                    </button>
+                  )}
                   <Dialog.Close asChild>
                     <button type="button" className="btn-dialog-secondary">
                       Đóng
@@ -3585,7 +2346,7 @@ export default function App() {
               <div className="lightbox-header-left">
                 <BookOpen size={18} style={{ color: 'var(--primary)', flexShrink: 0 }} />
                 <Dialog.Title className="lightbox-title">
-                  Tất cả tài liệu tham khảo ({(drugReport.sources || []).length})
+                  Tất cả tài liệu tham khảo ({(drugReport?.sources || []).length})
                 </Dialog.Title>
               </div>
               <Dialog.Close asChild>
@@ -3604,7 +2365,7 @@ export default function App() {
                 />
               </div>
               <div className="all-resources-grid">
-                {(drugReport.sources || [])
+                {(drugReport?.sources || [])
                   .filter(s => s.doc_name.toLowerCase().includes(resourceSearch.toLowerCase()))
                   .map((src, idx) => (
                     <div
@@ -3642,103 +2403,22 @@ export default function App() {
         <header className="workspace-header">
           <div className="header-info">
             <div className="brand-title-row">
-              <h1 className="header-brand-title">Trợ lý FII</h1>
-              <span className="badge-beta">BETA</span>
+              <h1 className="header-brand-title">
+                {activeTab === 'chat'
+                  ? (conversations.find(c => c.id === activeConversationId)?.title || 'Trợ lý Fil')
+                  : (MAIN_TABS.find(t => t.match.includes(activeTab)) || MAIN_TABS[0]).label}
+              </h1>
             </div>
           </div>
           <div className="header-actions">
-            {/* Notification Bell */}
-            {notifyEnabled && (
-              <DropdownMenu.Root onOpenChange={(open) => { if (open) fetchNotifications(); }}>
-                <DropdownMenu.Trigger asChild>
-                  <button className="btn-header-bell" title="Thông báo">
-                    <Bell size={18} />
-                    {visibleNotifications.length > 0 && (
-                      <span className="bell-badge">{visibleNotifications.length}</span>
-                    )}
-                  </button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content className="notif-dropdown-content" align="end" sideOffset={8}>
-                    <div className="notif-dropdown-header">Thông báo</div>
-                    {notifLoading ? (
-                      <div className="notif-dropdown-empty"><Loader2 className="animate-spin" size={16} /> Đang tải...</div>
-                    ) : visibleNotifications.length === 0 ? (
-                      <div className="notif-dropdown-empty">Không có nhắc lịch nào cần xử lý.</div>
-                    ) : (
-                      <div className="notif-dropdown-list">
-                        {visibleNotifications.map((n) => (
-                          <div
-                            key={n.reminder_id || n.visit_id}
-                            className={`notif-item ${n.overdue ? 'notif-item-overdue' : ''}`}
-                            onClick={() => handleNotificationClick(n)}
-                          >
-                            <div className={`notif-item-dot ${n.overdue ? 'overdue' : ''}`} />
-                            <div className="notif-item-body">
-                              <div className="notif-item-title">
-                                {n.patient_name}
-                                {n.kind_label && n.kind !== 'followup' && (
-                                  <span className="notif-item-kind">{n.kind_label}</span>
-                                )}
-                              </div>
-                              <div className="notif-item-desc">
-                                {n.followup_purpose || n.title || 'Tái khám'} • {formatDateVN(n.followup_date)}
-                              </div>
-                              <div className={`notif-item-due ${n.overdue ? 'overdue' : ''}`}>
-                                {formatFollowupDueLabel(n.days_diff)}
-                                {n.snoozed && <span className="notif-item-snoozed">đã hoãn</span>}
-                              </div>
-                            </div>
-                            <div className="notif-item-actions">
-                              {!permissions.isReadOnly && n.reminder_id && (
-                                <>
-                                  <button
-                                    className="notif-item-act"
-                                    title="Đánh dấu đã tái khám"
-                                    onClick={(e) => { e.stopPropagation(); actOnNotification(n, 'complete'); }}
-                                  >
-                                    <Check size={13} />
-                                  </button>
-                                  <button
-                                    className="notif-item-act"
-                                    title="Hoãn 3 ngày"
-                                    onClick={(e) => { e.stopPropagation(); actOnNotification(n, 'snooze', { days: 3 }); }}
-                                  >
-                                    <Clock size={13} />
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                className="notif-item-dismiss"
-                                title="Ẩn khỏi danh sách này"
-                                onClick={(e) => { e.stopPropagation(); dismissNotification(n.visit_id); }}
-                              >
-                                <X size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      className="notif-dropdown-footer"
-                      onClick={() => setActiveTab('reminders')}
-                    >
-                      Mở trang nhắc lịch <ChevronRight size={13} />
-                    </button>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
-            )}
-
-            {/* Dark Mode Toggle */}
             <button
               className="btn-theme-toggle"
               onClick={toggleTheme}
-              title={isDarkMode ? "Chuyển sang Giao diện Sáng" : "Chuyển sang Giao diện Tối"}
+              aria-label={isDarkMode ? "Chuyển sang nền sáng" : "Chuyển sang nền tối"}
+              title={isDarkMode ? "Chuyển sang nền sáng" : "Chuyển sang nền tối"}
             >
-              {isDarkMode ? <Sun size={19} /> : <Moon size={19} />}
+              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+              <span>{isDarkMode ? 'Nền sáng' : 'Nền tối'}</span>
             </button>
           </div>
         </header>
@@ -3752,7 +2432,8 @@ export default function App() {
         )}
 
         {statusMsg.text && (
-          <div className={`alert-banner status-${statusMsg.type}`}>
+          <div className={`alert-banner status-${statusMsg.type}`}
+            role={statusMsg.type === 'error' ? 'alert' : 'status'}>
             {statusMsg.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
             <span>{statusMsg.text}</span>
           </div>
@@ -3764,7 +2445,7 @@ export default function App() {
           {activeTab === 'chat' && (
             <div className="chat-dashboard-split">
               {/* Left Column: Chat Area */}
-              <div className="chat-panel">
+              <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
                 {/* Conversation Scroller */}
                 <div className="chat-messages-container">
                   {messages.map((msg, index) => (
@@ -3774,7 +2455,29 @@ export default function App() {
                           <Sparkles size={16} className="avatar-spark" />
                         </div>
                       )}
+                      {msg.attachment && (
+                        <div className="msg-attachments">
+                          <AttachmentCard
+                            title={msg.attachment.doc_title}
+                            onOpen={() => handleOpenLibraryPreview(msg.attachment.doc_name, msg.attachment.page_num || 1)}
+                          />
+                        </div>
+                      )}
                       <div className="message-bubble">
+                        {msg.normalized && (
+                          <p className="bubble-normalized">
+                            Đã tra theo: <strong>{msg.normalized.text}</strong>
+                          </p>
+                        )}
+                        {msg.understood && <QueryUnderstood understood={msg.understood} />}
+                        {msg.coverage?.length > 0 && (
+                          <CoverageChecklist
+                            items={msg.coverage}
+                            sources={msg.sources}
+                            onOpen={openSource}
+                            citationOf={sourceCitation}
+                          />
+                        )}
                         {msg.statusNote && (
                           <p className="bubble-status" role="status">
                             <Loader2 size={13} className="animate-spin" />
@@ -3795,6 +2498,9 @@ export default function App() {
                             </div>
                           )}
                         </div>
+                        {msg.role === 'assistant' && !msg.streaming && msg.verify && (
+                          <NumberCheck verify={msg.verify} />
+                        )}
                         {msg.errorMessage && (
                           // role="alert" để máy đọc màn hình đọc ngay, không chờ
                           // bác sĩ tự dò tới. Khối này nằm DƯỚI phần chữ và
@@ -3835,11 +2541,6 @@ export default function App() {
                                   </li>
                                 ))}
                               </ul>
-                              <p className="coverage-notice-hint">
-                                Thuốc nằm ngoài phạm vi này chưa có chuyên luận trong kho, nên
-                                không tra ra được — không phải app hỏng, và cũng không có nghĩa
-                                là thuốc đó không tồn tại.
-                              </p>
                             </div>
                           </div>
                         )}
@@ -3855,10 +2556,22 @@ export default function App() {
                               <button onClick={() => copyToClipboard(msg.text)} title="Sao chép câu trả lời">
                                 <Copy size={13} />
                               </button>
-                              <button title="Hữu ích">
+                              <button
+                                title="Hữu ích"
+                                aria-pressed={msg.rating === 'up'}
+                                className={msg.rating === 'up' ? 'is-on' : ''}
+                                disabled={!msg.logId}
+                                onClick={() => rateMessage(activeConversationId, index, 'up')}
+                              >
                                 <ThumbsUp size={13} />
                               </button>
-                              <button title="Không hữu ích">
+                              <button
+                                title="Không hữu ích"
+                                aria-pressed={msg.rating === 'down'}
+                                className={msg.rating === 'down' ? 'is-on' : ''}
+                                disabled={!msg.logId}
+                                onClick={() => rateMessage(activeConversationId, index, 'down')}
+                              >
                                 <ThumbsDown size={13} />
                               </button>
                             </div>
@@ -3868,96 +2581,121 @@ export default function App() {
                       </div>
                     </div>
                   ))}
-                  {/* Bong bong tra loi da ton tai va tu chay chu, nen khong con
-                      mot hang cho rieng nua — hai cai cung luc la hai vong xoay.
-                      Cho lai day dung mot thu: duong ra. */}
-                  {loading && (
-                    <div className="chat-cancel-row">
-                      <button
-                        type="button"
-                        className="chat-cancel-btn"
-                        onClick={handleCancelSearch}
-                      >
-                        <X size={14} />
-                        Dừng tra cứu
-                      </button>
-                    </div>
-                  )}
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* Suggestion Chips */}
-                <div className="chat-suggestions-container">
-                  {suggestions.map((s, idx) => (
-                    <button
-                      key={idx}
-                      className="btn-suggestion-chip"
-                      onClick={() => handleSearch(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+                {messages.length === 0 && <h1 className="chat-greeting">{greeting}</h1>}
 
-                {/* Chat Input Area */}
+                {/* Ô nhập kiểu ChatGPT: thẻ đính kèm ở trên, chữ ở giữa, nút ở dưới */}
                 <form
                   onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
-                  className="chat-input-container"
+                  className="chat-input-container composer"
                 >
-                  <SimilarQuestions
-                    query={query}
-                    disabled={loading}
-                    onReuse={handleReuseHistory}
+                  {chatScope && (
+                    <div className="att-row">
+                      <AttachmentCard
+                        title={chatScope.doc_title}
+                        onOpen={() => handleOpenLibraryPreview(chatScope.doc_name, chatScope.page_num || 1)}
+                        onRemove={() => setChatScope(null)}
+                      />
+                    </div>
+                  )}
+                  <textarea
+                    ref={chatInputRef}
+                    className="input-textarea composer-textarea"
+                    aria-label="Câu hỏi tra cứu y văn"
+                    placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Hỏi bất kỳ điều gì'}
+                    rows={1}
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 208)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      // isComposing: bộ gõ Telex/VNI đang ghép dấu thì Enter chưa phải là gửi.
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleSearch();
+                      }
+                    }}
                   />
-                  <div className="input-row">
-                    <textarea
-                      ref={chatInputRef}
-                      className="input-textarea"
-                      placeholder={isRecording === 'chat' ? "Đang nghe... hãy nói câu hỏi của bạn" : "Đặt câu hỏi lâm sàng dựa trên y văn đã chỉ mục..."}
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSearch();
-                        }
-                      }}
-                    />
-                    <div className="input-actions-right">
+                  <div className="composer-actions">
+                    <div className="composer-actions-left">
+                      <div className="composer-menu-wrap">
+                        <button
+                          type="button"
+                          className="composer-icon-btn"
+                          aria-label="Thêm"
+                          aria-haspopup="menu"
+                          aria-expanded={composerMenuOpen}
+                          title="Thêm tài liệu hoặc công cụ"
+                          onClick={() => setComposerMenuOpen(v => !v)}
+                        >
+                          <Plus size={20} />
+                        </button>
+                        {composerMenuOpen && (
+                          <div className="composer-menu" role="menu" onMouseLeave={() => setComposerMenuOpen(false)}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { setComposerMenuOpen(false); setActiveTab('library'); }}
+                            >
+                              <FileText size={18} /> Đính kèm tài liệu từ thư viện
+                            </button>
+                            {webSearchTools.length > 0 && (
+                              <button
+                                type="button"
+                                role="menuitemcheckbox"
+                                aria-checked={webSearchOn}
+                                onClick={() => { setComposerMenuOpen(false); setWebSearchOn(v => !v); }}
+                              >
+                                <Globe size={18} /> Tìm thêm trên web
+                                {webSearchOn && <Check size={16} className="composer-menu-check" />}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {webSearchOn && webSearchTools.length > 0 && (
+                        <span className="composer-mode-chip">
+                          <Globe size={16} aria-hidden="true" /> Web
+                          <button type="button" aria-label="Tắt tìm trên web" onClick={() => setWebSearchOn(false)}>
+                            <X size={14} />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                    <div className="composer-actions-right">
                       {settings.voiceInputEnabled && (
                         <button
                           type="button"
-                          className={`btn-mic ${isRecording === 'chat' ? 'recording' : ''}`}
+                          className={`composer-icon-btn ${isRecording === 'chat' ? 'recording' : ''}`}
                           onClick={() => handleToggleMic('chat', setQuery, () => handleSearch())}
-                          title={!micSupported ? "Trình duyệt không hỗ trợ ghi âm" : (isRecording === 'chat' ? "Dừng ghi âm" : "Ghi âm giọng nói")}
+                          aria-label={isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói'}
+                          title={!micSupported ? 'Trình duyệt không hỗ trợ ghi âm' : (isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói')}
                         >
-                          {isRecording === 'chat' ? <Square size={14} /> : <Mic size={18} />}
+                          {isRecording === 'chat' ? <Square size={14} /> : <Mic size={20} />}
                         </button>
                       )}
-                      <button type="submit" className="btn-send" disabled={loading || !query.trim()}>
-                        <Send size={16} />
-                      </button>
+                      {loading ? (
+                        <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
+                          <span className="composer-stop-square" aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
+                          <ArrowUp size={22} strokeWidth={2.25} />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="input-footer">
-                    <CheckCircle2 size={14} className="checkmark-icon" />
-                    <span>Nguồn: Đối chiếu sách hướng dẫn điều trị Bộ Y Tế & GINA/ESC</span>
-                    <button
-                      type="button"
-                      className="btn-history-link"
-                      onClick={() => setHistoryOpen(true)}
-                      title="Xem lại các câu hỏi đã tra cứu trước đây"
-                    >
-                      <History size={13} />
-                      Lịch sử tra cứu
-                    </button>
-                  </div>
                 </form>
+
               </div>
 
               {/* Right Column: References & Reader */}
               {showSourcesPanel && (
-                <div className="reference-panel">
+                <div className={`reference-panel ${activePage ? 'reader-open' : ''}`}>
                   {/* Reference list (NotebookLM-style Sources rail) */}
                   <div className="citation-list-card">
                     <div className="card-header">
@@ -3965,9 +2703,6 @@ export default function App() {
                         <BookOpen size={18} className="header-icon-blue" />
                         <h2>Nguồn ({activeSources.length})</h2>
                       </div>
-                    </div>
-                    <div className="card-subtitle">
-                      Nhấp vào nguồn để đọc trang đầy đủ bên dưới
                     </div>
                     <div className="citation-items-list">
                       {activeSources.length === 0 ? (
@@ -3984,10 +2719,7 @@ export default function App() {
                             <div
                               key={idx}
                               className={`citation-item-row ${isSelected ? 'selected' : ''}`}
-                              onClick={() => {
-                                setSelectedSourceIndex(idx);
-                                handleOpenPageReader(src.doc_name, src.page_num, src, src.text || src.snippet);
-                              }}
+                              onClick={() => openSource(src, idx)}
                             >
                               <div className="item-row-left">
                                 <span className={`item-square-badge ${badgeClass}`}>{idx + 1}</span>
@@ -4014,8 +2746,16 @@ export default function App() {
                                 </div>
                               </div>
                               <div className="item-row-right">
-                                <span className="doc-page-no">Trang {src.page_num}</span>
-                                {isSelected ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                {isWebSource(src) ? (
+                                  <span className="doc-page-no doc-web-link" title={src.url}>
+                                    {src.domain || 'Web'} <ExternalLink size={12} />
+                                  </span>
+                                ) : (
+                                  <>
+                                    <span className="doc-page-no">Trang {src.page_num}</span>
+                                    {isSelected ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                  </>
+                                )}
                               </div>
                             </div>
                           );
@@ -4032,26 +2772,36 @@ export default function App() {
                           {sourceTitle(activePage)} — Trang {activePage.page_num}
                         </h3>
                         <div className="reader-header-actions">
-                          {/* Hai cột là mặc định khi đủ chỗ. Nút này vẫn còn vì
-                              dưới ~900px không đủ chỗ cho cả hai, và vì đôi khi
-                              bác sĩ chỉ muốn phóng to đúng một bên. */}
                           <button
-                            className={`icon-btn-action ${readerTwoCol ? 'active' : ''}`}
-                            onClick={() => setReaderTwoCol(v => !v)}
-                            title={readerTwoCol ? 'Xem một cột' : 'Xem hai cột: ảnh scan và bản OCR cạnh nhau'}
+                            type="button"
+                            className="btn-ask-document"
+                            onClick={() => askAboutDocument(activePage)}
                           >
-                            <Columns size={16} />
+                            <MessageSquare size={18} aria-hidden="true" />
+                            Hỏi về tài liệu này
                           </button>
-                          {!readerTwoCol && (
+                          <button
+                            className="reader-action-btn"
+                            onClick={() => setReaderShowText(v => !v)}
+                            aria-pressed={readerShowText}
+                          >
+                            {readerShowText ? <ScanLine size={18} aria-hidden="true" /> : <FileText size={18} aria-hidden="true" />}
+                            {readerShowText ? 'Xem trang gốc' : 'Xem dạng chữ'}
+                          </button>
+                          {activeLogId && (
                             <button
-                              className={`icon-btn-action ${readerShowScan ? 'active' : ''}`}
-                              onClick={() => setReaderShowScan(v => !v)}
-                              title={readerShowScan ? 'Xem văn bản OCR' : 'Xem ảnh trang gốc để đối chiếu'}
+                              className="reader-action-btn"
+                              onClick={reportWrongPage}
+                              disabled={wrongPages.has(`${activeLogId}:${selectedSourceIndex}`)}
+                              title="Trang này không nói về câu hỏi — ghi lại để cải thiện tra cứu"
                             >
-                              {readerShowScan ? <FileText size={16} /> : <ScanLine size={16} />}
+                              <Flag size={18} aria-hidden="true" />
+                              {wrongPages.has(`${activeLogId}:${selectedSourceIndex}`) ? 'Đã báo sai trang' : 'Báo sai trang'}
                             </button>
                           )}
-                          <button className="icon-btn-action" onClick={() => setActivePage(null)} title="Đóng"><X size={16} /></button>
+                          <button className="reader-action-btn" onClick={() => setActivePage(null)} title="Đóng trang, quay lại danh sách nguồn">
+                            <X size={18} aria-hidden="true" /> Đóng
+                          </button>
                         </div>
                       </div>
 
@@ -4125,42 +2875,18 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className={`reader-content-body ${readerTwoCol ? 'two-col' : ''}`}>
-                        {readerTwoCol ? (
-                          <>
-                            {/* Ảnh scan bên trái. Không tô sáng được trên ảnh: kho
-                                này chỉ có chữ OCR ở mức TRANG, không có toạ độ từng
-                                từ. IIIF Content Search 2.0 lường trước đúng trường
-                                hợp này và cách xử đã được chấp nhận là tô sáng ở
-                                cột chữ, còn ảnh thì chỉ tới đúng trang. Muốn khung
-                                trên ảnh thì phải OCR lại để lấy hOCR/ALTO — việc
-                                riêng, không thuộc đợt này. */}
-                            <div className="reader-pane reader-pane-scan">
-                              <div className="reader-pane-label">Ảnh scan gốc</div>
-                              <AuthedImage
-                                className="reader-scan-image"
-                                url={`/api/documents/${encodeURIComponent(activePage.doc_name)}/pages/${activePage.page_num}/image?dpi=150`}
-                                alt={`Ảnh scan ${sourceCitation(activePage)}`}
-                              />
-                            </div>
-                            <div className="reader-pane reader-pane-text">
-                              <div className="reader-pane-label">
-                                Bản OCR
-                                {readerHighlight && <span className="reader-pane-note">đã tô sáng “{readerHighlight}”</span>}
-                              </div>
-                              {renderHighlightedText(activePage.text, readerHighlight)}
-                            </div>
-                          </>
-                        ) : readerShowScan ? (
-                          <AuthedImage
-                            className="reader-scan-image"
-                            url={`/api/documents/${encodeURIComponent(activePage.doc_name)}/pages/${activePage.page_num}/image?dpi=150`}
-                            alt={`Ảnh scan ${sourceCitation(activePage)}`}
-                          />
-                        ) : readerHighlight ? (
-                          renderHighlightedText(activePage.text, readerHighlight)
+                      <div className={`reader-content-body ${readerShowText ? '' : 'is-page'}`}>
+                        {readerShowText ? (
+                          readerHighlight
+                            ? renderHighlightedText(activePage.text, readerHighlight)
+                            : renderSimpleMarkdown(activePage.text)
                         ) : (
-                          renderSimpleMarkdown(activePage.text)
+                          <PageViewer
+                            docName={activePage.doc_name}
+                            pageNum={activePage.page_num}
+                            quote={quoteForActivePage()}
+                            alt={`Ảnh trang gốc ${sourceCitation(activePage)}`}
+                          />
                         )}
                       </div>
 
@@ -4200,14 +2926,34 @@ export default function App() {
           )}
 
           {/* TAB 2: Thuốc (Drug Lookup & AI Clinical Monograph) */}
+          {(activeTab === 'medicine' || activeTab === 'library') && (
+            <div className="segmented-switch" role="tablist" aria-label="Tra cứu thuốc">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'medicine'}
+                className={activeTab === 'medicine' ? 'active' : ''}
+                onClick={() => setActiveTab('medicine')}
+              >
+                <Pill size={18} aria-hidden="true" /> Tra một thuốc
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'library'}
+                className={activeTab === 'library' ? 'active' : ''}
+                onClick={() => setActiveTab('library')}
+              >
+                <Library size={18} aria-hidden="true" /> Sách &amp; tài liệu gốc
+              </button>
+            </div>
+          )}
+
           {activeTab === 'medicine' && (
             <div className="drug-lookup-view">
               {/* Top Title & Subtitle */}
               <div className="drug-hero-header">
                 <h1 className="drug-hero-title">Tra cứu thuốc</h1>
-                <p className="drug-hero-desc">
-                  AI hỗ trợ thông tin thuốc dựa trên dữ liệu y khoa đáng tin cậy.
-                </p>
               </div>
 
               {/* Search Box Form */}
@@ -4226,6 +2972,7 @@ export default function App() {
                     <input
                       type="text"
                       className="drug-search-input"
+                      aria-label="Tên thuốc hoặc nhu cầu tra cứu"
                       placeholder={isRecording === 'medicine' ? "Đang nghe giọng nói của bác sĩ..." : "Nhập tên thuốc hoặc chức năng của thuốc..."}
                       value={drugQuery}
                       onChange={(e) => setDrugQuery(e.target.value)}
@@ -4298,15 +3045,19 @@ export default function App() {
               </div>
 
               {/* Main Content Grid: Left Report & Right Resources/Takeaways */}
+              {!drugReport ? (
+                <div className="drug-empty-state">
+                  <div className="drug-empty-state-icon"><Pill size={26} /></div>
+                  <h4>Chưa có tra cứu nào</h4>
+                  <p>Nhập tên thuốc hoặc chọn một gợi ý ở trên — AI sẽ tổng hợp thông tin từ Dược thư Quốc gia (Quyển 1 &amp; 2) và Thuốc Biệt Dược, kèm trích dẫn để đối chiếu.</p>
+                </div>
+              ) : (
               <div className="drug-main-grid">
                 {/* LEFT COLUMN: Báo cáo AI */}
                 <div className="drug-report-card">
                   <div className="drug-report-card-header">
                     <div className="drug-report-meta-left">
                       <h2 className="drug-report-title">Báo cáo AI</h2>
-                      <p className="drug-report-meta-text">
-                        Được tạo bởi mô hình {drugReport.model_used || 'Deepseek'} • Cập nhật: {drugReport.created_at || '29/08/2026 14:30'}
-                      </p>
                     </div>
                     <div className="drug-report-actions-right">
                       <button
@@ -4353,8 +3104,7 @@ export default function App() {
                       {drugLoading ? (
                         <div className="drug-report-loading-state">
                           <Loader2 size={36} className="animate-spin text-primary" />
-                          <h4>Đang tổng hợp thông tin y khoa từ DeepSeek & Dược thư...</h4>
-                          <p>Phân tích chỉ định, liều dùng, tương tác thuốc và tài liệu tham khảo</p>
+                          <h4>Đang tổng hợp thông tin thuốc…</h4>
                         </div>
                       ) : (
                         (drugReport.sections || []).map((sec) => (
@@ -4373,7 +3123,7 @@ export default function App() {
                             <div className="drug-section-badge-row">
                               <span className="drug-confidence-pill">
                                 <CheckCircle2 size={13} />
-                                Độ tin cậy: {sec.confidence || drugReport.confidence_overall || 'Cao'}
+                                Mức AI tự đánh giá: {sec.confidence || drugReport.confidence_overall || 'Chưa rõ'}
                               </span>
                             </div>
                           </div>
@@ -4388,10 +3138,7 @@ export default function App() {
                   {/* Card 1: Tài liệu nguồn (Resources) */}
                   <div className="drug-resources-card">
                     <div className="drug-resources-header">
-                      <h3 className="drug-resources-title">Tài liệu nguồn (Resources)</h3>
-                      <p className="drug-resources-subtitle">
-                        Các tài liệu tham khảo được AI sử dụng để tạo báo cáo. Bạn nên kiểm chứng thông tin từ nguồn gốc.
-                      </p>
+                      <h3 className="drug-resources-title">Tài liệu nguồn</h3>
                     </div>
 
                     <div className="drug-resources-list">
@@ -4412,7 +3159,7 @@ export default function App() {
                             <h4 className="drug-resource-doc-name" title={sourceCitation(src)}>
                               {sourceTitle(src)}
                             </h4>
-                            <span className="drug-resource-meta">{src.file_size || 'PDF • 2.1 MB'}</span>
+                            <span className="drug-resource-meta">{src.file_size || 'PDF'}</span>
                           </div>
                           <div className="drug-resource-page-badge">
                             {src.page_num || `Trang ${idx + 1}`}
@@ -4426,7 +3173,7 @@ export default function App() {
                       className="btn-view-all-resources"
                       onClick={() => setShowAllResourcesDialog(true)}
                     >
-                      <span>Xem tất cả tài liệu ({(drugReport.sources || []).length || 12})</span>
+                      <span>Xem tất cả tài liệu ({(drugReport.sources || []).length})</span>
                       <ChevronRight size={16} />
                     </button>
                   </div>
@@ -4435,12 +3182,10 @@ export default function App() {
                   <div className="drug-quick-summary-card">
                     <h3 className="drug-quick-summary-title">Tóm tắt nhanh</h3>
                     <div className="drug-quick-summary-list">
-                      {(drugReport.quick_summary || [
-                        { type: 'success', text: 'Giảm đau, hạ sốt hiệu quả' },
-                        { type: 'success', text: 'An toàn nếu dùng đúng liều' },
-                        { type: 'warning', text: 'Nguy cơ độc gan khi quá liều' },
-                        { type: 'danger', text: 'Tránh dùng chung với rượu' }
-                      ]).map((item, idx) => {
+                      {(drugReport.quick_summary || []).length === 0 && (
+                        <p className="drug-quick-summary-empty">Không có tóm tắt nhanh cho lượt tra cứu này.</p>
+                      )}
+                      {(drugReport.quick_summary || []).map((item, idx) => {
                         const itemType = item.type || item.status || (item.icon === 'alert' ? 'warning' : item.icon === 'ban' ? 'danger' : 'success');
                         let IconComp = CheckCircle2;
                         let colorClass = 'status-success';
@@ -4462,2171 +3207,61 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Footer Disclaimer */}
-                  <div className="drug-disclaimer-text">
-                    Lưu ý: Thông tin chỉ mang tính tham khảo, không thay thế chẩn đoán và chỉ định của bác sĩ.
-                  </div>
                 </div>
               </div>
+              )}
             </div>
           )}
 
-          {/* TAB 3: Thư viện (document library manager, formerly the "Tra cứu" manage sub-tab) */}
-          {activeTab === 'library' && (() => {
-            const filteredLibraryDocs = documents
-              .filter(d => d.doc_name.toLowerCase().includes(librarySearch.trim().toLowerCase()))
-              .sort((a, b) => {
-                if (librarySortBy === 'name') return a.doc_name.localeCompare(b.doc_name);
-                if (librarySortBy === 'pages') return (b.page_count || 0) - (a.page_count || 0);
-                if (librarySortBy === 'oldest') return (a.uploaded_at || 0) - (b.uploaded_at || 0);
-                return (b.uploaded_at || 0) - (a.uploaded_at || 0); // newest (default)
-              });
-
-            const docMenu = (doc) => (
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger asChild>
-                  <button
-                    className="card-menu-btn"
-                    onClick={(e) => e.stopPropagation()}
-                    title="Tùy chọn tài liệu"
-                  >
-                    <MoreHorizontal size={15} />
-                  </button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    className="dropdown-menu-content"
-                    align="start"
-                    sideOffset={4}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleOpenLibraryPreview(doc.doc_name, 1)}>
-                      <Eye size={14} />
-                      Xem trước
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleDownloadDocument(doc.doc_name)}>
-                      <Download size={14} />
-                      Tải xuống
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator className="dropdown-menu-separator" />
-                    <DropdownMenu.Item className="dropdown-menu-item danger" onSelect={() => setDeleteDocTarget(doc.doc_name)}>
-                      <Trash2 size={14} />
-                      Xóa
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
-            );
-
-            return (
-              <div className="docs-tab-view animate-fade-in">
-                <div className="view-header">
-                  <h2>Thư viện</h2>
-                  <p>Toàn bộ tài liệu PDF đã tải lên và lập chỉ mục để tra cứu và trò chuyện, trình bày như ChatGPT Library.</p>
-                </div>
-
-                <div className="lib-toolbar">
-                  <div className="lib-search-wrap">
-                    <Search size={14} className="lib-search-icon" />
-                    <input
-                      type="text"
-                      className="lib-search-input"
-                      placeholder="Tìm tài liệu..."
-                      value={librarySearch}
-                      onChange={(e) => setLibrarySearch(e.target.value)}
-                    />
-                  </div>
-
-                  <select
-                    className="lib-sort-select"
-                    value={librarySortBy}
-                    onChange={(e) => setLibrarySortBy(e.target.value)}
-                    title="Sắp xếp"
-                  >
-                    <option value="newest">Mới nhất</option>
-                    <option value="oldest">Cũ nhất</option>
-                    <option value="name">Tên A-Z</option>
-                    <option value="pages">Nhiều trang nhất</option>
-                  </select>
-
-                  <div className="lib-view-toggle">
-                    <button
-                      className={libraryViewMode === 'grid' ? 'active' : ''}
-                      onClick={() => setLibraryViewMode('grid')}
-                      title="Xem dạng lưới"
-                    >
-                      <LayoutGrid size={15} />
-                    </button>
-                    <button
-                      className={libraryViewMode === 'list' ? 'active' : ''}
-                      onClick={() => setLibraryViewMode('list')}
-                      title="Xem dạng danh sách"
-                    >
-                      <List size={15} />
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn-lib-upload"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                  >
-                    {uploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-                    {uploading ? "Đang tải lên..." : "Tải tệp lên"}
-                  </button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".pdf"
-                    style={{ display: 'none' }}
-                    disabled={uploading}
-                  />
-                </div>
-
-                {documents.length === 0 ? (
-                  <div className="lib-empty">
-                    <div className="lib-empty-icon"><FileText size={26} /></div>
-                    <h4>Chưa có tài liệu nào</h4>
-                    <p>Tải lên tệp PDF đầu tiên để hệ thống lập chỉ mục và có thể tra cứu, trò chuyện dựa trên nội dung tài liệu.</p>
-                    <button type="button" className="btn-lib-upload" onClick={() => fileInputRef.current?.click()} style={{ marginLeft: 0 }}>
-                      <Upload size={15} />
-                      Tải tệp lên
-                    </button>
-                  </div>
-                ) : filteredLibraryDocs.length === 0 ? (
-                  <div className="lib-empty">
-                    <div className="lib-empty-icon"><Search size={24} /></div>
-                    <h4>Không tìm thấy tài liệu</h4>
-                    <p>Không có tài liệu nào khớp với từ khóa "{librarySearch}".</p>
-                  </div>
-                ) : libraryViewMode === 'grid' ? (
-                  <div className="lib-grid">
-                    {filteredLibraryDocs.map((doc) => (
-                      <div
-                        key={doc.doc_name}
-                        className="lib-card"
-                        onClick={() => handleOpenLibraryPreview(doc.doc_name, 1)}
-                      >
-                        {docMenu(doc)}
-                        <div className="lib-card-thumb">
-                          <div className="lib-card-thumb-icon"><FileText size={22} /></div>
-                        </div>
-                        <div className="lib-card-body">
-                          <div className="lib-card-title" title={doc.doc_name}>{doc.doc_name}</div>
-                          <div className="lib-card-meta">
-                            {doc.page_count} trang • {doc.chunk_count} đoạn
-                            {doc.uploaded_at ? ` • ${formatLibraryDate(doc.uploaded_at)}` : ''}
-                          </div>
-                          {highlightCounts[doc.doc_name] > 0 && (
-                            <span className="lib-highlight-badge" title="Số đoạn bạn đã tô sáng trong tài liệu này">
-                              <PencilLine size={11} />
-                              {highlightCounts[doc.doc_name]} ghi chú
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="lib-list">
-                    {filteredLibraryDocs.map((doc) => (
-                      <div
-                        key={doc.doc_name}
-                        className="lib-row"
-                        onClick={() => handleOpenLibraryPreview(doc.doc_name, 1)}
-                      >
-                        <div className="lib-row-icon"><FileText size={17} /></div>
-                        <div className="lib-row-body">
-                          <div className="lib-row-title" title={doc.doc_name}>{doc.doc_name}</div>
-                          <div className="lib-row-meta">
-                            {doc.page_count} trang • {doc.chunk_count} đoạn
-                            {doc.uploaded_at ? ` • ${formatLibraryDate(doc.uploaded_at)}` : ''}
-                            {highlightCounts[doc.doc_name] > 0 && ` • ${highlightCounts[doc.doc_name]} ghi chú`}
-                          </div>
-                        </div>
-                        {docMenu(doc)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* TAB: Đối chiếu nguồn — cùng một câu hỏi, nhiều tài liệu */}
-          {activeTab === 'compare' && (
-            <CompareView
+          {/* TAB 3: Thư viện + Đối chiếu */}
+          {activeTab === 'library' && (
+            <LibraryView
               documents={documents}
+              documentsError={documentsError}
+              fetchDocuments={fetchDocuments}
+              librarySearch={librarySearch}
+              setLibrarySearch={setLibrarySearch}
+              librarySortBy={librarySortBy}
+              setLibrarySortBy={setLibrarySortBy}
+              libraryViewMode={libraryViewMode}
+              setLibraryViewMode={setLibraryViewMode}
+              librarySelectMode={librarySelectMode}
+              setLibrarySelectMode={setLibrarySelectMode}
+              librarySelectedDocs={librarySelectedDocs}
+              setLibrarySelectedDocs={setLibrarySelectedDocs}
+              showComparePanel={showComparePanel}
+              setShowComparePanel={setShowComparePanel}
+              compareViewRef={compareViewRef}
+              fileInputRef={fileInputRef}
+              uploadJobs={uploadJobs}
+              uploading={uploading}
+              handleFileUpload={handleFileUpload}
+              dismissUploadJob={dismissUploadJob}
+              highlightCounts={highlightCounts}
+              handleOpenLibraryPreview={handleOpenLibraryPreview}
+              handleDownloadDocument={handleDownloadDocument}
+              setDeleteDocTarget={setDeleteDocTarget}
               apiKey={apiKey}
-              onOpenSource={(docName, pageNum) => handleOpenLibraryPreview(docName, pageNum)}
-              onNotify={showStatus}
+              showStatus={showStatus}
             />
           )}
 
           {/* TAB 4: Hồ sơ bệnh nhân (Patient Profile) */}
-          {activeTab === 'patients' && (
-            <div className="pp-view animate-fade-in">
-              <div className="pp-topbar">
-                <h1 className="pp-title">Hồ sơ bệnh nhân</h1>
-
-                <div className="pp-search-wrap">
-                  <Search size={16} className="pp-search-icon" />
-                  <input
-                    type="text"
-                    className="pp-search-input"
-                    placeholder="Tìm kiếm bệnh nhân..."
-                    value={patientSearchQuery}
-                    onChange={(e) => handlePatientSearchChange(e.target.value)}
-                    onFocus={() => setPatientSearchOpen(true)}
-                    onBlur={() => setTimeout(() => setPatientSearchOpen(false), 150)}
-                  />
-                  <kbd className="pp-search-kbd">Ctrl K</kbd>
-
-                  {patientSearchOpen && patientSearchQuery.trim() && (
-                    <div className="pp-search-dropdown">
-                      {patientSearchResults.length === 0 ? (
-                        <div className="pp-search-empty">Không tìm thấy bệnh nhân phù hợp.</div>
-                      ) : (
-                        patientSearchResults.map((pat) => (
-                          <div
-                            key={pat.id}
-                            className="pp-search-result"
-                            onMouseDown={() => handleSelectSearchedPatient(pat.id)}
-                          >
-                            <div className="pp-search-result-avatar"><UserRound size={14} /></div>
-                            <div>
-                              <div className="pp-search-result-name">{pat.name}</div>
-                              <div className="pp-search-result-meta">{pat.code}{pat.age != null ? ` • ${pat.age} tuổi` : ''}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="pp-topbar-actions">
-                  {selectedPatient && (
-                    <button
-                      className="pp-btn-outline"
-                      onClick={() => setExportPdfOpen(true)}
-                      title="Xuất bệnh án, phiếu khám hoặc giấy chuyển tuyến ra PDF"
-                    >
-                      <Printer size={15} /> Xuất PDF
-                    </button>
-                  )}
-                  {!permissions.isReadOnly && (
-                    <button className="pp-btn-add" onClick={() => openAddPatientModal()}>
-                      <Plus size={16} /> Thêm bệnh nhân
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {patients.length === 0 ? (
-                <div className="pp-empty-state">
-                  <div className="pp-empty-icon"><Users size={28} /></div>
-                  <h3>Chưa có hồ sơ bệnh nhân nào</h3>
-                  <p>
-                    {permissions.isReadOnly
-                      ? 'Chưa bác sĩ nào trong phòng khám tạo hồ sơ bệnh nhân.'
-                      : permissions.seesAllPatients
-                        ? 'Bắt đầu bằng cách thêm bệnh nhân đầu tiên vào hệ thống.'
-                        : 'Bạn chưa phụ trách hồ sơ nào. Thêm bệnh nhân mới, hoặc nhờ quản trị bàn giao hồ sơ cho bạn.'}
-                  </p>
-                  {!permissions.isReadOnly && (
-                    <button className="pp-btn-add" onClick={() => openAddPatientModal()}><Plus size={16} /> Thêm bệnh nhân</button>
-                  )}
-                </div>
-              ) : patientDetailLoading || !selectedPatient ? (
-                <div className="pp-loading-state"><Loader2 className="animate-spin" size={24} /><span>Đang tải hồ sơ bệnh nhân...</span></div>
-              ) : (
-                <>
-                  <div className="pp-body">
-                    <div className="pp-main">
-                      {/* Patient header card */}
-                      <div className="pp-header-card">
-                        <div className="pp-identity">
-                          <div className="pp-avatar"><UserRound size={30} /></div>
-                          <div className="pp-identity-info">
-                            <div className="pp-name-row">
-                              <h2>{selectedPatient.name}</h2>
-                              <span className={`pp-gender-symbol ${selectedPatient.gender === 'Nữ' ? 'female' : 'male'}`}>
-                                {selectedPatient.gender === 'Nữ' ? '♀' : '♂'}
-                              </span>
-                            </div>
-                            <div className="pp-id-badge">ID: {selectedPatient.code}</div>
-                            <div className="pp-owner-row">
-                              <Stethoscope size={12} />
-                              {selectedPatient.owner_name
-                                ? <>Phụ trách: <strong>{selectedPatient.owner_name}</strong></>
-                                : <span className="pp-owner-none">Chưa có bác sĩ phụ trách</span>}
-                              {permissions.isReadOnly && (
-                                <span className="pp-readonly-chip"><Lock size={11} /> chỉ xem</span>
-                              )}
-                            </div>
-                            <div className="pp-meta-row">
-                              <span><Users size={13} /> {selectedPatient.gender || '--'}</span>
-                            </div>
-                            {selectedPatient.phone && <div className="pp-contact-row"><Phone size={13} /> {selectedPatient.phone}</div>}
-                            {selectedPatient.address && <div className="pp-contact-row"><MapPin size={13} /> {selectedPatient.address}</div>}
-                          </div>
-                        </div>
-
-                        <div className="pp-stats-grid">
-                          <div className="pp-stat"><span className="pp-stat-label">Nhóm máu</span><span className="pp-stat-value pp-blood">{selectedPatient.blood_type || '--'}</span></div>
-                          <div className="pp-stat"><span className="pp-stat-label">Cân nặng</span><span className="pp-stat-value">{selectedPatient.weight_kg ? `${selectedPatient.weight_kg} kg` : '--'}</span></div>
-                          <div className="pp-stat"><span className="pp-stat-label">Chiều cao</span><span className="pp-stat-value">{selectedPatient.height_cm ? `${selectedPatient.height_cm} cm` : '--'}</span></div>
-                        </div>
-                      </div>
-
-                      {/* Tabs */}
-                      <div className="pp-tabs">
-                        {PATIENT_PROFILE_TABS.map(tab => (
-                          <button
-                            key={tab.id}
-                            className={`pp-tab ${patientProfileTab === tab.id ? 'active' : ''}`}
-                            onClick={() => setPatientProfileTab(tab.id)}
-                          >
-                            {tab.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Tổng quan tab content */}
-                      {patientProfileTab === 'overview' && (
-                        <>
-                          <div className="pp-overview-grid">
-                            {/* Timeline */}
-                            <div className="pp-card pp-timeline-card">
-                              <h3>Tóm tắt bệnh án</h3>
-                              {selectedPatient.visits.length === 0 ? (
-                                <div className="pp-inline-empty">Chưa có lịch sử khám bệnh nào được ghi nhận.</div>
-                              ) : (
-                                <div className="pp-timeline">
-                                  {selectedPatient.visits.map((visit, idx) => (
-                                    <div key={visit.id} className="pp-timeline-item">
-                                      <div className={`pp-timeline-dot ${idx === 0 ? 'latest' : ''}`} />
-                                      <div className="pp-timeline-content">
-                                        <div className="pp-timeline-date">{formatDateVN(visit.visit_date)}</div>
-                                        <div className="pp-timeline-title-row">
-                                          <span className="pp-timeline-title">{visit.title || 'Khám bệnh'}</span>
-                                          {idx === 0 && <span className="pp-badge-latest">Mới nhất</span>}
-                                        </div>
-                                        {visit.symptoms && <div className="pp-timeline-symptoms">{visit.symptoms}</div>}
-                                        {visit.doctor_name && <div className="pp-timeline-doctor">BS. {visit.doctor_name}</div>}
-                                      </div>
-                                      <ChevronRight size={16} className="pp-timeline-chevron" />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {selectedPatient.visits.length > 0 && (
-                                <button className="pp-link-btn" onClick={() => setPatientProfileTab('history')}>Xem tất cả lịch sử khám</button>
-                              )}
-                            </div>
-
-                            {/* Latest visit detail */}
-                            <div className="pp-card pp-visit-detail-card">
-                              {selectedPatient.visits.length === 0 ? (
-                                <>
-                                  <h3>Lần khám gần nhất</h3>
-                                  <div className="pp-inline-empty">Bệnh nhân chưa có lần khám nào được ghi nhận.</div>
-                                </>
-                              ) : (() => {
-                                const latest = selectedPatient.visits[0];
-                                const symptomList = (latest.symptoms || '').split('\n').map(s => s.trim()).filter(Boolean);
-                                const treatmentList = (latest.treatment || '').split('\n').map(s => s.trim()).filter(Boolean);
-                                return (
-                                  <>
-                                    <div className="pp-visit-detail-header">
-                                      <h3>Lần khám gần nhất - {formatDateVN(latest.visit_date)}</h3>
-                                      <button className="pp-link-btn" onClick={() => setPatientProfileTab('history')}>Xem chi tiết</button>
-                                    </div>
-                                    <div className="pp-visit-detail-grid">
-                                      <div>
-                                        <h4>Triệu chứng chính</h4>
-                                        {symptomList.length === 0 ? <p className="pp-muted">Không có ghi nhận.</p> : (
-                                          <ul>{symptomList.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                                        )}
-                                      </div>
-                                      <div>
-                                        <h4>Chẩn đoán</h4>
-                                        {latest.diagnosis_primary && (
-                                          <div className="pp-diagnosis-row">
-                                            <span>{latest.diagnosis_primary}</span>
-                                            <span className="pp-pill pp-pill-primary">Chẩn đoán chính</span>
-                                          </div>
-                                        )}
-                                        {latest.diagnosis_secondary && (
-                                          <div className="pp-diagnosis-row">
-                                            <span>{latest.diagnosis_secondary}</span>
-                                            <span className="pp-pill pp-pill-secondary">Chẩn đoán phụ</span>
-                                          </div>
-                                        )}
-                                        {!latest.diagnosis_primary && !latest.diagnosis_secondary && <p className="pp-muted">Chưa có chẩn đoán.</p>}
-                                      </div>
-                                      <div>
-                                        <h4>Điều trị</h4>
-                                        {treatmentList.length === 0 ? <p className="pp-muted">Không có ghi nhận.</p> : (
-                                          <ul>{treatmentList.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                                        )}
-                                        {treatmentList.length > 0 && (
-                                          <button className="pp-btn-outline" onClick={() => setPatientProfileTab('treatment')}>
-                                            <FileText size={13} /> Xem đơn thuốc
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {latest.doctor_notes && (
-                                      <div className="pp-doctor-notes">
-                                        <h4>Ghi chú của bác sĩ</h4>
-                                        <p>{latest.doctor_notes}</p>
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </div>
-
-                          {/* Important medical info cards */}
-                          <div className="pp-info-section">
-                            <h3>Thông tin y tế quan trọng</h3>
-                            <div className="pp-info-cards">
-                              {/* Màu ở bốn ô này phải MANG NGHĨA. Trước đây ô Dị ứng luôn
-                                  đỏ kể cả khi trống, nên đỏ mất hết sức cảnh báo: liếc vào
-                                  không phân biệt được "có dị ứng" với "chưa ghi gì". Nay ô
-                                  trống về trung tính, chỉ ô có dữ liệu thật mới mang màu. */}
-                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.allergies) ? 'danger' : 'empty'}`}>
-                                <div className="pp-info-icon"><Ban size={16} /></div>
-                                <div>
-                                  <div className="pp-info-title">Dị ứng</div>
-                                  <div className="pp-info-value">{selectedPatient.allergies || 'Không có'}</div>
-                                </div>
-                              </div>
-                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.chronic_conditions) ? 'warning' : 'empty'}`}>
-                                <div className="pp-info-icon"><Stethoscope size={16} /></div>
-                                <div>
-                                  <div className="pp-info-title">Chẩn đoán</div>
-                                  <div className="pp-info-value">{selectedPatient.chronic_conditions || 'Không có'}</div>
-                                </div>
-                              </div>
-                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.surgical_history) ? 'info' : 'empty'}`}>
-                                <div className="pp-info-icon"><FileText size={16} /></div>
-                                <div>
-                                  <div className="pp-info-title">Tiền sử bệnh</div>
-                                  <div className="pp-info-value">{selectedPatient.surgical_history || 'Chưa có tiền sử bệnh'}</div>
-                                </div>
-                              </div>
-                              <div className={`pp-info-card ${hasClinicalValue(selectedPatient.family_history) ? 'purple' : 'empty'}`}>
-                                <div className="pp-info-icon"><UsersRound size={16} /></div>
-                                <div>
-                                  <div className="pp-info-title">Tiền sử gia đình</div>
-                                  <div className="pp-info-value">
-                                    {selectedPatient.family_history
-                                      ? selectedPatient.family_history.split('\n').filter(Boolean).map((l, i) => <div key={i}>{l}</div>)
-                                      : 'Không có'}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      {patientProfileTab === 'history' && (() => {
-                        const allVisits = selectedPatient.visits || [];
-                        const now = Date.now();
-                        const rangeMs = { '7d': 7 * 86400000, '30d': 30 * 86400000, '90d': 90 * 86400000, '1y': 365 * 86400000 };
-                        const doctorOptions = [...new Set(allVisits.map(v => v.doctor_name).filter(Boolean))];
-
-                        const filteredVisits = allVisits.filter(visit => {
-                          if (historyStatus !== 'all' && (visit.status || 'in_progress') !== historyStatus) return false;
-                          if (historyDoctor !== 'all' && visit.doctor_name !== historyDoctor) return false;
-                          if (historyDiagnosisSearch.trim()) {
-                            const q = stripDiacriticsVN(historyDiagnosisSearch.trim());
-                            const hay = stripDiacriticsVN(`${visit.diagnosis_primary || ''} ${visit.title || ''}`);
-                            if (!hay.includes(q)) return false;
-                          }
-                          if (historyDateRange !== 'all') {
-                            const t = new Date(`${visit.visit_date}T00:00:00`).getTime();
-                            if (Number.isNaN(t) || now - t > rangeMs[historyDateRange]) return false;
-                          }
-                          return true;
-                        });
-
-                        const hasHistoryFilters = historyDateRange !== 'all' || historyStatus !== 'all' || historyDiagnosisSearch.trim() !== '' || historyDoctor !== 'all';
-                        const resetHistoryFilters = () => {
-                          setHistoryDateRange('all'); setHistoryStatus('all'); setHistoryDiagnosisSearch(''); setHistoryDoctor('all');
-                        };
-
-                        const totalMeds = allVisits.reduce((sum, v) => sum + (v.medications || []).length, 0);
-                        const totalLabTests = (selectedPatient.attachments || []).filter(a => classifyAttachmentCategory(a) === 'lab').length;
-                        const latestVisit = allVisits[0] || null;
-                        const openVisitId = expandedHistoryVisitId || (filteredVisits[0] && filteredVisits[0].id) || null;
-                        const goToTreatment = (visitId) => { setActiveTreatmentVisitId(visitId); setPatientProfileTab('treatment'); };
-
-                        return (
-                          <div className="pp-histtab">
-                            {/* Left: filters + quick stats */}
-                            <div className="pp-hist-sidebar">
-                              <div className="pp-card pp-doc-side-card">
-                                <h4>Bộ lọc</h4>
-                                <div className="pp-doc-filter-group">
-                                  <label>Khoảng thời gian</label>
-                                  <div className="pp-doc-select-wrap pp-doc-select-has-icon">
-                                    <Calendar size={14} className="pp-doc-select-icon" />
-                                    <select value={historyDateRange} onChange={e => setHistoryDateRange(e.target.value)}>
-                                      <option value="all">Tất cả thời gian</option>
-                                      <option value="7d">7 ngày qua</option>
-                                      <option value="30d">30 ngày qua</option>
-                                      <option value="90d">3 tháng qua</option>
-                                      <option value="1y">1 năm qua</option>
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <div className="pp-doc-filter-group">
-                                  <label>Loại khám</label>
-                                  <div className="pp-doc-select-wrap">
-                                    <select value={historyStatus} onChange={e => setHistoryStatus(e.target.value)}>
-                                      <option value="all">Tất cả</option>
-                                      <option value="in_progress">Đang điều trị</option>
-                                      <option value="completed">Hoàn thành</option>
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <div className="pp-doc-filter-group">
-                                  <label>Chẩn đoán chính</label>
-                                  <input
-                                    type="text"
-                                    className="pp-hist-search-input"
-                                    value={historyDiagnosisSearch}
-                                    onChange={e => setHistoryDiagnosisSearch(e.target.value)}
-                                    placeholder="Tìm kiếm chẩn đoán..."
-                                  />
-                                </div>
-                                <div className="pp-doc-filter-group">
-                                  <label>Bác sĩ khám</label>
-                                  <div className="pp-doc-select-wrap">
-                                    <select value={historyDoctor} onChange={e => setHistoryDoctor(e.target.value)}>
-                                      <option value="all">Tất cả bác sĩ</option>
-                                      {doctorOptions.map(d => <option key={d} value={d}>BS. {d}</option>)}
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <button className="pp-doc-reset-btn" onClick={resetHistoryFilters} disabled={!hasHistoryFilters}>
-                                  <RotateCcw size={13} /> Đặt lại bộ lọc
-                                </button>
-                              </div>
-
-                              <div className="pp-card pp-doc-side-card">
-                                <h4>Thống kê nhanh</h4>
-                                <div className="pp-hist-stats-list">
-                                  <div className="pp-hist-stat-row">
-                                    <div className="pp-hist-stat-icon pp-hist-stat-blue"><Users size={15} /></div>
-                                    <div className="pp-hist-stat-info">
-                                      <span className="pp-hist-stat-label">Tổng số lần khám</span>
-                                      <span className="pp-hist-stat-value">{allVisits.length}</span>
-                                    </div>
-                                  </div>
-                                  <div className="pp-hist-stat-row">
-                                    <div className="pp-hist-stat-icon pp-hist-stat-green"><Calendar size={15} /></div>
-                                    <div className="pp-hist-stat-info">
-                                      <span className="pp-hist-stat-label">Lần khám gần nhất</span>
-                                      <span className="pp-hist-stat-value">{latestVisit ? formatDateVN(latestVisit.visit_date) : '--'}</span>
-                                    </div>
-                                  </div>
-                                  <div className="pp-hist-stat-row">
-                                    <div className="pp-hist-stat-icon pp-hist-stat-orange"><Pill size={15} /></div>
-                                    <div className="pp-hist-stat-info">
-                                      <span className="pp-hist-stat-label">Tổng thuốc đã kê</span>
-                                      <span className="pp-hist-stat-value">{totalMeds} đơn</span>
-                                    </div>
-                                  </div>
-                                  <div className="pp-hist-stat-row">
-                                    <div className="pp-hist-stat-icon pp-hist-stat-purple"><FlaskConical size={15} /></div>
-                                    <div className="pp-hist-stat-info">
-                                      <span className="pp-hist-stat-label">Tổng xét nghiệm</span>
-                                      <span className="pp-hist-stat-value">{totalLabTests} lần</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Middle: visit timeline */}
-                            <div className="pp-hist-main">
-                              <div className="pp-hist-main-header">
-                                <h3 className="pp-hist-main-title">Lịch sử khám bệnh</h3>
-                              </div>
-                              {filteredVisits.length === 0 ? (
-                                <div className="pp-card"><div className="pp-inline-empty">Không tìm thấy lần khám nào phù hợp với bộ lọc.</div></div>
-                              ) : (
-                                <div className="pp-hist-timeline">
-                                  {filteredVisits.map(visit => {
-                                    const isOpen = visit.id === openVisitId;
-                                    const statusMeta = TREATMENT_STATUS_META[visit.status] || TREATMENT_STATUS_META.completed;
-                                    const symptomList = (visit.symptoms || '').split('\n').map(s => s.trim()).filter(Boolean);
-                                    const treatmentList = (visit.treatment || '').split('\n').map(s => s.trim()).filter(Boolean);
-                                    const subclinicalList = (visit.subclinical_orders || '').split('\n').map(s => s.trim()).filter(Boolean);
-                                    const medCount = (visit.medications || []).length;
-                                    const sameDayAttachments = (selectedPatient.attachments || []).filter(a => (a.uploaded_at || '').slice(0, 10) === visit.visit_date);
-                                    const labCount = sameDayAttachments.filter(a => classifyAttachmentCategory(a) === 'lab').length;
-                                    const imgCount = sameDayAttachments.filter(a => ['imaging', 'xray', 'ultrasound', 'endoscopy'].includes(classifyAttachmentCategory(a))).length;
-                                    const docCount = sameDayAttachments.filter(a => classifyAttachmentCategory(a) === 'other').length;
-
-                                    return (
-                                      <div key={visit.id} className="pp-hist-item">
-                                        <div className="pp-hist-dot-col">
-                                          <span className={`pp-hist-dot ${isOpen ? 'open' : ''}`} />
-                                        </div>
-                                        <div className="pp-hist-date-col">
-                                          <span className="pp-hist-date">{formatDateVN(visit.visit_date)}</span>
-                                          {formatTimeVN(visit.visit_date) && <span className="pp-hist-time">{formatTimeVN(visit.visit_date)}</span>}
-                                        </div>
-
-                                        {isOpen ? (
-                                          <div className="pp-hist-card-open">
-                                            <div className="pp-hist-card-header">
-                                              <div className="pp-hist-card-header-left">
-                                                <span className="pp-hist-card-title">{visit.title || 'Khám bệnh'}</span>
-                                                <span className={`pp-status-badge ${statusMeta.className}`}>{statusMeta.label}</span>
-                                              </div>
-                                              <button
-                                                type="button"
-                                                className="pp-hist-collapse-btn"
-                                                title="Thu nhỏ"
-                                                onClick={(e) => { e.stopPropagation(); setExpandedHistoryVisitId(null); }}
-                                              >
-                                                <ChevronUp size={16} />
-                                              </button>
-                                            </div>
-
-                                            <div className="pp-hist-card-grid">
-                                              <div>
-                                                <div className="pp-hist-col-label">Triệu chứng</div>
-                                                {symptomList.length ? (
-                                                  <ul className="pp-hist-bullets">{symptomList.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                                                ) : <p className="pp-muted">Chưa ghi nhận.</p>}
-                                              </div>
-                                              <div>
-                                                <div className="pp-hist-col-label">Chẩn đoán</div>
-                                                <p className="pp-hist-col-text">{visit.diagnosis_primary || 'Chưa có chẩn đoán.'}</p>
-                                              </div>
-                                              <div>
-                                                <div className="pp-hist-col-label">Điều trị</div>
-                                                {treatmentList.length ? (
-                                                  <ul className="pp-hist-bullets">{treatmentList.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                                                ) : <p className="pp-muted">Chưa có.</p>}
-                                              </div>
-                                              <div>
-                                                <div className="pp-hist-col-label">Chỉ định CLS</div>
-                                                {subclinicalList.length ? (
-                                                  <ul className="pp-hist-bullets">{subclinicalList.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                                                ) : <p className="pp-muted">Chưa có chỉ định.</p>}
-                                              </div>
-                                              <div>
-                                                <div className="pp-hist-col-label">Ghi chú</div>
-                                                <p className="pp-hist-col-text">{visit.doctor_notes || 'Không có ghi chú.'}</p>
-                                              </div>
-                                            </div>
-
-                                            <div className="pp-hist-card-footer">
-                                              <div className="pp-hist-chips">
-                                                {medCount > 0 && <span className="pp-hist-chip"><Pill size={12} /> {medCount} đơn thuốc</span>}
-                                                {labCount > 0 && <span className="pp-hist-chip"><FlaskConical size={12} /> {labCount} xét nghiệm</span>}
-                                                {imgCount > 0 && <span className="pp-hist-chip"><ImageIcon size={12} /> {imgCount} hình ảnh</span>}
-                                                {docCount > 0 && <span className="pp-hist-chip"><FileText size={12} /> {docCount} tài liệu</span>}
-                                              </div>
-                                              <div className="pp-hist-footer-actions">
-                                                <button className="pp-icon-btn" title="Xóa lần khám" onClick={() => handleDeleteVisit(visit.id)}><Trash2 size={14} /></button>
-                                                <button className="pp-link-btn pp-hist-detail-link" onClick={() => goToTreatment(visit.id)}>Xem chi tiết</button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="pp-hist-card-closed" role="button" tabIndex={0} onClick={() => setExpandedHistoryVisitId(visit.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpandedHistoryVisitId(visit.id); }}>
-                                            <div className="pp-hist-closed-main">
-                                              <span className="pp-hist-card-title">{visit.title || 'Khám bệnh'}</span>
-                                              {(visit.symptoms || '').trim() && <span className="pp-hist-closed-sub">{(visit.symptoms || '').split('\n')[0]}</span>}
-                                            </div>
-                                            <div className="pp-hist-closed-right">
-                                              <span className={`pp-status-badge pp-status-sm ${statusMeta.className}`}>{statusMeta.label}</span>
-                                              <span className="pp-hist-closed-doctor">{visit.doctor_name ? `BS. ${visit.doctor_name}` : ''}</span>
-                                              <button className="pp-icon-btn" title="Xóa lần khám" onClick={(e) => { e.stopPropagation(); handleDeleteVisit(visit.id); }}><Trash2 size={14} /></button>
-                                              <ChevronDown size={15} className="pp-hist-closed-chevron" />
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              {filteredVisits.length > 0 && <div className="pp-hist-footer-note">Đã hiển thị tất cả</div>}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {patientProfileTab === 'treatment' && (
-                        <div className="pp-tp-wrap">
-                          <div className="pp-tp-topbar">
-                            <div className="pp-tp-visit-select">
-                              <label>Chọn lần khám</label>
-                              <div className="pp-doc-select-wrap">
-                                <select
-                                  value={currentTreatmentVisit ? currentTreatmentVisit.id : ''}
-                                  onChange={e => setActiveTreatmentVisitId(e.target.value)}
-                                  disabled={!selectedPatient.visits.length}
-                                >
-                                  {!selectedPatient.visits.length && <option value="">Chưa có lần khám nào</option>}
-                                  {selectedPatient.visits.map(v => (
-                                    <option key={v.id} value={v.id}>
-                                      {formatDateVN(v.visit_date)} - {v.diagnosis_primary || v.title || 'Khám bệnh'}
-                                    </option>
-                                  ))}
-                                </select>
-                                <ChevronDown size={14} className="pp-doc-select-chevron" />
-                              </div>
-                            </div>
-                            <div className="pp-tp-topbar-actions">
-                              <button className="pp-btn-outline" onClick={handlePrintTreatmentPlan} disabled={!currentTreatmentVisit}>
-                                <Printer size={14} /> In kế hoạch
-                              </button>
-                              <button className="pp-btn-add" onClick={openAddVisitPanel}>
-                                <Plus size={14} /> Tạo kế hoạch mới
-                              </button>
-                            </div>
-                          </div>
-
-                          {!currentTreatmentVisit ? (
-                            <div className="pp-card">
-                              <div className="pp-empty-state">
-                                <div className="pp-empty-icon"><ClipboardList size={26} /></div>
-                                <h3>Chưa có kế hoạch điều trị nào</h3>
-                                <p>Tạo kế hoạch điều trị đầu tiên cho bệnh nhân để bắt đầu theo dõi chẩn đoán, thuốc và lịch tái khám.</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="pp-tp-grid">
-                                {/* 1. Chẩn đoán */}
-                                <div className="pp-card pp-tp-card">
-                                  <div className="pp-tp-card-header">
-                                    <h4><span className="pp-section-badge">1</span> Chẩn đoán</h4>
-                                    <div className="pp-tp-header-actions">
-                                      {currentTreatmentVisit.diagnosis_primary && <span className="pp-tp-confirmed-tag">Chẩn đoán chính</span>}
-                                      <button className="pp-link-btn" onClick={() => handleAiSuggestDiagnosis(currentTreatmentVisit)} disabled={aiSuggestLoading}>
-                                        {aiSuggestLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Gợi ý từ AI
-                                      </button>
-                                      {!isEditingDiagnosis && (
-                                        <button className="pp-link-btn" onClick={() => openDiagnosisEdit(currentTreatmentVisit)}><PencilLine size={12} /> Sửa</button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {aiReasoningNote && (
-                                    <div className="pp-tp-ai-note">
-                                      <Sparkles size={13} />
-                                      <span>{aiReasoningNote}</span>
-                                      <button className="pp-icon-btn" onClick={() => { setAiReasoningNote(''); setAiAgentTrace([]); setAiAgentSources([]); }}><X size={13} /></button>
-                                    </div>
-                                  )}
-
-                                  {aiAgentTrace.length > 0 && (
-                                    <div className="pp-agent-trace">
-                                      <button className="pp-agent-trace-toggle" onClick={() => setAiAgentTraceExpanded(v => !v)}>
-                                        {aiAgentTraceExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                                        Agent đã tra cứu {aiAgentTrace.length} bước trước khi kết luận
-                                      </button>
-                                      {aiAgentTraceExpanded && (
-                                        <div className="pp-agent-trace-list">
-                                          {aiAgentTrace.map((step, idx) => (
-                                            <div className="pp-agent-trace-step" key={idx}>
-                                              {step.tool === 'tra_cuu_duoc_thu' ? <Search size={12} /> : <FileText size={12} />}
-                                              <div>
-                                                <div className="pp-agent-trace-step-label">{step.label}</div>
-                                                {step.output_summary && (
-                                                  <div className="pp-agent-trace-step-output">{step.output_summary}</div>
-                                                )}
-                                              </div>
-                                            </div>
-                                          ))}
-                                          {aiAgentSources.length > 0 && (
-                                            <div className="pp-agent-source-chips">
-                                              {aiAgentSources.map((src, idx) => (
-                                                <button
-                                                  key={idx}
-                                                  className="pp-agent-source-chip"
-                                                  onClick={() => handleOpenLibraryPreview(src.doc_name, parseInt(String(src.page_num).replace(/[^\d]/g, ''), 10) || 1)}
-                                                  title={src.snippet}
-                                                >
-                                                  <BookOpen size={11} /> {sourceTitle(src)} · {src.page_num}
-                                                </button>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {isEditingDiagnosis ? (
-                                    <div className="pp-tp-edit-form">
-                                      <label>Chẩn đoán chính</label>
-                                      <input type="text" value={diagnosisDraft.primary} onChange={e => setDiagnosisDraft(d => ({ ...d, primary: e.target.value }))} placeholder="Ví dụ: Viêm họng cấp do virus (J02.9)" />
-                                      <label>Chẩn đoán phân biệt (mỗi dòng một chẩn đoán)</label>
-                                      <textarea rows={4} value={diagnosisDraft.differentials} onChange={e => setDiagnosisDraft(d => ({ ...d, differentials: e.target.value }))} placeholder={'Viêm họng do liên cầu khuẩn (J02.0)\nViêm amidan cấp (J03.9)'} />
-                                      <label>Khám lâm sàng</label>
-                                      <textarea rows={4} value={diagnosisDraft.exam} onChange={e => setDiagnosisDraft(d => ({ ...d, exam: e.target.value }))} placeholder="Niêm mạc họng viêm, không có mủ, không hạch cổ to." />
-                                      <div className="pp-tp-edit-actions">
-                                        <button className="pp-btn-ghost" onClick={() => setIsEditingDiagnosis(false)}>Hủy</button>
-                                        <button className="pp-btn-add pp-btn-sm" onClick={() => handleSaveDiagnosis(currentTreatmentVisit.id)}>Lưu</button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      {currentTreatmentVisit.diagnosis_primary ? (() => {
-                                        const { name, code } = parseDiagnosisPrimary(currentTreatmentVisit.diagnosis_primary);
-                                        const basis = [currentTreatmentVisit.symptoms, currentTreatmentVisit.exam_findings].filter(Boolean).join('. ');
-                                        return (
-                                          <div className="pp-tp-diag-box">
-                                            <div className="pp-tp-diag-box-top">
-                                              {code && <span className="pp-tp-diag-code">{code}</span>}
-                                              <span className="pp-tp-diag-name">{name}</span>
-                                              {!!currentTreatmentVisit.diagnosis_confidence && (
-                                                <span className={`pp-confidence-badge ${confidenceMeta(currentTreatmentVisit.diagnosis_confidence).className}`}>
-                                                  Độ tin cậy: {confidenceMeta(currentTreatmentVisit.diagnosis_confidence).label} ({currentTreatmentVisit.diagnosis_confidence}%)
-                                                </span>
-                                              )}
-                                            </div>
-                                            <p className="pp-tp-diag-basis"><strong>Dựa trên:</strong> {basis || 'Chưa ghi nhận.'}</p>
-                                          </div>
-                                        );
-                                      })() : <p className="pp-muted">Chưa có chẩn đoán chính.</p>}
-
-                                      {(currentTreatmentVisit.differential_diagnoses || []).length > 0 ? (
-                                        <>
-                                          <div className="pp-tp-subhead">Chẩn đoán phân biệt</div>
-                                          <div className="pp-diag-top5-table">
-                                            <div className="pp-diag-top5-row pp-diag-top5-head">
-                                              <span>STT</span><span>Chẩn đoán</span><span>ICD-10</span><span>Độ tin cậy</span><span>Ghi chú</span>
-                                            </div>
-                                            {currentTreatmentVisit.differential_diagnoses.map((d, i) => {
-                                              const meta = confidenceMeta(d.confidence);
-                                              return (
-                                                <div key={i} className="pp-diag-top5-row">
-                                                  <span>{i + 1}</span>
-                                                  <span>{d.name}</span>
-                                                  <span>{d.icd10 || '—'}</span>
-                                                  <span className={`pp-confidence-dot ${meta.className}`}>{meta.label} ({d.confidence}%)</span>
-                                                  <span>{d.note || '—'}</span>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                          <button type="button" className="pp-link-btn pp-diag-reasoning-toggle" onClick={() => setShowDiagnosisReasoning(v => !v)}>
-                                            {showDiagnosisReasoning ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Xem chi tiết lý do gợi ý
-                                          </button>
-                                          {showDiagnosisReasoning && (
-                                            <ul className="pp-tp-bullets pp-diag-reasoning-list">
-                                              {currentTreatmentVisit.differential_diagnoses.filter(d => d.reasoning).map((d, i) => (
-                                                <li key={i}><strong>{d.name}:</strong> {d.reasoning}</li>
-                                              ))}
-                                            </ul>
-                                          )}
-                                        </>
-                                      ) : currentTreatmentVisit.diagnosis_secondary && (
-                                        <>
-                                          <div className="pp-tp-subhead">Chẩn đoán phân biệt</div>
-                                          <ul className="pp-tp-bullets">
-                                            {currentTreatmentVisit.diagnosis_secondary.split('\n').map(s => s.trim()).filter(Boolean).map((s, i) => <li key={i}>{s}</li>)}
-                                          </ul>
-                                        </>
-                                      )}
-
-                                      <div className="pp-tp-diag-note-head">
-                                        <div className="pp-tp-subhead">Ghi chú chẩn đoán</div>
-                                        {!isEditingDiagnosisNote && <button className="pp-link-btn" onClick={() => openDiagnosisNoteEdit(currentTreatmentVisit)}><PencilLine size={12} /> Sửa</button>}
-                                      </div>
-                                      {isEditingDiagnosisNote ? (
-                                        <div className="pp-tp-edit-form">
-                                          <textarea rows={3} maxLength={1000} value={diagnosisNoteDraft} onChange={e => setDiagnosisNoteDraft(e.target.value)} placeholder="Nhập ghi chú thêm về chẩn đoán (nếu có)..." />
-                                          <div className="pp-diag-note-counter">{diagnosisNoteDraft.length}/1000</div>
-                                          <div className="pp-tp-edit-actions">
-                                            <button className="pp-btn-ghost" onClick={() => setIsEditingDiagnosisNote(false)}>Hủy</button>
-                                            <button className="pp-btn-add pp-btn-sm" onClick={() => handleSaveDiagnosisNote(currentTreatmentVisit.id)}>Lưu</button>
-                                          </div>
-                                        </div>
-                                      ) : currentTreatmentVisit.diagnosis_note && (
-                                        <p className="pp-tp-basis">{currentTreatmentVisit.diagnosis_note}</p>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-
-                                {/* 3. Đơn thuốc */}
-                                <div className="pp-card pp-tp-card">
-                                  <div className="pp-tp-card-header">
-                                    <h4><span className="pp-section-badge">3</span> Đơn thuốc</h4>
-                                    <button className="pp-btn-outline" onClick={openAddMedication}><Plus size={13} /> Thêm thuốc</button>
-                                  </div>
-
-                                  {(currentTreatmentVisit.medications || []).length === 0 && !isAddingMedication ? (
-                                    <div className="pp-inline-empty">Chưa có thuốc điều trị nào được kê.</div>
-                                  ) : (currentTreatmentVisit.medications || []).length > 0 && (
-                                    <div className="pp-tp-rx-table">
-                                      <div className="pp-tp-rx-row pp-tp-rx-head">
-                                        <span>#</span><span>Thuốc</span><span>Cách dùng – Liều dùng</span><span>Số lượng</span><span></span>
-                                      </div>
-                                      {currentTreatmentVisit.medications.map((m, i) => (
-                                        <div key={i} className="pp-tp-rx-row">
-                                          <span className="pp-tp-rx-idx">{i + 1}</span>
-                                          <span className="pp-tp-rx-name">
-                                            <strong>{m.name}</strong>
-                                            {m.form && <small>{m.form}</small>}
-                                          </span>
-                                          <span className="pp-tp-rx-usage">
-                                            {!!(m.dosage || m.frequency) && <div>{[m.dosage, m.frequency].filter(Boolean).join(', ')}</div>}
-                                            {(m.instructions || '').split('\n').map(s => s.trim()).filter(Boolean).map((line, li) => <small key={li}>{line}</small>)}
-                                          </span>
-                                          <span className="pp-tp-rx-qty">{m.quantity || '—'}</span>
-                                          <button className="pp-icon-btn" onClick={() => handleDeleteMedication(currentTreatmentVisit, i)}><Trash2 size={14} /></button>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {isAddingMedication && (
-                                    <div className="pp-tp-med-add-form">
-                                      <div className="pp-form-row">
-                                        <div className="pp-form-group"><label>Tên thuốc</label><input type="text" value={medDraft.name} onChange={e => setMedDraft(d => ({ ...d, name: e.target.value }))} placeholder="Ví dụ: Paracetamol 500mg" autoFocus /></div>
-                                        <div className="pp-form-group"><label>Dạng bào chế</label><input type="text" value={medDraft.form} onChange={e => setMedDraft(d => ({ ...d, form: e.target.value }))} placeholder="Viên nén" /></div>
-                                      </div>
-                                      <div className="pp-form-row">
-                                        <div className="pp-form-group"><label>Liều dùng</label><input type="text" value={medDraft.dosage} onChange={e => setMedDraft(d => ({ ...d, dosage: e.target.value }))} placeholder="Uống 1 viên/lần" /></div>
-                                        <div className="pp-form-group"><label>Thời gian</label><input type="text" value={medDraft.frequency} onChange={e => setMedDraft(d => ({ ...d, frequency: e.target.value }))} placeholder="Ngày 3 lần" /></div>
-                                      </div>
-                                      <div className="pp-form-row">
-                                        <div className="pp-form-group"><label>Số lượng</label><input type="text" value={medDraft.quantity} onChange={e => setMedDraft(d => ({ ...d, quantity: e.target.value }))} placeholder="10 viên" /></div>
-                                        <div className="pp-form-group"><label>Hướng dẫn</label><input type="text" value={medDraft.instructions} onChange={e => setMedDraft(d => ({ ...d, instructions: e.target.value }))} placeholder="Sau ăn" /></div>
-                                      </div>
-                                      <div className="pp-tp-edit-actions">
-                                        <button className="pp-btn-ghost" onClick={() => setIsAddingMedication(false)}>Hủy</button>
-                                        <button className="pp-btn-add pp-btn-sm" onClick={() => handleSaveMedication(currentTreatmentVisit)}>Thêm thuốc</button>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  <div className="pp-tp-note-box">
-                                    <div className="pp-tp-note-box-head">
-                                      <span className="pp-tp-note-label">Lưu ý:</span>
-                                      {!isEditingNoDrug && <button className="pp-link-btn" onClick={() => openNoDrugEdit(currentTreatmentVisit)}><PencilLine size={12} /> Sửa</button>}
-                                    </div>
-                                    {isEditingNoDrug ? (
-                                      <div className="pp-tp-edit-form">
-                                        <textarea rows={3} value={noDrugDraft} onChange={e => setNoDrugDraft(e.target.value)} placeholder={'Uống thuốc đúng liều, đủ thời gian.\nKhông tự ý ngưng thuốc khi chưa hết triệu chứng.'} />
-                                        <div className="pp-tp-edit-actions">
-                                          <button className="pp-btn-ghost" onClick={() => setIsEditingNoDrug(false)}>Hủy</button>
-                                          <button className="pp-btn-add pp-btn-sm" onClick={() => handleSaveNoDrug(currentTreatmentVisit.id)}>Lưu</button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <p className="pp-tp-note-text">
-                                        {(currentTreatmentVisit.no_drug_recommendations || '').trim() === ''
-                                          ? 'Chưa có lưu ý nào.'
-                                          : currentTreatmentVisit.no_drug_recommendations.split('\n').map(s => s.trim()).filter(Boolean).join(' ')}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* 2. Kế hoạch điều trị */}
-                                <div className="pp-card pp-tp-card">
-                                  <div className="pp-tp-card-header">
-                                    <h4><span className="pp-section-badge">2</span> Kế hoạch điều trị</h4>
-                                    {!isEditingPlan && !isEditingFollowup && (
-                                      <button className="pp-link-btn" onClick={() => { openPlanEdit(currentTreatmentVisit); openFollowupEdit(currentTreatmentVisit); }}><PencilLine size={12} /> Sửa kế hoạch</button>
-                                    )}
-                                  </div>
-                                  {(isEditingPlan || isEditingFollowup) ? (
-                                    <div className="pp-tp-edit-form">
-                                      <label>Mục tiêu điều trị (mỗi dòng một mục tiêu)</label>
-                                      <textarea rows={3} value={planDraft.goals} onChange={e => setPlanDraft(d => ({ ...d, goals: e.target.value }))} placeholder={'Giảm nhanh triệu chứng\nNgăn ngừa biến chứng'} />
-                                      <div className="pp-form-row">
-                                        <div className="pp-form-group"><label>Phương pháp điều trị</label><input type="text" value={planDraft.treatment_method} onChange={e => setPlanDraft(d => ({ ...d, treatment_method: e.target.value }))} placeholder="Nội khoa" /></div>
-                                        <div className="pp-form-group"><label>Thời gian dự kiến</label><input type="text" value={planDraft.protocol_duration} onChange={e => setPlanDraft(d => ({ ...d, protocol_duration: e.target.value }))} placeholder="5 - 7 ngày" /></div>
-                                      </div>
-                                      <label>Chế độ</label>
-                                      <textarea rows={2} value={planDraft.diet_regimen} onChange={e => setPlanDraft(d => ({ ...d, diet_regimen: e.target.value }))} placeholder="Nghỉ ngơi, uống nhiều nước ấm, ăn thức ăn mềm, dễ nuốt." />
-                                      <label>Lưu ý</label>
-                                      <textarea rows={2} value={planDraft.precautions} onChange={e => setPlanDraft(d => ({ ...d, precautions: e.target.value }))} placeholder="Tránh khói bụi, không hút thuốc lá, không uống rượu bia." />
-                                      <label>Mục đích / tiêu chí tái khám</label>
-                                      <textarea rows={2} value={followupDraft.purpose} onChange={e => setFollowupDraft(d => ({ ...d, purpose: e.target.value }))} placeholder="Nếu không cải thiện sau 3 ngày hoặc nặng hơn." />
-                                      <label>Ngày hẹn tái khám (nếu có)</label>
-                                      <input type="date" value={followupDraft.date} onChange={e => setFollowupDraft(d => ({ ...d, date: e.target.value }))} />
-                                      <div className="pp-tp-edit-actions">
-                                        <button className="pp-btn-ghost" onClick={() => { setIsEditingPlan(false); setIsEditingFollowup(false); }}>Hủy</button>
-                                        <button className="pp-btn-add pp-btn-sm" onClick={async () => { await handleSavePlan(currentTreatmentVisit.id); await handleSaveFollowup(currentTreatmentVisit.id); }}>Lưu</button>
-                                      </div>
-                                    </div>
-                                  ) : (currentTreatmentVisit.goals || []).length === 0
-                                    && !currentTreatmentVisit.protocol_duration && !currentTreatmentVisit.followup_purpose
-                                    && !currentTreatmentVisit.followup_date && !currentTreatmentVisit.diet_regimen && !currentTreatmentVisit.precautions ? (
-                                    <div className="pp-inline-empty">Chưa có kế hoạch điều trị.</div>
-                                  ) : (
-                                    <div className="pp-tp-plan-icon-rows">
-                                      {(currentTreatmentVisit.goals || []).length > 0 && (
-                                        <div className="pp-tp-plan-icon-row">
-                                          <span className="pp-tp-plan-icon"><Target size={14} /></span>
-                                          <span className="pp-tp-plan-label">Mục tiêu điều trị</span>
-                                          <span className="pp-tp-plan-value">{currentTreatmentVisit.goals.join(' • ')}</span>
-                                        </div>
-                                      )}
-                                      {currentTreatmentVisit.protocol_duration && (
-                                        <div className="pp-tp-plan-icon-row">
-                                          <span className="pp-tp-plan-icon"><Clock size={14} /></span>
-                                          <span className="pp-tp-plan-label">Thời gian dự kiến</span>
-                                          <span className="pp-tp-plan-value">{currentTreatmentVisit.protocol_duration}</span>
-                                        </div>
-                                      )}
-                                      {(currentTreatmentVisit.followup_purpose || currentTreatmentVisit.followup_date) && (
-                                        <div className="pp-tp-plan-icon-row">
-                                          <span className="pp-tp-plan-icon"><Calendar size={14} /></span>
-                                          <span className="pp-tp-plan-label">Tái khám</span>
-                                          <span className="pp-tp-plan-value">
-                                            {currentTreatmentVisit.followup_date && `${formatDateVN(currentTreatmentVisit.followup_date)}. `}
-                                            {currentTreatmentVisit.followup_purpose}
-                                          </span>
-                                        </div>
-                                      )}
-                                      {currentTreatmentVisit.diet_regimen && (
-                                        <div className="pp-tp-plan-icon-row">
-                                          <span className="pp-tp-plan-icon"><Utensils size={14} /></span>
-                                          <span className="pp-tp-plan-label">Chế độ</span>
-                                          <span className="pp-tp-plan-value">{currentTreatmentVisit.diet_regimen}</span>
-                                        </div>
-                                      )}
-                                      {currentTreatmentVisit.precautions && (
-                                        <div className="pp-tp-plan-icon-row">
-                                          <span className="pp-tp-plan-icon"><ShieldAlert size={14} /></span>
-                                          <span className="pp-tp-plan-label">Lưu ý</span>
-                                          <span className="pp-tp-plan-value">{currentTreatmentVisit.precautions}</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* 4. Hướng dẫn cho bệnh nhân */}
-                                <div className="pp-card pp-tp-card">
-                                  <div className="pp-tp-card-header">
-                                    <h4><span className="pp-section-badge">4</span> Hướng dẫn cho bệnh nhân</h4>
-                                    {!isEditingCare && <button className="pp-link-btn" onClick={() => openCareEdit(currentTreatmentVisit)}><PencilLine size={12} /> Sửa</button>}
-                                  </div>
-                                  {isEditingCare ? (
-                                    <div className="pp-tp-edit-form">
-                                      <textarea rows={5} value={careDraft} onChange={e => setCareDraft(e.target.value)} placeholder={'Uống thuốc đúng liều, đúng thời gian theo đơn.\nUống nhiều nước ấm, súc họng nước muối ấm 2-3 lần/ngày.'} />
-                                      <div className="pp-tp-edit-actions">
-                                        <button className="pp-btn-ghost" onClick={() => setIsEditingCare(false)}>Hủy</button>
-                                        <button className="pp-btn-add pp-btn-sm" onClick={() => handleSaveCare(currentTreatmentVisit.id)}>Lưu</button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    (currentTreatmentVisit.care_instructions || '').trim() === '' ? (
-                                      <div className="pp-inline-empty">Chưa có hướng dẫn chăm sóc.</div>
-                                    ) : (
-                                      <ul className="pp-tp-check-list">
-                                        {currentTreatmentVisit.care_instructions.split('\n').map(s => s.trim()).filter(Boolean).map((s, i) => (
-                                          <li key={i}><Check size={14} /><span>{s}</span></li>
-                                        ))}
-                                      </ul>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="pp-tp-action-bar">
-                                <button
-                                  type="button"
-                                  className="pp-btn-add"
-                                  onClick={() => handleToggleTreatmentStatus(currentTreatmentVisit)}
-                                  disabled={currentTreatmentVisit.status === 'completed'}
-                                >
-                                  <Check size={14} /> {currentTreatmentVisit.status === 'completed' ? 'Đã hoàn tất điều trị' : 'Hoàn tất điều trị'}
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-
-                      {patientProfileTab === 'documents' && (() => {
-                        const allAttachments = selectedPatient.attachments || [];
-                        const categorized = allAttachments.map(att => ({ ...att, _category: classifyAttachmentCategory(att) }));
-                        const categoryCounts = DOC_CATEGORY_ORDER.reduce((acc, id) => {
-                          acc[id] = categorized.filter(a => a._category === id).length;
-                          return acc;
-                        }, {});
-
-                        const now = Date.now();
-                        const rangeMs = { '7d': 7 * 86400000, '30d': 30 * 86400000, '90d': 90 * 86400000 };
-
-                        const filtered = categorized.filter(att => {
-                          if (docCategory !== 'all' && att._category !== docCategory) return false;
-                          if (docSearch.trim() && !stripDiacriticsVN(att.original_name || '').includes(stripDiacriticsVN(docSearch.trim()))) return false;
-                          if (docDateRange !== 'all') {
-                            const t = new Date(att.uploaded_at).getTime();
-                            if (Number.isNaN(t) || now - t > rangeMs[docDateRange]) return false;
-                          }
-                          if (docStatus !== 'all') {
-                            const t = new Date(att.uploaded_at).getTime();
-                            const isNew = !Number.isNaN(t) && (now - t) <= 3 * 86400000;
-                            if (docStatus === 'new' && !isNew) return false;
-                            if (docStatus === 'archived' && isNew) return false;
-                          }
-                          return true;
-                        });
-
-                        const sorted = [...filtered].sort((a, b) => {
-                          if (docSort === 'name') return (a.original_name || '').localeCompare(b.original_name || '');
-                          if (docSort === 'size') return (b.size_bytes || 0) - (a.size_bytes || 0);
-                          if (docSort === 'oldest') return new Date(a.uploaded_at) - new Date(b.uploaded_at);
-                          return new Date(b.uploaded_at) - new Date(a.uploaded_at); // newest (default)
-                        });
-
-                        const visible = sorted.slice(0, docVisibleCount);
-                        const hasFiltersActive = docCategory !== 'all' || docDateRange !== 'all' || docStatus !== 'all';
-                        const resetFilters = () => { setDocCategory('all'); setDocDateRange('all'); setDocStatus('all'); setDocVisibleCount(8); };
-
-                        const docCard = (att) => {
-                          const meta = DOC_CATEGORY_META[att._category];
-                          const CatIcon = meta.icon;
-                          const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF'].includes((att.file_type || '').toUpperCase());
-                          const downloadUrl = `/api/patients/${selectedPatient.id}/attachments/${att.id}/download`;
-
-                          const menu = (
-                            <DropdownMenu.Root>
-                              <DropdownMenu.Trigger asChild>
-                                <button className="card-menu-btn" onClick={(e) => e.stopPropagation()} title="Tùy chọn tài liệu">
-                                  <MoreHorizontal size={15} />
-                                </button>
-                              </DropdownMenu.Trigger>
-                              <DropdownMenu.Portal>
-                                <DropdownMenu.Content className="dropdown-menu-content" align="end" sideOffset={4} onClick={(e) => e.stopPropagation()}>
-                                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleDownloadAttachment(att)}>
-                                    <Download size={14} /> Tải xuống
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Separator className="dropdown-menu-separator" />
-                                  <DropdownMenu.Item className="dropdown-menu-item danger" onSelect={() => handleDeleteAttachment(att.id)}>
-                                    <Trash2 size={14} /> Xóa
-                                  </DropdownMenu.Item>
-                                </DropdownMenu.Content>
-                              </DropdownMenu.Portal>
-                            </DropdownMenu.Root>
-                          );
-
-                          if (docView === 'list') {
-                            return (
-                              <div key={att.id} className="pp-doc-row">
-                                <div className={`pp-doc-row-icon pp-doc-hue-${getDocFileHue(att.file_type)}`}>
-                                  {isImage ? <ImageIcon size={17} /> : <FileText size={17} />}
-                                </div>
-                                <div className="pp-doc-row-body">
-                                  <div className="pp-doc-row-title">{att.original_name}</div>
-                                  <div className="pp-doc-row-meta">{formatDateVN(att.uploaded_at)} • {formatTimeVN(att.uploaded_at)} • {formatFileSize(att.size_bytes)}</div>
-                                </div>
-                                <span className={`pp-doc-tag ${meta.pill}`}><CatIcon size={11} /> {meta.label}</span>
-                                {menu}
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div key={att.id} className="pp-doc-card">
-                              <div className="pp-doc-card-thumb">
-                                {isImage ? (
-                                  <AuthedImage url={downloadUrl} alt={att.original_name} />
-                                ) : (
-                                  <div className={`pp-doc-file-icon pp-doc-hue-${getDocFileHue(att.file_type)}`}>
-                                    <FileText size={22} />
-                                    <span>{att.file_type || 'FILE'}</span>
-                                  </div>
-                                )}
-                                {menu}
-                              </div>
-                              <div className="pp-doc-card-body">
-                                <div className="pp-doc-card-title">{att.original_name}</div>
-                                <div className="pp-doc-card-meta">{formatDateVN(att.uploaded_at)} • {formatTimeVN(att.uploaded_at)} • {formatFileSize(att.size_bytes)}</div>
-                                <span className={`pp-doc-tag ${meta.pill}`}><CatIcon size={11} /> {meta.label}</span>
-                              </div>
-                            </div>
-                          );
-                        };
-
-                        return (
-                          <div className="pp-doctab">
-                            {/* Left: categories + filters */}
-                            <div className="pp-doc-sidebar">
-                              <div className="pp-card pp-doc-side-card">
-                                <h4>Danh mục tài liệu</h4>
-                                <div className="pp-doc-cat-list">
-                                  <button
-                                    className={`pp-doc-cat-item ${docCategory === 'all' ? 'active' : ''}`}
-                                    onClick={() => { setDocCategory('all'); setDocVisibleCount(8); }}
-                                  >
-                                    <FileText size={15} />
-                                    <span>Tất cả</span>
-                                    <span className="pp-doc-cat-count">{allAttachments.length}</span>
-                                  </button>
-                                  {DOC_CATEGORY_ORDER.map(id => {
-                                    const meta = DOC_CATEGORY_META[id];
-                                    const Icon = meta.icon;
-                                    return (
-                                      <button
-                                        key={id}
-                                        className={`pp-doc-cat-item ${docCategory === id ? 'active' : ''}`}
-                                        onClick={() => { setDocCategory(id); setDocVisibleCount(8); }}
-                                      >
-                                        <Icon size={15} />
-                                        <span>{meta.label}</span>
-                                        <span className="pp-doc-cat-count">{categoryCounts[id]}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              <div className="pp-card pp-doc-side-card">
-                                <h4>Bộ lọc</h4>
-                                <div className="pp-doc-filter-group">
-                                  <label>Khoảng thời gian</label>
-                                  <div className="pp-doc-select-wrap pp-doc-select-has-icon">
-                                    <Calendar size={14} className="pp-doc-select-icon" />
-                                    <select value={docDateRange} onChange={e => { setDocDateRange(e.target.value); setDocVisibleCount(8); }}>
-                                      <option value="all">Tất cả thời gian</option>
-                                      <option value="7d">7 ngày qua</option>
-                                      <option value="30d">30 ngày qua</option>
-                                      <option value="90d">3 tháng qua</option>
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <div className="pp-doc-filter-group">
-                                  <label>Loại tài liệu</label>
-                                  <div className="pp-doc-select-wrap">
-                                    <select value={docCategory} onChange={e => { setDocCategory(e.target.value); setDocVisibleCount(8); }}>
-                                      <option value="all">Tất cả</option>
-                                      {DOC_CATEGORY_ORDER.map(id => (
-                                        <option key={id} value={id}>{DOC_CATEGORY_META[id].label}</option>
-                                      ))}
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <div className="pp-doc-filter-group">
-                                  <label>Trạng thái</label>
-                                  <div className="pp-doc-select-wrap">
-                                    <select value={docStatus} onChange={e => { setDocStatus(e.target.value); setDocVisibleCount(8); }}>
-                                      <option value="all">Tất cả</option>
-                                      <option value="new">Mới tải lên (≤ 3 ngày)</option>
-                                      <option value="archived">Đã lưu trữ</option>
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                </div>
-                                <button className="pp-doc-reset-btn" onClick={resetFilters} disabled={!hasFiltersActive}>
-                                  <RotateCcw size={13} /> Đặt lại bộ lọc
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Right: toolbar + grid/list */}
-                            <div className="pp-doc-main">
-                              <div className="pp-doc-toolbar">
-                                <h3 className="pp-doc-toolbar-title">Tất cả tài liệu ({filtered.length})</h3>
-                                <div className="pp-doc-toolbar-actions">
-                                  <div className="pp-doc-search-wrap">
-                                    <Search size={14} className="pp-doc-search-icon" />
-                                    <input
-                                      type="text"
-                                      placeholder="Tìm kiếm theo tên tài liệu..."
-                                      value={docSearch}
-                                      onChange={e => { setDocSearch(e.target.value); setDocVisibleCount(8); }}
-                                    />
-                                  </div>
-                                  <div className="pp-doc-select-wrap pp-doc-toolbar-select">
-                                    <select value={docCategory} onChange={e => { setDocCategory(e.target.value); setDocVisibleCount(8); }} title="Loại tài liệu">
-                                      <option value="all">Loại tài liệu</option>
-                                      {DOC_CATEGORY_ORDER.map(id => (
-                                        <option key={id} value={id}>{DOC_CATEGORY_META[id].label}</option>
-                                      ))}
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                  <div className="pp-doc-select-wrap pp-doc-toolbar-select">
-                                    <select value={docSort} onChange={e => setDocSort(e.target.value)} title="Sắp xếp">
-                                      <option value="newest">Mới nhất</option>
-                                      <option value="oldest">Cũ nhất</option>
-                                      <option value="name">Tên A-Z</option>
-                                      <option value="size">Dung lượng</option>
-                                    </select>
-                                    <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                  </div>
-                                  <div className="pp-doc-view-toggle">
-                                    <button className={docView === 'grid' ? 'active' : ''} onClick={() => setDocView('grid')} title="Xem dạng lưới">
-                                      <LayoutGrid size={15} />
-                                    </button>
-                                    <button className={docView === 'list' ? 'active' : ''} onClick={() => setDocView('list')} title="Xem dạng danh sách">
-                                      <List size={15} />
-                                    </button>
-                                  </div>
-                                  <label className="pp-btn-add pp-btn-sm pp-upload-label">
-                                    <Plus size={14} /> Thêm tài liệu
-                                    <input type="file" hidden onChange={handleUploadAttachment} />
-                                  </label>
-                                </div>
-                              </div>
-
-                              {allAttachments.length === 0 ? (
-                                <div className="pp-doc-empty">
-                                  <div className="pp-doc-empty-icon"><FileText size={26} /></div>
-                                  <h4>Chưa có tài liệu đính kèm nào</h4>
-                                  <p>Tải lên kết quả xét nghiệm, hình ảnh chẩn đoán hoặc các tài liệu khác của bệnh nhân.</p>
-                                  <label className="pp-btn-add pp-upload-label">
-                                    <Plus size={16} /> Thêm tài liệu
-                                    <input type="file" hidden onChange={handleUploadAttachment} />
-                                  </label>
-                                </div>
-                              ) : filtered.length === 0 ? (
-                                <div className="pp-doc-empty">
-                                  <div className="pp-doc-empty-icon"><Search size={24} /></div>
-                                  <h4>Không tìm thấy tài liệu</h4>
-                                  <p>Không có tài liệu nào khớp với bộ lọc hiện tại.</p>
-                                </div>
-                              ) : (
-                                <div className={docView === 'grid' ? 'pp-doc-grid' : 'pp-doc-list'}>
-                                  {visible.map(docCard)}
-                                </div>
-                              )}
-
-                              {visible.length < filtered.length && (
-                                <button className="pp-doc-more-btn" onClick={() => setDocVisibleCount(c => c + 8)}>
-                                  Xem thêm <ChevronDown size={14} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Ghi chú tab content */}
-                      {patientProfileTab === 'notes' && (() => {
-                        const notes = selectedPatient.notes || [];
-                        const isCreatingBlankNote = isNoteFormOpen && !activeNoteId;
-                        return (
-                        <div className="pp-tp-wrap">
-                          {/* Hidden while creating a new note or bulk-editing an existing one — only shown in the plain read-only view (and the empty state). */}
-                          {!isNoteFormOpen && (
-                            <div className="pp-tp-topbar">
-                              <div className="pp-tp-visit-select">
-                                <label>Chọn ghi chú</label>
-                                <div className="pp-doc-select-wrap">
-                                  <select
-                                    value={activeNoteId || ''}
-                                    onChange={e => selectNote(e.target.value)}
-                                    disabled={!notes.length}
-                                  >
-                                    {!notes.length && <option value="">Chưa có ghi chú nào</option>}
-                                    {notes.map(n => (
-                                      <option key={n.id} value={n.id}>
-                                        {formatDateVN(n.visit_date) || 'Chưa có ngày'} - {n.reason_for_visit || 'Ghi chú'}{n.status === 'draft' ? ' (Nháp)' : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <ChevronDown size={14} className="pp-doc-select-chevron" />
-                                </div>
-                              </div>
-                              <div className="pp-tp-topbar-actions">
-                                <button className="pp-btn-add" onClick={openCreateNote}>
-                                  <Plus size={14} /> Tạo ghi chú
-                                </button>
-                              </div>
-                            </div>
-                          )}
-
-                          {!isCreatingBlankNote && !currentNote ? (
-                            <div className="pp-card">
-                              <div className="pp-empty-state">
-                                <div className="pp-empty-icon"><ClipboardList size={26} /></div>
-                                <h3>Chưa có ghi chú nào</h3>
-                                <p>Tạo ghi chú thăm khám đầu tiên cho bệnh nhân để bắt đầu ghi nhận thông tin lâm sàng.</p>
-                              </div>
-                            </div>
-                          ) : isNoteFormOpen ? (
-                            <div className="pp-notes-page">
-                              <div className="pp-notes-grid">
-                                <div className="pp-notes-col">
-                                  <div className="pp-form-group pp-notes-date-field">
-                                    <label>Ngày khám <span className="pp-required">*</span></label>
-                                    <input type="date" required value={noteFormDraft.visit_date} onChange={e => handleNoteFormFieldChange('visit_date', e.target.value)} />
-                                  </div>
-
-                                  <div className="pp-notes-field">
-                                    <label>Lý do khám bệnh</label>
-                                    <textarea
-                                      rows={1}
-                                      value={noteFormDraft.reason_for_visit}
-                                      onChange={e => handleNoteFormFieldChange('reason_for_visit', e.target.value)}
-                                      placeholder="Đau họng"
-                                    />
-                                  </div>
-
-                                  <div className="pp-notes-field">
-                                    <label>Dấu hiệu sinh tồn</label>
-                                    <div className="pp-notes-vitals-row">
-                                      {NOTES_VITALS_FIELDS.map(f => (
-                                        <div className="pp-notes-vital" key={f.key}>
-                                          <span className="pp-notes-vital-label">{f.label}</span>
-                                          <div className="pp-notes-vital-input">
-                                            <input
-                                              type="text"
-                                              value={noteFormDraft.vitals[f.key]}
-                                              onChange={e => handleNoteFormVitalChange(f.key, e.target.value)}
-                                              placeholder={f.placeholder}
-                                            />
-                                            <span className="pp-notes-vital-unit">{f.unit}</span>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  {NOTES_EXAM_FIELDS.map(f => (
-                                    <div className="pp-notes-field" key={f.key}>
-                                      <label>{f.label}</label>
-                                      <textarea
-                                        rows={2}
-                                        value={noteFormDraft[f.key]}
-                                        onChange={e => handleNoteFormFieldChange(f.key, e.target.value)}
-                                        placeholder={f.placeholder}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-
-                                <div className="pp-notes-col">
-                                  <div className="pp-notes-ent-card">
-                                    <h4>Khám chuyên khoa Tai Mũi Họng</h4>
-                                    {NOTES_ENT_FIELDS.map(f => (
-                                      <div className="pp-notes-ent-field" key={f.key}>
-                                        <label>{f.label}</label>
-                                        <textarea
-                                          rows={2}
-                                          value={noteFormDraft[f.key]}
-                                          onChange={e => handleNoteFormFieldChange(f.key, e.target.value)}
-                                          placeholder={f.placeholder}
-                                        />
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {(() => {
-                                // Editing an already-finalized note (via "Sửa") never offers "Lưu nháp" —
-                                // finalizing is one-way, so saving here just keeps status "final".
-                                const editingFinal = !!activeNoteId && currentNote?.status === 'final';
-                                return (
-                                  <div className="pp-notes-footer">
-                                    <button className="pp-btn-ghost" onClick={handleCancelNoteForm} disabled={isSavingNote}>Hủy</button>
-                                    <div className="pp-notes-footer-right">
-                                      {!editingFinal && (
-                                        <button className="pp-btn-outline" onClick={handleSaveNoteDraft} disabled={isSavingNote}>Lưu nháp</button>
-                                      )}
-                                      <button className="pp-btn-add" onClick={handleSaveNoteFinal} disabled={isSavingNote}>{editingFinal ? 'Lưu' : 'Lưu ghi chú'}</button>
-                                    </div>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          ) : (
-                            <div className="pp-notes-page">
-                              <div className="pp-tp-card-header">
-                                <span className={`pp-status-badge ${NOTE_STATUS_META[currentNote.status]?.className || ''}`}>
-                                  {NOTE_STATUS_META[currentNote.status]?.label || currentNote.status}
-                                </span>
-                                <div className="pp-tp-header-actions">
-                                  <button className="pp-link-btn" onClick={() => openEditNote(currentNote)}><PencilLine size={12} /> Sửa</button>
-                                  <button className="pp-icon-btn" title="Xóa ghi chú" onClick={() => handleDeleteNote(currentNote.id)}><Trash2 size={14} /></button>
-                                </div>
-                              </div>
-
-                              <div className="pp-notes-grid">
-                                <div className="pp-notes-col">
-                                  {renderNoteReadField(currentNote, 'reason_for_visit', 'Lý do khám bệnh')}
-
-                                  <div className="pp-tp-note-box">
-                                    <div className="pp-tp-note-box-head">
-                                      <span className="pp-tp-note-label">Dấu hiệu sinh tồn</span>
-                                    </div>
-                                    <p className="pp-tp-note-text">
-                                      {NOTES_VITALS_FIELDS.map(f => currentNote.vitals[f.key] ? `${f.label}: ${currentNote.vitals[f.key]} ${f.unit}` : null).filter(Boolean).join('  •  ') || 'Chưa ghi nhận.'}
-                                    </p>
-                                  </div>
-
-                                  {NOTES_EXAM_FIELDS.map(f => renderNoteReadField(currentNote, f.key, f.label))}
-                                </div>
-
-                                <div className="pp-notes-col">
-                                  <div className="pp-notes-ent-card">
-                                    <h4>Khám chuyên khoa Tai Mũi Họng</h4>
-                                    {NOTES_ENT_FIELDS.map(f => renderNoteReadField(currentNote, f.key, f.label))}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        );
-                      })()}
-
-                    </div>
-
-                    {/* Right sidebar */}
-                    {patientProfileTab !== 'documents' && patientProfileTab !== 'notes' && patientProfileTab !== 'treatment' && (
-                    <div className="pp-side">
-                      {patientProfileTab === 'history' ? (() => {
-                        const latestVisit = selectedPatient.visits[0] || null;
-                        const goToTreatment = (visitId) => { setActiveTreatmentVisitId(visitId); setPatientProfileTab('treatment'); };
-                        return (
-                          <>
-                            <div className="pp-card">
-                              {!latestVisit ? (
-                                <>
-                                  <h3>Lần khám gần nhất</h3>
-                                  <div className="pp-inline-empty">Chưa có lần khám nào.</div>
-                                </>
-                              ) : (() => {
-                                const statusMeta = TREATMENT_STATUS_META[latestVisit.status] || TREATMENT_STATUS_META.completed;
-                                return (
-                                  <>
-                                    <div className="pp-hist-side-header">
-                                      <h3>Lần khám gần nhất</h3>
-                                      <span className={`pp-status-badge ${statusMeta.className}`}>{statusMeta.label}</span>
-                                    </div>
-                                    <div className="pp-hist-side-date">
-                                      {formatDateVN(latestVisit.visit_date)}{formatTimeVN(latestVisit.visit_date) && ` - ${formatTimeVN(latestVisit.visit_date)}`}
-                                    </div>
-                                    <div className="pp-hist-side-field">
-                                      <div className="pp-hist-col-label">Chẩn đoán</div>
-                                      <p className="pp-hist-side-value">{latestVisit.diagnosis_primary || 'Chưa có chẩn đoán.'}</p>
-                                    </div>
-                                    <div className="pp-hist-side-field">
-                                      <div className="pp-hist-col-label">Bác sĩ điều trị</div>
-                                      <p className="pp-hist-side-value">{latestVisit.doctor_name ? `BS. ${latestVisit.doctor_name}` : 'Chưa xác định'}</p>
-                                    </div>
-                                    <button className="pp-hist-side-btn" onClick={() => goToTreatment(latestVisit.id)}>
-                                      Xem chi tiết kế hoạch điều trị <ChevronRight size={14} />
-                                    </button>
-                                  </>
-                                );
-                              })()}
-                            </div>
-
-                            <div className="pp-card">
-                              <div className="pp-hist-side-header">
-                                <h3>Tài liệu liên quan gần nhất</h3>
-                                {(selectedPatient.attachments || []).length > 0 && (
-                                  <button className="pp-link-btn" onClick={() => setPatientProfileTab('documents')}>Xem tất cả</button>
-                                )}
-                              </div>
-                              {(selectedPatient.attachments || []).length === 0 ? (
-                                <div className="pp-inline-empty">Chưa có tài liệu nào.</div>
-                              ) : (
-                                <div className="pp-attachment-list">
-                                  {selectedPatient.attachments.slice(0, 3).map(att => (
-                                    <div key={att.id} className="pp-attachment-item">
-                                      <div className={`pp-doc-row-icon pp-doc-hue-${getDocFileHue(att.file_type)}`}>
-                                        {['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'TIFF'].includes((att.file_type || '').toUpperCase()) ? <ImageIcon size={15} /> : <FileText size={15} />}
-                                      </div>
-                                      <div className="pp-attachment-info">
-                                        <div className="pp-attachment-name">{att.original_name}</div>
-                                        <div className="pp-attachment-meta">{formatDateVN(att.uploaded_at)}</div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })() : (
-                      <>
-                      {/* Quick note */}
-                      <div className="pp-card pp-quicknote">
-                        <div className="pp-quicknote-header">
-                          <h3>Ghi chú nhanh</h3>
-                          {!isEditingQuickNote && (
-                            <button className="pp-link-btn" onClick={() => { setQuickNoteDraft(selectedPatient.quick_note || ''); setIsEditingQuickNote(true); }}>
-                              <PencilLine size={12} /> Sửa
-                            </button>
-                          )}
-                        </div>
-                        {isEditingQuickNote ? (
-                          <>
-                            <textarea
-                              className="pp-textarea"
-                              rows={4}
-                              value={quickNoteDraft}
-                              onChange={(e) => setQuickNoteDraft(e.target.value)}
-                              autoFocus
-                            />
-                            <div className="pp-quicknote-actions">
-                              <button className="pp-btn-ghost" onClick={() => setIsEditingQuickNote(false)}>Hủy</button>
-                              <button className="pp-btn-add pp-btn-sm" onClick={handleSaveQuickNote}>Lưu</button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <p className="pp-quicknote-text">{selectedPatient.quick_note || 'Chưa có ghi chú nhanh nào cho bệnh nhân này.'}</p>
-                            {selectedPatient.quick_note_updated_at && (
-                              <div className="pp-quicknote-footer">
-                                Cập nhật: {formatDateVN(selectedPatient.quick_note_updated_at)} bởi {selectedPatient.quick_note_updated_by}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {/* Medical alert */}
-                      <div className={`pp-card pp-alert-card ${hasClinicalValue(selectedPatient.allergies) ? 'danger' : 'neutral'}`}>
-                        <h3>Cảnh báo y tế</h3>
-                        {/* Cùng một phép thử với bốn ô thông tin y tế: chuỗi
-                            "Không có" nằm trong cơ sở dữ liệu là chỗ trống, không
-                            phải một cảnh báo. */}
-                        {hasClinicalValue(selectedPatient.allergies) ? (
-                          <div className="pp-alert-box">
-                            <AlertCircle size={16} />
-                            <div>
-                              <div className="pp-alert-title">Dị ứng thuốc</div>
-                              <div className="pp-alert-text">{selectedPatient.allergies}</div>
-                            </div>
-                            <ChevronRight size={15} className="pp-alert-chevron" />
-                          </div>
-                        ) : (
-                          <div className="pp-inline-empty">Không có cảnh báo y tế nào.</div>
-                        )}
-                      </div>
-
-                      {/* Vitals */}
-                      <div className="pp-card">
-                        <div className="pp-quicknote-header">
-                          <h3>Chỉ số cơ bản</h3>
-                        </div>
-                        <div className="pp-vitals-list">
-                          {Object.entries(VITAL_META).map(([key, meta]) => {
-                            const reading = selectedPatient.vitals.find(v => v.vital_type === key);
-                            const Icon = meta.icon;
-                            return (
-                              <div key={key} className="pp-vital-row">
-                                <div className="pp-vital-icon" style={{ color: meta.color, background: `${meta.color}1a` }}><Icon size={15} /></div>
-                                <div className="pp-vital-info">
-                                  <span className="pp-vital-label">{meta.label}</span>
-                                  <span className="pp-vital-date">{reading ? formatDateVN(reading.recorded_at) : '--'}</span>
-                                </div>
-                                <span className="pp-vital-value">{reading ? `${reading.value}${meta.unit ? ` ${meta.unit}` : ''}` : '--'}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Attachments */}
-                      <div className="pp-card">
-                        <div className="pp-quicknote-header">
-                          <h3>Tài liệu đính kèm</h3>
-                          <label className="pp-link-btn pp-upload-label">
-                            <Plus size={13} /> Thêm
-                            <input type="file" hidden onChange={handleUploadAttachment} />
-                          </label>
-                        </div>
-                        {selectedPatient.attachments.length === 0 ? (
-                          <div className="pp-inline-empty">Chưa có tài liệu đính kèm nào.</div>
-                        ) : (
-                          <div className="pp-attachment-list">
-                            {selectedPatient.attachments.slice(0, 3).map(att => (
-                              <div key={att.id} className="pp-attachment-item">
-                                <div className="pp-attachment-icon">{['JPG', 'PNG', 'JPEG'].includes(att.file_type) ? <ImageIcon size={16} /> : <FileText size={16} />}</div>
-                                <div className="pp-attachment-info">
-                                  <div className="pp-attachment-name">{att.original_name}</div>
-                                  <div className="pp-attachment-meta">{formatDateVN(att.uploaded_at)} • {att.file_type} • {formatFileSize(att.size_bytes)}</div>
-                                </div>
-                                <button className="pp-icon-btn" onClick={() => handleDownloadAttachment(att)} title="Tải xuống"><Download size={15} /></button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {selectedPatient.attachments.length > 3 && (
-                          <button className="pp-link-btn" onClick={() => setPatientProfileTab('documents')}>Xem tất cả tài liệu</button>
-                        )}
-                      </div>
-
-                      {/* Delete patient */}
-                      <button className="pp-delete-patient-btn" onClick={() => handleDeletePatient(selectedPatient.id)}>
-                        <Trash2 size={13} /> Xóa hồ sơ bệnh nhân
-                      </button>
-                      </>
-                      )}
-                    </div>
-                    )}
-                  </div>
-
-                  <div className="pp-footer-note">
-                    <Info size={13} />
-                    <span>Thông tin trong hồ sơ được bảo mật và chỉ phục vụ mục đích chăm sóc sức khỏe.</span>
-                  </div>
-                </>
-              )}
-
-              {/* Slide-over panel: Thêm bệnh nhân */}
-              <Dialog.Root open={isAddPatientOpen} onOpenChange={setIsAddPatientOpen}>
-                <Dialog.Portal>
-                  <Dialog.Overlay className="pp-modal-overlay" />
-                  <Dialog.Content className="pp-modal-panel">
-                    <div className="pp-modal-header">
-                      <div className="pp-modal-header-left">
-                        <div className="pp-modal-header-icon"><UserRound size={18} /></div>
-                        <div>
-                          <Dialog.Title className="pp-modal-title">Thêm bệnh nhân</Dialog.Title>
-                          <Dialog.Description className="pp-modal-subtitle">
-                            Thêm mới bệnh nhân vào hệ thống để quản lý hồ sơ và theo dõi điều trị.
-                          </Dialog.Description>
-                        </div>
-                      </div>
-                      <Dialog.Close asChild>
-                        <button className="pp-icon-btn" title="Đóng"><X size={18} /></button>
-                      </Dialog.Close>
-                    </div>
-
-                    <div className="pp-modal-body">
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">1</span> Thông tin cá nhân</div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Họ và tên <span className="pp-required">*</span></label>
-                            <input type="text" required value={newPatName} onChange={(e) => setNewPatName(e.target.value)} placeholder="Nhập họ và tên bệnh nhân" />
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Mã bệnh nhân (tự động)</label>
-                            <input type="text" disabled value={nextPatientCode} />
-                          </div>
-                        </div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Giới tính <span className="pp-required">*</span></label>
-                            <div className="pp-radio-row">
-                              {['Nam', 'Nữ', 'Khác'].map(g => (
-                                <label key={g} className="pp-radio-option">
-                                  <input type="radio" name="pp-gender" checked={newPatGender === g} onChange={() => setNewPatGender(g)} /> {g}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Nhóm máu</label>
-                            <select value={newPatBloodType} onChange={(e) => setNewPatBloodType(e.target.value)}>
-                              <option value="">Chọn nhóm máu</option>
-                              {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bt => <option key={bt} value={bt}>{bt}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Số điện thoại</label>
-                            <input type="tel" value={newPatPhone} onChange={(e) => setNewPatPhone(e.target.value)} placeholder="Nhập số điện thoại" />
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Email</label>
-                            <input type="email" value={newPatEmail} onChange={(e) => setNewPatEmail(e.target.value)} placeholder="Nhập email (nếu có)" />
-                          </div>
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Địa chỉ</label>
-                          <input type="text" value={newPatAddress} onChange={(e) => setNewPatAddress(e.target.value)} placeholder="Nhập địa chỉ liên hệ" />
-                        </div>
-                      </div>
-
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">2</span> Thông tin y tế cơ bản</div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Chiều cao (cm)</label>
-                            <div className="pp-stepper">
-                              <button type="button" onClick={() => setNewPatHeight(v => Math.max(0, (parseFloat(v) || 0) - 1))}><Minus size={14} /></button>
-                              <input type="number" value={newPatHeight} onChange={(e) => setNewPatHeight(e.target.value)} />
-                              <button type="button" onClick={() => setNewPatHeight(v => (parseFloat(v) || 0) + 1)}><Plus size={14} /></button>
-                            </div>
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Cân nặng (kg)</label>
-                            <div className="pp-stepper">
-                              <button type="button" onClick={() => setNewPatWeight(v => Math.max(0, (parseFloat(v) || 0) - 1))}><Minus size={14} /></button>
-                              <input type="number" value={newPatWeight} onChange={(e) => setNewPatWeight(e.target.value)} />
-                              <button type="button" onClick={() => setNewPatWeight(v => (parseFloat(v) || 0) + 1)}><Plus size={14} /></button>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Chẩn đoán</label>
-                          <textarea rows={2} value={newPatDiagnosis} onChange={(e) => setNewPatDiagnosis(e.target.value)} placeholder="Ví dụ: Viêm dạ dày cấp, tăng huyết áp, ..." />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Tiền sử bệnh</label>
-                          <textarea rows={2} value={newPatMedHistory} onChange={(e) => setNewPatMedHistory(e.target.value)} placeholder="Ví dụ: Đái tháo đường (2019), cắt ruột thừa (2018), ..." />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Tiền sử gia đình</label>
-                          <textarea rows={2} value={newPatFamilyHistory} onChange={(e) => setNewPatFamilyHistory(e.target.value)} placeholder="Ví dụ: Bố tăng huyết áp, mẹ đái tháo đường type 2, ..." />
-                        </div>
-                      </div>
-
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">3</span> Dị ứng &amp; Ghi chú (nếu có)</div>
-                        <textarea rows={3} value={newPatAllergiesNotes} onChange={(e) => setNewPatAllergiesNotes(e.target.value)} placeholder="Ví dụ: Dị ứng Penicillin, hải sản. Ghi chú thêm về bệnh nhân..." />
-                      </div>
-
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">4</span> Điều trị ban đầu (nếu có)</div>
-
-                        <div className="pp-visit-med-block">
-                          <div className="pp-visit-med-header">
-                            <label>Thuốc điều trị</label>
-                            {!isAddingPatMedication && (
-                              <button type="button" className="pp-link-btn" onClick={() => setIsAddingPatMedication(true)}>
-                                <Plus size={12} /> Thêm thuốc
-                              </button>
-                            )}
-                          </div>
-
-                          {newPatMedications.length > 0 && (
-                            <div className="pp-visit-med-list">
-                              {newPatMedications.map((m, i) => (
-                                <div key={i} className="pp-visit-med-item">
-                                  <div className="pp-visit-med-item-info">
-                                    <span className="pp-visit-med-item-name">{m.name}</span>
-                                    <span className="pp-visit-med-item-meta">{[m.dosage, m.form, m.frequency].filter(Boolean).join(' · ') || 'Chưa có chi tiết'}</span>
-                                  </div>
-                                  <button type="button" className="pp-icon-btn" onClick={() => handleRemovePatMedication(i)} title="Xóa thuốc"><Trash2 size={14} /></button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {newPatMedications.length === 0 && !isAddingPatMedication && (
-                            <div className="pp-inline-empty">Chưa có thuốc nào được kê.</div>
-                          )}
-
-                          {isAddingPatMedication && (
-                            <div className="pp-tp-med-add-form">
-                              <div className="pp-form-row">
-                                <div className="pp-form-group"><label>Tên thuốc</label><input type="text" value={patMedDraft.name} onChange={e => setPatMedDraft(d => ({ ...d, name: e.target.value }))} placeholder="Ví dụ: Paracetamol 500mg" autoFocus /></div>
-                                <div className="pp-form-group"><label>Liều dùng</label><input type="text" value={patMedDraft.dosage} onChange={e => setPatMedDraft(d => ({ ...d, dosage: e.target.value }))} placeholder="1 viên/lần" /></div>
-                              </div>
-                              <div className="pp-form-row">
-                                <div className="pp-form-group"><label>Dạng bào chế</label><input type="text" value={patMedDraft.form} onChange={e => setPatMedDraft(d => ({ ...d, form: e.target.value }))} placeholder="Viên nén" /></div>
-                                <div className="pp-form-group"><label>Thời gian</label><input type="text" value={patMedDraft.frequency} onChange={e => setPatMedDraft(d => ({ ...d, frequency: e.target.value }))} placeholder="3 lần/ngày" /></div>
-                              </div>
-                              <div className="pp-form-group"><label>Hướng dẫn</label><textarea rows={2} value={patMedDraft.instructions} onChange={e => setPatMedDraft(d => ({ ...d, instructions: e.target.value }))} placeholder={'Sau ăn\nKhi sốt > 38.5°C'} /></div>
-                              <div className="pp-tp-edit-actions">
-                                <button type="button" className="pp-btn-ghost" onClick={() => { setIsAddingPatMedication(false); setPatMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '' }); }}>Hủy</button>
-                                <button type="button" className="pp-btn-add pp-btn-sm" onClick={handleAddPatMedication} disabled={!patMedDraft.name.trim()}>Thêm thuốc</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="pp-form-group">
-                          <label>Khuyến nghị không dùng thuốc</label>
-                          <textarea rows={2} value={newPatNoDrugRecommendations} onChange={(e) => setNewPatNoDrugRecommendations(e.target.value)} placeholder={'Không tự ý dùng kháng sinh khi chưa có chỉ định.\nHạn chế thuốc lá, rượu bia, đồ uống lạnh.'} />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Hướng dẫn chăm sóc</label>
-                          <textarea rows={3} value={newPatCareInstructions} onChange={(e) => setNewPatCareInstructions(e.target.value)} placeholder={'Uống nhiều nước ấm.\nNghỉ ngơi hợp lý, tránh thức khuya.'} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pp-modal-footer">
-                      <Dialog.Close asChild>
-                        <button type="button" className="pp-btn-ghost">Hủy</button>
-                      </Dialog.Close>
-                      <button type="button" className="pp-btn-add" disabled={isSavingPatient || !newPatName.trim()} onClick={handleAddPatient}>
-                        {isSavingPatient ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Lưu bệnh nhân
-                      </button>
-                    </div>
-                  </Dialog.Content>
-                </Dialog.Portal>
-              </Dialog.Root>
-
-              {/* Slide-over panel: Tạo kế hoạch mới (creates the underlying visit record) */}
-              <Dialog.Root open={isAddVisitOpen} onOpenChange={setIsAddVisitOpen}>
-                <Dialog.Portal>
-                  <Dialog.Overlay className="pp-modal-overlay" />
-                  <Dialog.Content className="pp-modal-panel">
-                    <div className="pp-modal-header">
-                      <div className="pp-modal-header-left">
-                        <div className="pp-modal-header-icon"><Stethoscope size={18} /></div>
-                        <div>
-                          <Dialog.Title className="pp-modal-title">Tạo kế hoạch mới</Dialog.Title>
-                          <Dialog.Description className="pp-modal-subtitle">
-                            Ghi nhận thông tin lần khám mới cho {selectedPatient?.name || 'bệnh nhân'}.
-                          </Dialog.Description>
-                        </div>
-                      </div>
-                      <Dialog.Close asChild>
-                        <button className="pp-icon-btn" title="Đóng"><X size={18} /></button>
-                      </Dialog.Close>
-                    </div>
-
-                    <div className="pp-modal-body">
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title">Thông tin lần khám</div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Ngày khám <span className="pp-required">*</span></label>
-                            <input type="date" required value={newVisitDate} onChange={(e) => setNewVisitDate(e.target.value)} />
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Bác sĩ khám</label>
-                            <input type="text" value={newVisitDoctor} onChange={(e) => setNewVisitDoctor(e.target.value)} placeholder="Nhập tên bác sĩ" />
-                          </div>
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Tiêu đề lần khám</label>
-                          <input type="text" value={newVisitTitle} onChange={(e) => setNewVisitTitle(e.target.value)} placeholder="Ví dụ: Khám tổng quát, Tái khám viêm họng, ..." />
-                        </div>
-                      </div>
-
-                      {/* 1. Chẩn đoán */}
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">1</span> Chẩn đoán</div>
-
-                        <div className="pp-form-group">
-                          <label>Triệu chứng</label>
-                          <input
-                            type="text"
-                            value={newVisitSymptomInput}
-                            onChange={(e) => setNewVisitSymptomInput(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddVisitSymptom(); } }}
-                            placeholder="Ví dụ: sốt nhẹ 37.8 độ C, đau họng khi nuốt, ho khan..."
-                          />
-                        </div>
-                        <button type="button" className="pp-btn-add-symptom" onClick={handleAddVisitSymptom} disabled={!newVisitSymptomInput.trim()}>
-                          <Plus size={14} /> Triệu chứng
-                        </button>
-                        {newVisitSymptoms.length > 0 && (
-                          <div className="pp-symptom-tags">
-                            {newVisitSymptoms.map((s, i) => (
-                              <span key={i} className="pp-symptom-tag">
-                                {s}
-                                <button type="button" onClick={() => handleRemoveVisitSymptom(i)} title="Xóa triệu chứng"><X size={12} /></button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="pp-form-group">
-                          <label>Chẩn đoán chính</label>
-                          <input type="text" value={newVisitDiagnosis} onChange={(e) => setNewVisitDiagnosis(e.target.value)} placeholder="Ví dụ: Viêm họng cấp do virus (J02.9)" />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Chẩn đoán phân biệt (mỗi dòng một chẩn đoán)</label>
-                          <textarea rows={3} value={newVisitDiagnosisSecondary} onChange={(e) => setNewVisitDiagnosisSecondary(e.target.value)} placeholder={'Viêm họng do liên cầu khuẩn (J02.0)\nViêm amidan cấp (J03.9)'} />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Khám lâm sàng</label>
-                          <textarea rows={3} value={newVisitExamFindings} onChange={(e) => setNewVisitExamFindings(e.target.value)} placeholder="Niêm mạc họng viêm, không có mủ, không hạch cổ to." />
-                        </div>
-                      </div>
-
-                      {/* 2. Kế hoạch điều trị */}
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">2</span> Kế hoạch điều trị</div>
-
-                        <div className="pp-form-group">
-                          <label>Mục tiêu điều trị (mỗi dòng một mục tiêu)</label>
-                          <textarea rows={3} value={newVisitGoals} onChange={(e) => setNewVisitGoals(e.target.value)} placeholder={'Giảm nhanh triệu chứng\nNgăn ngừa biến chứng'} />
-                        </div>
-                        <div className="pp-form-row">
-                          <div className="pp-form-group">
-                            <label>Phương pháp điều trị</label>
-                            <input type="text" value={newVisitTreatmentMethod} onChange={(e) => setNewVisitTreatmentMethod(e.target.value)} placeholder="Nội khoa" />
-                          </div>
-                          <div className="pp-form-group">
-                            <label>Thời gian dự kiến</label>
-                            <input type="text" value={newVisitProtocolDuration} onChange={(e) => setNewVisitProtocolDuration(e.target.value)} placeholder="5 - 7 ngày" />
-                          </div>
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Chế độ</label>
-                          <textarea rows={2} value={newVisitDietRegimen} onChange={(e) => setNewVisitDietRegimen(e.target.value)} placeholder="Nghỉ ngơi, uống nhiều nước ấm, ăn thức ăn mềm, dễ nuốt." />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Lưu ý</label>
-                          <textarea rows={2} value={newVisitPrecautions} onChange={(e) => setNewVisitPrecautions(e.target.value)} placeholder="Tránh khói bụi, không hút thuốc lá, không uống rượu bia." />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Mục đích / tiêu chí tái khám</label>
-                          <textarea rows={2} value={newVisitFollowupPurpose} onChange={(e) => setNewVisitFollowupPurpose(e.target.value)} placeholder="Nếu không cải thiện sau 3 ngày hoặc nặng hơn." />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Ngày hẹn tái khám (nếu có)</label>
-                          <input type="date" value={newVisitFollowupDate} onChange={(e) => setNewVisitFollowupDate(e.target.value)} />
-                        </div>
-                        <div className="pp-form-group">
-                          <label>Ghi chú điều trị (nếu có)</label>
-                          <textarea rows={2} value={newVisitTreatmentInstructions} onChange={(e) => setNewVisitTreatmentInstructions(e.target.value)} placeholder="Nhập ghi chú thêm về hướng điều trị..." />
-                        </div>
-                      </div>
-
-                      {/* 3. Đơn thuốc */}
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">3</span> Đơn thuốc</div>
-
-                        {/* Khối đối chiếu dị ứng đứng TRÊN danh sách thuốc, không
-                            phải dưới: nó phải nằm trên đường mắt đi từ tiêu đề
-                            xuống đơn thuốc rồi tới nút Lưu. Đặt dưới danh sách là
-                            đặt sau chỗ bác sĩ đã quyết xong.
-
-                            KHÔNG dùng hộp thoại chặn. Rào chặn cứng trong y văn
-                            chỉ đặt cho khớp đúng hoạt chất KÈM phản ứng nặng đã
-                            ghi, và kết quả của nó vẫn đang chờ đo; thí nghiệm
-                            2025 còn không lặp lại được kết quả 2021 về ma sát
-                            chủ ý. Nên chỗ này chỉ chắn tầm mắt, không chặn tay. */}
-                        <AllergyCheckPanel check={allergyCheck} />
-
-                        <div className="pp-visit-med-block">
-                          <div className="pp-visit-med-header">
-                            <label>Thuốc kê đơn</label>
-                            {!isAddingVisitMedication && (
-                              <button type="button" className="pp-link-btn" onClick={() => setIsAddingVisitMedication(true)}>
-                                <Plus size={12} /> Thêm thuốc
-                              </button>
-                            )}
-                          </div>
-
-                          {newVisitMedications.length > 0 && (
-                            <div className="pp-visit-med-list">
-                              {newVisitMedications.map((m, i) => (
-                                <div key={i} className="pp-visit-med-item">
-                                  <div className="pp-visit-med-item-info">
-                                    <span className="pp-visit-med-item-name">{m.name}</span>
-                                    <span className="pp-visit-med-item-meta">{[m.dosage, m.form, m.frequency, m.quantity && `SL: ${m.quantity}`].filter(Boolean).join(' · ') || 'Chưa có chi tiết'}</span>
-                                  </div>
-                                  <button type="button" className="pp-icon-btn" onClick={() => handleRemoveVisitMedication(i)} title="Xóa thuốc"><Trash2 size={14} /></button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {newVisitMedications.length === 0 && !isAddingVisitMedication && (
-                            <div className="pp-inline-empty">Chưa có thuốc nào được kê.</div>
-                          )}
-
-                          {isAddingVisitMedication && (
-                            <div className="pp-tp-med-add-form">
-                              <div className="pp-form-row">
-                                <div className="pp-form-group"><label>Tên thuốc</label><input type="text" value={visitMedDraft.name} onChange={e => setVisitMedDraft(d => ({ ...d, name: e.target.value }))} placeholder="Ví dụ: Paracetamol 500mg" autoFocus /></div>
-                                <div className="pp-form-group"><label>Dạng bào chế</label><input type="text" value={visitMedDraft.form} onChange={e => setVisitMedDraft(d => ({ ...d, form: e.target.value }))} placeholder="Viên nén" /></div>
-                              </div>
-                              <div className="pp-form-row">
-                                <div className="pp-form-group"><label>Liều dùng</label><input type="text" value={visitMedDraft.dosage} onChange={e => setVisitMedDraft(d => ({ ...d, dosage: e.target.value }))} placeholder="1 viên/lần" /></div>
-                                <div className="pp-form-group"><label>Thời gian</label><input type="text" value={visitMedDraft.frequency} onChange={e => setVisitMedDraft(d => ({ ...d, frequency: e.target.value }))} placeholder="3 lần/ngày" /></div>
-                              </div>
-                              <div className="pp-form-row">
-                                <div className="pp-form-group"><label>Số lượng</label><input type="text" value={visitMedDraft.quantity} onChange={e => setVisitMedDraft(d => ({ ...d, quantity: e.target.value }))} placeholder="10 viên" /></div>
-                                <div className="pp-form-group"><label>Hướng dẫn</label><input type="text" value={visitMedDraft.instructions} onChange={e => setVisitMedDraft(d => ({ ...d, instructions: e.target.value }))} placeholder="Sau ăn" /></div>
-                              </div>
-                              <div className="pp-tp-edit-actions">
-                                <button type="button" className="pp-btn-ghost" onClick={() => { setIsAddingVisitMedication(false); setVisitMedDraft({ name: '', dosage: '', form: '', frequency: '', instructions: '', quantity: '' }); }}>Hủy</button>
-                                <button type="button" className="pp-btn-add pp-btn-sm" onClick={handleAddVisitMedication} disabled={!visitMedDraft.name.trim()}>Thêm thuốc</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="pp-form-group">
-                          <label>Lưu ý (không dùng thuốc)</label>
-                          <textarea rows={2} value={newVisitNoDrugRecommendations} onChange={(e) => setNewVisitNoDrugRecommendations(e.target.value)} placeholder={'Không tự ý dùng kháng sinh khi chưa có chỉ định.\nHạn chế thuốc lá, rượu bia, đồ uống lạnh.'} />
-                        </div>
-                      </div>
-
-                      {/* 4. Hướng dẫn cho bệnh nhân */}
-                      <div className="pp-modal-section">
-                        <div className="pp-modal-section-title"><span className="pp-section-badge">4</span> Hướng dẫn cho bệnh nhân</div>
-                        <div className="pp-form-group">
-                          <textarea rows={3} value={newVisitCareInstructions} onChange={(e) => setNewVisitCareInstructions(e.target.value)} placeholder={'Uống nhiều nước ấm.\nNghỉ ngơi hợp lý, tránh thức khuya.'} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pp-modal-footer">
-                      <Dialog.Close asChild>
-                        <button type="button" className="pp-btn-ghost">Hủy</button>
-                      </Dialog.Close>
-                      <button type="button" className="pp-btn-add" disabled={isSavingVisit || !newVisitDate || patientDetailLoading} onClick={handleSaveNewVisit}>
-                        {(isSavingVisit || patientDetailLoading) ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Lưu lần khám
-                      </button>
-                    </div>
-                  </Dialog.Content>
-                </Dialog.Portal>
-              </Dialog.Root>
-            </div>
-          )}
-
-          {/* TAB 5: Diagnosis Tree (Sơ đồ chẩn đoán tương tác) */}
-          {activeTab === 'stats' && (
-            <DashboardView permissions={permissions} />
-          )}
-
-          {activeTab === 'reminders' && (
-            <RemindersView
-              permissions={permissions}
-              patients={patients}
-              onOpenPatient={(patientId) => { handleSelectSearchedPatient(patientId); }}
-              onChanged={fetchNotifications}
-            />
-          )}
-
           {activeTab === 'diagnosisTree' && (
             <DiagnosisTreeView
               centerTreeCanvas={centerTreeCanvas}
               collectSymptoms={collectSymptoms}
-              diagPatientQuery={diagPatientQuery}
-              diagPatientResults={diagPatientResults}
-              diagPatientSearchOpen={diagPatientSearchOpen}
-              diagSelectedPatient={diagSelectedPatient}
               examLoading={examLoading}
               examNotes={examNotes}
               examResult={examResult}
               finalDiagnoses={finalDiagnoses}
               finalLoading={finalLoading}
-              handleDiagPatientSearchChange={handleDiagPatientSearchChange}
               handleFinalDiagnosis={handleFinalDiagnosis}
               handleGenerateTree={handleGenerateTree}
-              handleSelectDiagPatient={handleSelectDiagPatient}
               handleSuggestExam={handleSuggestExam}
               handleToggleDiagnosisSelected={handleToggleDiagnosisSelected}
               handleTreeCanvasMouseDown={handleTreeCanvasMouseDown}
-              handleUpdateDisease={handleUpdateDisease}
+              handleSuggestTreatment={handleSuggestTreatment}
               patientContextSent={patientContextSent}
               patientContextOpen={patientContextOpen}
               setPatientContextOpen={setPatientContextOpen}
@@ -6637,7 +3272,10 @@ export default function App() {
               renderDecisionTreeNode={renderDecisionTreeNode}
               selectedDiagnosisDetail={selectedDiagnosisDetail}
               selectedDiagnosisIds={selectedDiagnosisIds}
-              setDiagPatientSearchOpen={setDiagPatientSearchOpen}
+              patientHistory={patientHistory}
+              setPatientHistory={setPatientHistory}
+              treatmentResult={treatmentResult}
+              allergyCheck={allergyCheck}
               setExamNotes={setExamNotes}
               setPatientDesc={setPatientDesc}
               setSelectedDiagnosisDetail={setSelectedDiagnosisDetail}
@@ -6651,19 +3289,8 @@ export default function App() {
             />
           )}
 
-          {/* TAB 6: Giới thiệu */}
-          {activeTab === 'about' && (
-            <IntroExperience onExit={() => setActiveTab('chat')} />
-          )}
-
         </div>
 
-        {/* Universal Footer Banner — toggled by Settings → An toàn */}
-        {settings.showDisclaimer && (
-          <footer className="workspace-footer-bar">
-            <span>Thông tin chỉ mang tính chất tham khảo lâm sàng học thuật, quyết định điều trị cuối cùng thuộc về bác sĩ chuyên môn.</span>
-          </footer>
-        )}
       </div>
 
       <SettingsDialog
@@ -6681,7 +3308,6 @@ export default function App() {
           onSaveApiKey: handleSaveApiKey,
           micSupported,
           conversationCount: conversations.length,
-          patientCount: patients.length,
           documentCount: documents.length,
           onDeleteAllConversations: handleDeleteAllConversations,
           onExportData: handleExportData,

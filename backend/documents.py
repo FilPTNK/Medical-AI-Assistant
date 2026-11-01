@@ -153,6 +153,55 @@ def list_manifests() -> List[Dict[str, Any]]:
     return out
 
 
+# --- Quyền xem / xoá ---------------------------------------------------------
+#
+# Hai loại tài liệu:
+#   - "shared"  — sách tham khảo và mọi tài liệu quản trị phòng khám tải lên.
+#                 Ai đăng nhập cũng xem được; chỉ quản trị được xoá.
+#   - "private" — tài liệu bác sĩ tự tải. CHỈ chủ tài khoản thấy nó ở mọi nơi:
+#                 Thư viện, tra cứu y văn, tra thuốc, Đối chiếu, trình đọc trang.
+#                 Quản trị cũng không thấy — đây là kho riêng của từng bác sĩ.
+#
+# Manifest không có trường `visibility` (sách nạp bằng script, bản cũ) được coi
+# là "shared", nên dữ liệu đã có không cần chuyển đổi.
+
+VISIBILITY_SHARED = "shared"
+VISIBILITY_PRIVATE = "private"
+
+
+def visibility_of(manifest: Optional[Dict[str, Any]]) -> str:
+    if manifest and manifest.get("visibility") == VISIBILITY_PRIVATE:
+        return VISIBILITY_PRIVATE
+    return VISIBILITY_SHARED
+
+
+def _user_id(user: Optional[Dict[str, Any]]) -> Optional[str]:
+    return (user or {}).get("id")
+
+
+def can_view(user: Optional[Dict[str, Any]], doc_name: str) -> bool:
+    manifest = load_manifest(doc_name)
+    if visibility_of(manifest) == VISIBILITY_SHARED:
+        return True
+    return _user_id(user) is not None and manifest.get("owner_id") == _user_id(user)
+
+
+def can_delete(user: Optional[Dict[str, Any]], doc_name: str) -> bool:
+    manifest = load_manifest(doc_name)
+    if visibility_of(manifest) == VISIBILITY_PRIVATE:
+        return _user_id(user) is not None and manifest.get("owner_id") == _user_id(user)
+    return (user or {}).get("role") == "admin"
+
+
+def hidden_doc_names(user: Optional[Dict[str, Any]]) -> set:
+    """Tài liệu riêng của NGƯỜI KHÁC — phải loại khỏi mọi kết quả tìm của `user`."""
+    uid = _user_id(user)
+    return {
+        m["doc_name"] for m in list_manifests()
+        if visibility_of(m) == VISIBILITY_PRIVATE and m.get("owner_id") != uid
+    }
+
+
 _page_map_cache: Dict[str, Dict[str, Any]] = {}
 
 

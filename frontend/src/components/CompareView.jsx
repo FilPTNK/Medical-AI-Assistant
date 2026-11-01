@@ -14,8 +14,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import './CompareView.css';
-
-const MAX_DOCS = 5;
+import { MAX_COMPARE_DOCS, toggleLibrarySelection } from '../lib/library';
 
 const COVERAGE_CLASS = {
   'Đầy đủ': 'full',
@@ -29,10 +28,17 @@ const SAMPLE_QUESTIONS = [
   'Khi nào chỉ định kháng sinh trong viêm họng cấp?'
 ];
 
-/** Tab "Đối chiếu": hỏi cùng một câu hỏi trên nhiều tài liệu và so sánh câu trả lời. */
-export default function CompareView({ documents, apiKey, onOpenSource, onNotify }) {
+/**
+ * Panel "Đối chiếu": hỏi cùng một câu hỏi trên nhiều tài liệu và so sánh câu trả lời.
+ *
+ * Từ đợt 6, đây không còn là một tab riêng — bác sĩ chọn tài liệu ngay trong lưới Thư
+ * viện rồi mở panel này. `initialSelectedDocs` chỉ GIEO lựa chọn ban đầu (đọc một lần
+ * lúc mount): panel vẫn giữ state chọn tài liệu của riêng nó để bác sĩ thêm/bớt ngay
+ * tại đây mà không phải đóng panel quay lại chế độ chọn của lưới.
+ */
+export default function CompareView({ documents, apiKey, initialSelectedDocs, onOpenSource, onNotify }) {
   const [question, setQuestion] = useState('');
-  const [selectedDocs, setSelectedDocs] = useState([]);
+  const [selectedDocs, setSelectedDocs] = useState(() => initialSelectedDocs || []);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [expandedDoc, setExpandedDoc] = useState(null);
@@ -47,12 +53,9 @@ export default function CompareView({ documents, apiKey, onOpenSource, onNotify 
 
   const toggleDoc = (docName) => {
     setSelectedDocs(prev => {
-      if (prev.includes(docName)) return prev.filter(d => d !== docName);
-      if (prev.length >= MAX_DOCS) {
-        onNotify?.('error', `Chỉ đối chiếu tối đa ${MAX_DOCS} tài liệu cùng lúc.`);
-        return prev;
-      }
-      return [...prev, docName];
+      const result = toggleLibrarySelection(prev, docName);
+      if (result.limitReached) onNotify?.('error', `Chỉ đối chiếu tối đa ${MAX_COMPARE_DOCS} tài liệu cùng lúc.`);
+      return result.selected;
     });
   };
 
@@ -92,6 +95,7 @@ export default function CompareView({ documents, apiKey, onOpenSource, onNotify 
         <div className="cmp-question-row">
           <textarea
             className="cmp-question-input"
+            aria-label="Câu hỏi lâm sàng cần đối chiếu"
             placeholder="Ví dụ: Kháng sinh ưu tiên trong viêm xoang cấp do vi khuẩn?"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -118,7 +122,7 @@ export default function CompareView({ documents, apiKey, onOpenSource, onNotify 
         <div className="cmp-doc-picker">
           <div className="cmp-doc-picker-label">
             <Scale size={13} />
-            Chọn tài liệu để đối chiếu ({selectedDocs.length}/{MAX_DOCS}) — cần ít nhất 2
+            Chọn tài liệu để đối chiếu ({selectedDocs.length}/{MAX_COMPARE_DOCS}) — cần ít nhất 2
           </div>
           {documents.length < 2 ? (
             <div className="cmp-doc-warning">
@@ -134,6 +138,7 @@ export default function CompareView({ documents, apiKey, onOpenSource, onNotify 
                     key={doc.doc_name}
                     type="button"
                     className={`cmp-doc-chip ${active ? 'active' : ''}`}
+                    aria-pressed={active}
                     onClick={() => toggleDoc(doc.doc_name)}
                     title={doc.doc_name}
                   >
@@ -149,7 +154,7 @@ export default function CompareView({ documents, apiKey, onOpenSource, onNotify 
       </div>
 
       {loading && (
-        <div className="cmp-loading">
+        <div className="cmp-loading" role="status">
           <Loader2 size={20} className="animate-spin" />
           <p>Đang tìm đoạn liên quan trong từng tài liệu và so sánh…</p>
         </div>

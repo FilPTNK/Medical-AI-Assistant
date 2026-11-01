@@ -33,6 +33,7 @@ import documents
 from drug_name import is_suspect_name, normalize_drug_name
 from vector_store import VectorStore
 import config
+from writer_lock import writer_lock
 
 
 def chunk_uid(doc_name: str, chunk: Dict[str, Any]) -> str:
@@ -92,13 +93,21 @@ def build_documents(
 
     suspect_count = 0
     for c in raw_chunks:
+        # Chuyên luận thuốc (Dược thư, Thuốc Biệt Dược) mang key "generic_name".
+        # Tài liệu bác sĩ tự nạp (backend/generic_ingest.py) không đặt key này —
+        # đó KHÔNG phải chuyên luận thuốc, nên không được gắn dòng "THUỐC: ..."
+        # vào parent_text. Trước đây generic_name mặc định "UNKNOWN" cho mọi
+        # chunk thiếu key, nên mọi tài liệu tự nạp sẽ có "【THUỐC: UNKNOWN】" ở
+        # đầu từng đoạn gửi cho LLM và đi vào embedding — sai ngữ cảnh.
+        is_drug_chunk = "generic_name" in c
+
         # Chuẩn hoá tên ở đây chứ không ở parser: chỗ này chạy cho MỌI cuốn sách
         # và cho cả những tệp chunk đã bóc từ trước, nên không phải OCR lại sách
         # chỉ để sửa cái nhãn. Hàm này idempotent nên parser có gọi sẵn cũng
         # không sao.
         raw_name = c.get("generic_name", "UNKNOWN")
-        generic_name = normalize_drug_name(raw_name) or "UNKNOWN"
-        suspect, suspect_reason = is_suspect_name(raw_name)
+        generic_name = normalize_drug_name(raw_name) or "UNKNOWN" if is_drug_chunk else None
+        suspect, suspect_reason = is_suspect_name(raw_name) if is_drug_chunk else (False, None)
         field_name = c.get("field_name", "Thông tin")
         content = c.get("content", "")
         if not content.strip():
@@ -122,25 +131,25 @@ def build_documents(
         syn_list = c.get("synonyms", [])
         syn_str = ", ".join(syn_list) if isinstance(syn_list, list) else str(syn_list)
 
-        ident: List[str] = [f"【THUỐC: {generic_name}】"]
-        if brand_str:
-            ident.append(f"(Biệt dược: {brand_str})")
-        # Dược thư in tên đồng nghĩa ngay dưới tên chuyên luận. Đưa vào đây thì
-        # câu hỏi "Vitamin C" mới tìm ra chuyên luận ACID ASCORBIC — cả BM25 lẫn
-        # embedding đều chỉ nhìn thấy chuỗi này.
-        if syn_str:
-            ident.append(f"(Tên khác: {syn_str})")
-        if c.get("intl_name"):
-            ident.append(f"(Tên quốc tế: {c['intl_name']})")
-        if c.get("atc_code"):
-            ident.append(f"(ATC: {c['atc_code']})")
-        parent_text = f"{' '.join(ident)}\n[{field_name}]\n{content}"
+        ident: List[str] = []
+        if is_drug_chunk:
+            ident.append(f"【THUỐC: {generic_name}】")
+            if brand_str:
+                ident.append(f"(Biệt dược: {brand_str})")
+            # Dược thư in tên đồng nghĩa ngay dưới tên chuyên luận. Đưa vào đây thì
+            # câu hỏi "Vitamin C" mới tìm ra chuyên luận ACID ASCORBIC — cả BM25 lẫn
+            # embedding đều chỉ nhìn thấy chuỗi này.
+            if syn_str:
+                ident.append(f"(Tên khác: {syn_str})")
+            if c.get("intl_name"):
+                ident.append(f"(Tên quốc tế: {c['intl_name']})")
+            if c.get("atc_code"):
+                ident.append(f"(ATC: {c['atc_code']})")
+        parent_text = f"{' '.join(ident)}\n[{field_name}]\n{content}" if ident else f"[{field_name}]\n{content}"
 
         metadata = {
             "doc_name": doc_name,
             "chunk_id": c.get("chunk_id", ""),
-            "generic_name": generic_name,
-            "brand_names": brand_str,
             "field_type": c.get("field_type", "GENERAL"),
             "field_name": field_name,
             "page_num": page_num,
@@ -149,6 +158,9 @@ def build_documents(
             "source": doc_name,
             "page": page_num,
         }
+        if is_drug_chunk:
+            metadata["generic_name"] = generic_name
+            metadata["brand_names"] = brand_str
 
         # Trường phục vụ trích dẫn & lọc phạm vi trong bộ nhiều tập. Chroma chỉ
         # nhận str/int/float/bool nên bỏ mọi giá trị None.
@@ -195,6 +207,7 @@ def ingest(
     replace: bool,
     batch_size: int,
     persist_dir: str = None,
+    vector_store: VectorStore = None,
 ) -> None:
     manifest = documents.load_manifest(doc_name)
     if not manifest:
@@ -225,7 +238,13 @@ def ingest(
         print("  [!] Id bị trùng — dừng để tránh mất dữ liệu.")
         return
 
-    db = VectorStore(persist_dir)
+    # Gọi từ CLI (dựng chỉ mục một lần rồi thoát) thì tự mở một VectorStore mới
+    # là đúng. Gọi từ máy chủ đang chạy (backend/generic_ingest.py, tài liệu
+    # bác sĩ tự nạp) thì BẮT BUỘC dùng lại đúng instance singleton của main.py —
+    # nếu không, chunk vẫn ghi đúng xuống đĩa Chroma, nhưng bản sao corpus/BM25
+    # trong RAM của server đang chạy không hề biết mà tự làm mới, nên tài liệu
+    # mới nạp không tìm thấy được cho tới khi khởi động lại server.
+    db = vector_store if vector_store is not None else VectorStore(persist_dir)
 
     if replace:
         print(f"[3/4] Xoá toàn bộ chunk cũ của '{doc_name}' khỏi index...")
@@ -233,6 +252,7 @@ def ingest(
             db.delete_document(doc_name)
         except Exception as e:
             print(f"  [!] Lỗi khi xoá: {e}")
+            raise
     else:
         print("[3/4] Bỏ qua bước xoá (upsert theo id).")
 
@@ -273,7 +293,9 @@ def main() -> None:
     args = p.parse_args()
 
     chunks_file = args.chunks or documents.chunks_path(args.doc_name)
-    ingest(args.doc_name, chunks_file, args.replace, args.batch_size, args.persist_dir)
+    persist_dir = args.persist_dir or config.VECTOR_DB_DIR
+    with writer_lock(persist_dir):
+        ingest(args.doc_name, chunks_file, args.replace, args.batch_size, persist_dir)
 
 
 if __name__ == "__main__":

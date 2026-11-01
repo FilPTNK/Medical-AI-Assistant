@@ -34,6 +34,7 @@ os.chdir(BACKEND_DIR)
 warnings.filterwarnings("ignore")
 
 import config                                    # noqa: E402
+import query_intent                              # noqa: E402
 from vector_store import (  # noqa: E402
     VectorStore,
     tokenize_text,
@@ -78,7 +79,12 @@ class Harness:
             return self._cache[query]
 
         dense = []
-        for doc, _ in self.db.db.similarity_search_with_relevance_scores(query, k=K_CAND):
+        embedding = self.db.embedding
+        if embedding is None:
+            raise RuntimeError("Chưa nạp được embedding để đo nhánh dense; kiểm tra /api/index/health.")
+        for doc, _ in self.db.db.similarity_search_by_vector_with_relevance_scores(
+            embedding.embed_query(query), k=K_CAND
+        ):
             cid = doc.metadata.get("chunk_id") if doc.metadata else None
             idx = self.by_chunk_id.get(cid, -1) if cid else -1
             if idx == -1:
@@ -89,6 +95,10 @@ class Harness:
         # Đi đúng đường mà search() đi, kể cả bước mở rộng từ ghép hiếm —
         # nếu không thì bộ đo chấm một hệ thống khác với hệ thống chạy thật.
         query_tokens = expand_rare_compounds(tokenize_text(query), self.db._doc_freq or {})
+        subject = query_intent.indication_subject(query) if query_intent.ENABLE_INDICATION_RANKING else None
+        if subject:
+            for term in query_intent.expanded_terms(subject):
+                query_tokens.extend(expand_rare_compounds(tokenize_text(term), self.db._doc_freq or {}))
         scores = self.bm25.get_scores(query_tokens)
         sparse = []
         for idx in np.argsort(scores)[::-1]:
@@ -113,7 +123,14 @@ class Harness:
                 fused[doc_id] = fused.get(doc_id, 0.0) + w_dense / (k + rank + 1)
             for rank, doc_id in enumerate(sparse):
                 fused[doc_id] = fused.get(doc_id, 0.0) + w_sparse / (k + rank + 1)
-            ranked = [i for i, _ in sorted(fused.items(), key=lambda x: -x[1])[:TOP_K]]
+            subject = query_intent.indication_subject(query) if query_intent.ENABLE_INDICATION_RANKING else None
+            ranked = [i for i, _ in sorted(
+                fused.items(),
+                key=lambda item: -query_intent.adjusted_score(
+                    item[1], self.metas[self.by_id[item[0]]],
+                    self.texts[self.by_id[item[0]]], subject
+                ),
+            )[:TOP_K]]
         return [self.texts[self.by_id[i]] for i in ranked]
 
     def score(self, queries, mode, **kw):
@@ -132,16 +149,49 @@ def load_sets(which):
     import eval_set_holdout
 
     sets = []
-    if which in ("main", "both"):
+    if which in ("main", "both", "all"):
         sets.append(("BỘ CHÍNH — truy vấn từ khoá", eval_set.QUERIES))
-    if which in ("holdout", "both"):
+    if which in ("holdout", "both", "all"):
         sets.append(("BỘ GIỮ RIÊNG — câu hỏi tự nhiên", eval_set_holdout.QUERIES))
     return sets
 
 
+def run_wp2(h):
+    import eval_set_wp2
+    import query_intent
+    from collections import defaultdict
+
+    print("\nBỘ WP2: 80 NHÃN ỨNG VIÊN — CẦN DƯỢC SĨ DUYỆT; chưa phải độ chính xác lâm sàng")
+    grouped = defaultdict(list)
+    try:
+        for query, expect, trap, group, review in eval_set_wp2.QUERIES:
+            if review != eval_set_wp2.REVIEW:
+                raise ValueError(f"Nhãn chưa có cờ duyệt: {query}")
+            query_intent.ENABLE_INDICATION_RANKING = False
+            before = h.db.search(query, top_k=TOP_K)[:TOP_K]
+            query_intent.ENABLE_INDICATION_RANKING = True
+            after = h.db.search(query, top_k=TOP_K)[:TOP_K]
+            # Chấm theo tên thuốc khi có; biệt dược chưa được xác minh thì dò
+            # chuỗi trong đoạn nguồn, nên số này chỉ có giá trị sàng lọc.
+            def score(hits, terms):
+                return sum(any(t.lower() in (r.get("generic_name", "") + " " +
+                           r.get("child_text", "")).lower() for t in terms) for r in hits) / TOP_K
+            grouped[group].append((query, score(before, expect), score(after, expect),
+                                   score(after, trap)))
+    finally:
+        query_intent.ENABLE_INDICATION_RANKING = True
+    for group, rows in grouped.items():
+        n = len(rows)
+        print(f"  {group} ({n}): P@5 trước={sum(r[1] for r in rows)/n:.1%} "
+              f"sau={sum(r[2] for r in rows)/n:.1%} bẫy sau={sum(r[3] for r in rows)/n:.1%}")
+        for query, before, after, _ in rows:
+            if after < before:
+                print(f"    GIẢM {before:.0%} -> {after:.0%}: {query}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", choices=["main", "holdout", "both"], default="both")
+    ap.add_argument("--set", choices=["main", "holdout", "both", "wp2", "all"], default="all")
     ap.add_argument("--sweep", action="store_true", help="quét trọng số RRF")
     ap.add_argument(
         "--persist-dir",
@@ -152,6 +202,8 @@ def main():
     args = ap.parse_args()
 
     h = Harness(args.persist_dir)
+    if args.set in ("wp2", "all"):
+        run_wp2(h)
 
     for name, queries in load_sets(args.set):
         print("=" * 64)

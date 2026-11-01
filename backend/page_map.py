@@ -45,8 +45,16 @@ TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])([0-9lIiOoSBZ\]\|]{1,4})(?![0-9A-Za-z])"
 _DIGITISE = str.maketrans({"l": "1", "I": "1", "i": "1", "]": "1", "|": "1",
                            "O": "0", "o": "0", "S": "5", "B": "8", "Z": "2"})
 
-# Offset hợp lệ: chênh lệch giữa trang in và chỉ số PDF chỉ do vài trang bìa/phụ
-# bản chèn vào, không bao giờ lớn. Ngưỡng rộng rãi để không cắt nhầm.
+# Offset hợp lệ: với MỘT quyển, chênh lệch giữa trang in và chỉ số PDF chỉ do
+# vài trang bìa/phụ bản chèn vào, không bao giờ lớn.
+#
+# Nhưng bộ nhiều tập đánh số TRANG IN LIÊN TỤC qua các quyển: Quyển 2 của
+# DTQGVN-2022 mở đầu ở trang in 979 dù chỉ số PDF bắt đầu lại từ 1 — offset đo
+# được ~878, vượt xa ngưỡng 60 này và làm rỗng toàn bộ tập ứng viên (xem
+# build_map). Cận cứng cố định vì vậy sai cho quyển tiếp theo của một bộ dù
+# đúng cho quyển đầu. Thay bằng max(60, pdf_pages): vẫn chặt cho quyển đầu
+# (offset chỉ có thể tới từ vài trang bìa), nhưng đủ rộng cho quyển sau —
+# offset không bao giờ vượt quá số trang chính cuốn sách đang xử lý.
 MAX_PLAUSIBLE_OFFSET = 60
 # Một mức offset phải xuất hiện ở ít nhất ngần này trang mới coi là thật.
 MIN_LEVEL_SUPPORT = 4
@@ -125,6 +133,7 @@ def build_map(doc_name: str) -> Optional[Dict[str, Any]]:
     print(f"[2/5] Nhận diện {len(index_pages)} trang mục lục tra cứu (ML-xx).")
 
     # --- Tìm các mức offset thật bằng tần suất
+    max_plausible_offset = max(MAX_PLAUSIBLE_OFFSET, pdf_pages)
     offset_counter: Counter = Counter()
     page_candidates: Dict[int, List[Tuple[int, float]]] = {}
     for pdf_page, head in heads.items():
@@ -134,7 +143,7 @@ def build_map(doc_name: str) -> Optional[Dict[str, Any]]:
         page_candidates[pdf_page] = cands
         for val, _pos in cands:
             off = val - pdf_page
-            if abs(off) <= MAX_PLAUSIBLE_OFFSET:
+            if abs(off) <= max_plausible_offset:
                 offset_counter[off] += 1
 
     levels = {off for off, n in offset_counter.items() if n >= MIN_LEVEL_SUPPORT}

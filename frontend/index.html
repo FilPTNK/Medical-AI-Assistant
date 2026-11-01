@@ -4,25 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🩺</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trợ lý Fil - Medical RAG Assistant</title>
+    <title>Trợ lý Fil — Tra cứu y khoa</title>
 
-    <!--
-      Màn hình khởi động nằm THẲNG trong index.html, không phải trong React.
-
-      Trước đây #root rỗng và không có một dòng CSS nào cho tới khi gói JS tải
-      xong và React gắn vào. Trên máy này backend mất 34 giây mới nạp xong mô
-      hình, nên bác sĩ mở máy buổi sáng nhìn một màn hình trắng trơn khoảng 11
-      giây, không có gì báo hiệu máy còn sống. Khối dưới đây hiện ngay từ byte
-      đầu tiên của trang.
-
-      Lớp `dark` phải đặt TRƯỚC khi vẽ, nếu không màn hình loé trắng một nhịp
-      rồi mới chuyển sang nền tối.
-    -->
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('theme');
-          if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          // Cùng khoá với useSettings: mặc định sáng, chỉ tối khi bác sĩ tự chọn.
+          var a = localStorage.getItem('set_appearance_v2') || 'light';
+          if (a === 'dark' || (a === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
           }
         } catch (e) {
@@ -33,20 +22,20 @@
 
     <style>
       :root {
-        --boot-bg: #f2f7f8;
+        --boot-bg: #f4f7f9;
         --boot-card: #ffffff;
-        --boot-ink: #0b2a31;
-        --boot-muted: #5e797e;
-        --boot-track: #dbe7e9;
-        --boot-grad: linear-gradient(100deg, #064b5c 0%, #0b7a94 55%, #12a0b8 100%);
+        --boot-ink: #1f2a33;
+        --boot-muted: #4c6272;
+        --boot-track: #dbe3ec;
+        --boot-grad: linear-gradient(100deg, #003d78 0%, #005eb8 100%);
       }
       html.dark {
-        --boot-bg: #0b1a1e;
-        --boot-card: #12262b;
-        --boot-ink: #e6f0f0;
-        --boot-muted: #7e979b;
-        --boot-track: #234047;
-        --boot-grad: linear-gradient(100deg, #8fd9e8 0%, #4cbbd4 55%, #6bc79a 100%);
+        --boot-bg: #0e1620;
+        --boot-card: #16212d;
+        --boot-ink: #e8eef4;
+        --boot-muted: #93a5b6;
+        --boot-track: #2a3a4b;
+        --boot-grad: linear-gradient(100deg, #a9d1f7 0%, #6cb4f5 100%);
       }
       html, body { margin: 0; height: 100%; background: var(--boot-bg); }
 

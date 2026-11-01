@@ -1,0 +1,103 @@
+/* Thẻ tệp đính kèm kiểu ChatGPT — xem AttachmentCard.jsx. */
+
+.att-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 8px;
+}
+
+.att-card {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
+.att-card-surface {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 224px;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid #e5e5e5;
+  border-radius: 16px;
+  background: var(--bg-card);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.att-card-surface:hover { background: #f5f5f5; }
+
+.att-card-tile {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.att-card-tile svg { display: block; }
+
+.att-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.att-card-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.att-card-sub {
+  color: #5d5d5d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nút ✕ đè lên góc trên-phải, luôn hiện (màn cảm ứng không có hover). */
+.att-card-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  transform: translate(50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #e5e5e5;
+  border-radius: 9999px;
+  background: #fff;
+  color: #0d0d0d;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.att-card-remove:hover { background: #f5f5f5; }
+
+/* Thẻ trong tin nhắn đã gửi: căn phải, nằm trên bong bóng câu hỏi. */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+:root.dark .att-card-surface { background: #2f2f2f; border-color: #424242; }
+:root.dark .att-card-surface:hover { background: #3a3a3a; }
+:root.dark .att-card-sub { color: #b4b4b4; }
+:root.dark .att-card-remove { background: #2f2f2f; border-color: #424242; color: #ececec; }

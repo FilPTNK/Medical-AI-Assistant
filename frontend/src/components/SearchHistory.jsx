@@ -208,7 +208,7 @@ export function SearchHistoryDialog({ open, onOpenChange, onReuse, onNotify }) {
             ) : records.length === 0 ? (
               <div className="sh-empty">
                 <History size={20} />
-                <p>{keyword ? `Không có lượt tra cứu nào khớp "${keyword}".` : 'Chưa có lượt tra cứu nào được ghi lại.'}</p>
+                <p>{keyword ? `Không có lượt tra cứu nào khớp "${keyword}".` : 'Chưa có lượt tra cứu nào của bạn được ghi lại.'}</p>
               </div>
             ) : (
               records.map(rec => (
@@ -221,7 +221,6 @@ export function SearchHistoryDialog({ open, onOpenChange, onReuse, onNotify }) {
                       <div className="sh-item-query">{rec.query}</div>
                       <div className="sh-item-meta">
                         <span>{formatWhen(rec.created_at)}</span>
-                        {rec.created_by && <span>· {rec.created_by}</span>}
                         {rec.sources?.length > 0 && (
                           <span className="sh-source-count">
                             <BookOpen size={11} /> {rec.sources.length} nguồn

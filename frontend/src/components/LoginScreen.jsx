@@ -111,12 +111,6 @@ function GoogleButton({ clientId, label, onCredential, onError }) {
           }
         }}
       />
-      <p className="lg-privacy">
-        Thư viện đăng nhập của Google được tải ngay khi bạn mở trang này, nên từ thời
-        điểm đó Google có thể ghi nhận địa chỉ IP và thông tin trình duyệt của bạn.
-        Email, tên và ảnh đại diện Google chỉ được chuyển cho chúng tôi nếu bạn chủ
-        động bấm đăng nhập bằng Google.
-      </p>
     </div>
   );
 }
@@ -336,8 +330,6 @@ export default function LoginScreen({
             </button>
           </div>
         </div>
-
-        <footer className="lg-footer">Dữ liệu bệnh nhân được lưu ngay trên máy này.</footer>
       </div>
     );
   }
@@ -513,8 +505,6 @@ export default function LoginScreen({
           </p>
         )}
       </div>
-
-      <footer className="lg-footer">Dữ liệu bệnh nhân được lưu ngay trên máy này.</footer>
     </div>
   );
 }

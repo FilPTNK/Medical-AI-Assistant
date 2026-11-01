@@ -1,0 +1,86 @@
+/* Bảng kiểm điều kiện (CoverageChecklist.jsx). Dùng màu token của index.css;
+   xanh lá "có" đặt riêng ở đây vì bảng màu chung chưa có màu thành công. */
+.coverage {
+  --coverage-ok: #007f3b;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sunk);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+:root.dark .coverage { --coverage-ok: #4cc38a; }
+
+.coverage-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.coverage-list { list-style: none; margin: 0; padding: 0; }
+.coverage-item + .coverage-item { margin-top: 8px; }
+
+.coverage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.coverage-icon { flex-shrink: 0; }
+.is-found .coverage-icon { color: var(--coverage-ok); }
+.is-partial .coverage-icon { color: var(--warning); }
+.is-missing .coverage-icon { color: var(--danger); }
+
+.coverage-label { font-weight: 600; color: var(--text-primary); }
+.coverage-drug { color: var(--text-secondary); }
+
+.coverage-cite {
+  margin-left: 2px;
+  padding: 2px 8px;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.coverage-cite:hover { border-color: var(--primary); }
+
+.coverage-note {
+  margin: 2px 0 0 22px;
+  color: var(--text-secondary);
+}
+
+.is-missing .coverage-note { color: var(--danger); }
+
+.coverage-quote {
+  display: block;
+  width: calc(100% - 22px);
+  margin: 4px 0 0 22px;
+  padding: 6px 10px;
+  border: none;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-card, #fff);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.coverage-quote:hover { background: var(--primary-glow); }
+.coverage-quote:focus-visible,
+.coverage-cite:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.coverage-foot {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}

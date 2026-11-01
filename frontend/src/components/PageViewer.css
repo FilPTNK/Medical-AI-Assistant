@@ -1,0 +1,127 @@
+/* Trình xem trang gốc có tô sáng — xem PageViewer.jsx. */
+
+.page-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+}
+
+.page-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.page-viewer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text-secondary);
+  min-height: 44px;
+}
+
+.page-viewer-swatch {
+  width: 22px;
+  height: 14px;
+  border-radius: 3px;
+  background: rgba(255, 213, 0, 0.45);
+  outline: 2px solid #c79200;
+}
+
+.page-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.pv-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+.pv-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.page-viewer-scroll {
+  flex: 1;
+  min-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-sunk);
+}
+
+.page-viewer-page {
+  position: relative;
+  margin: 0 auto;
+  min-width: 100%;
+}
+
+.page-viewer-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+.page-viewer-image.authed-image-state {
+  aspect-ratio: 1 / 1.414;
+}
+
+/* Vàng ~40% kèm viền 2px: đọc được chữ bên dưới, và vẫn thấy được khi màu bị
+   in đen trắng hoặc với người khó phân biệt màu. */
+.page-viewer-hl {
+  position: absolute;
+  background: rgba(255, 213, 0, 0.4);
+  outline: 2px solid #c79200;
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  animation: pv-pulse 1.2s ease-out 1;
+}
+
+@keyframes pv-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.7); }
+  100% { box-shadow: 0 0 0 10px rgba(255, 193, 7, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-viewer-hl { animation: none; }
+}
+
+.page-viewer-fallback {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 4px solid var(--warning);
+  background: var(--bg-sunk);
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}

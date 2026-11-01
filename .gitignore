@@ -10,3 +10,11 @@ backend/.deps-installed
 
 # Ban build sinh ra
 frontend/dist/
+
+# Cấu hình agent và tệp tạm cục bộ
+.claude/
+.agents/
+skills-lock.json
+research_notes/
+*.patch
+*.zip

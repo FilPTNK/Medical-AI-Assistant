@@ -64,7 +64,9 @@ export const formatBytes = (bytes) => {
 
 export default function useSettings() {
   // --- General ---
-  const [appearance, setAppearanceState] = useState(() => readString('set_appearance', 'dark'));
+  // Khoá mới (_v2) để mọi máy về giao diện SÁNG một lần: nền trắng–xanh bệnh
+  // viện là mặc định, chế độ tối chỉ còn là lựa chọn tự bật.
+  const [appearance, setAppearanceState] = useState(() => readString('set_appearance_v2', 'light'));
   const [accentColor, setAccentColorState] = useState(() => readString('set_accent', 'default'));
   const [language, setLanguageState] = useState(() => readString('set_language', 'vi'));
   const [libraryViewMode, setLibraryViewModeState] = useState(() => readString('med_library_view', 'grid'));
@@ -107,7 +109,7 @@ export default function useSettings() {
     localStorage.setItem(key, serialize(value));
   }, []);
 
-  const setAppearance = useMemo(() => persist('set_appearance', setAppearanceState), [persist]);
+  const setAppearance = useMemo(() => persist('set_appearance_v2', setAppearanceState), [persist]);
   const setAccentColor = useMemo(() => persist('set_accent', setAccentColorState), [persist]);
   const setLanguage = useMemo(() => persist('set_language', setLanguageState), [persist]);
   const setLibraryViewMode = useMemo(() => persist('med_library_view', setLibraryViewModeState), [persist]);

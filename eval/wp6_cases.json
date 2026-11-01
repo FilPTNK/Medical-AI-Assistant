@@ -1,0 +1,23 @@
+[
+  {
+    "id": "mock_dose_supported",
+    "question": "Chế phẩm giả định A có số lượng sử dụng nào?",
+    "context": [
+      {"doc_name": "Nguồn giả A", "page_num": 1, "text": "Chế phẩm giả định A: 12 mg mỗi lần."},
+      {"doc_name": "Nguồn giả B", "page_num": 2, "text": "Cách lưu: nơi khô ráo."}
+    ],
+    "expect": {"citation_required": true, "abstention_required": false}
+  },
+  {
+    "id": "irrelevant_context",
+    "question": "Chế phẩm giả định B có liều bao nhiêu?",
+    "context": [{"doc_name": "Nguồn giả C", "page_num": 1, "text": "Quy trình lưu trữ hồ sơ giấy."}],
+    "expect": {"citation_required": false, "abstention_required": true}
+  },
+  {
+    "id": "empty_context",
+    "question": "Thông tin về chế phẩm giả định C?",
+    "context": [],
+    "expect": {"citation_required": false, "abstention_required": true}
+  }
+]

@@ -1,4 +1,5 @@
 import React from 'react';
+import AllergyCheckPanel from './AllergyCheckPanel';
 import {
   Activity,
   AlertCircle,
@@ -9,10 +10,8 @@ import {
   Info,
   Loader2,
   Maximize2,
-  Search,
   Sparkles,
   Stethoscope,
-  UserRound,
   X,
   ZoomIn,
   ZoomOut,
@@ -25,23 +24,17 @@ import {
 export default function DiagnosisTreeView({
   centerTreeCanvas,
   collectSymptoms,
-  diagPatientQuery,
-  diagPatientResults,
-  diagPatientSearchOpen,
-  diagSelectedPatient,
   examLoading,
   examNotes,
   examResult,
   finalDiagnoses,
   finalLoading,
-  handleDiagPatientSearchChange,
   handleFinalDiagnosis,
   handleGenerateTree,
-  handleSelectDiagPatient,
   handleSuggestExam,
   handleToggleDiagnosisSelected,
   handleTreeCanvasMouseDown,
-  handleUpdateDisease,
+  handleSuggestTreatment,
   isPanningTree,
   isPreparingHandoff,
   nodeStatusMap,
@@ -52,7 +45,10 @@ export default function DiagnosisTreeView({
   renderDecisionTreeNode,
   selectedDiagnosisDetail,
   selectedDiagnosisIds,
-  setDiagPatientSearchOpen,
+  patientHistory,
+  setPatientHistory,
+  treatmentResult,
+  allergyCheck,
   setExamNotes,
   setPatientDesc,
   setSelectedDiagnosisDetail,
@@ -70,92 +66,51 @@ export default function DiagnosisTreeView({
           <div className="column-questionnaire animate-fade-in">
             <h2>
               Xây dựng sơ đồ chẩn đoán
-              <Info size={14} style={{ display: 'inline', color: 'var(--text-muted)', cursor: 'pointer', verticalAlign: 'middle' }} title="Tạo sơ đồ chẩn đoán dựa trên mô tả bệnh án kết hợp tiền sử bệnh" />
             </h2>
-            <p className="col-desc">Nhập mô tả bệnh nhân để DeepSeek sinh cây chẩn đoán. Bạn chọn Có/Không để hệ thống gợi ý khám & nội soi, rồi đưa ra chẩn đoán cuối cùng.</p>
-
-            {/* Section 0: Bệnh nhân — links this diagnosis session to a patient record */}
-            <div className="patient-desc-section">
-              <div className="patient-desc-header">
-                <span className="patient-desc-header-badge">0</span>
-                <span>Bệnh nhân</span>
-                <Info size={14} style={{ color: 'var(--text-muted)', cursor: 'pointer' }} title="Chọn hồ sơ thì tiền sử trong bệnh án — dị ứng, bệnh nền, các lần khám trước — được nạp vào cả bốn bước chẩn đoán, và kết quả điền lại được vào lần khám mới. Tên và mã hồ sơ KHÔNG được gửi ra ngoài. Để trống thì chỉ dùng phần mô tả bạn gõ." />
-              </div>
-
-              <div className="pp-search-wrap" style={{ maxWidth: '460px' }}>
-                <Search size={16} className="pp-search-icon" />
-                <input
-                  type="text"
-                  className="pp-search-input"
-                  placeholder="Tìm bệnh nhân theo tên, mã hồ sơ hoặc SĐT..."
-                  value={diagPatientQuery}
-                  onChange={(e) => handleDiagPatientSearchChange(e.target.value)}
-                  onFocus={() => setDiagPatientSearchOpen(true)}
-                  onBlur={() => setTimeout(() => setDiagPatientSearchOpen(false), 150)}
-                />
-
-                {diagPatientSearchOpen && diagPatientQuery.trim() && !diagSelectedPatient && (
-                  <div className="pp-search-dropdown">
-                    {diagPatientResults.length === 0 ? (
-                      <div className="pp-search-empty">Không tìm thấy bệnh nhân phù hợp.</div>
-                    ) : (
-                      diagPatientResults.map((pat) => (
-                        <div
-                          key={pat.id}
-                          className="pp-search-result"
-                          onMouseDown={() => handleSelectDiagPatient(pat)}
-                        >
-                          <div className="pp-search-result-avatar"><UserRound size={14} /></div>
-                          <div>
-                            <div className="pp-search-result-name">{pat.name}</div>
-                            <div className="pp-search-result-meta">{pat.code}{pat.age != null ? ` • ${pat.age} tuổi` : ''}</div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Đúng những gì AI đã đọc. Gập sẵn — y văn về hiệu chỉnh lòng tin
-                  cho thấy giải thích làm bác sĩ DỄ chấp nhận hơn mà KHÔNG giúp
-                  nhận ra kết quả sai (JMIR AI 2024), còn giải thích dài thì bị
-                  bỏ qua. Nên panel này không phải để thuyết phục: nó để kiểm
-                  chứng rằng tên bệnh nhân không lọt ra và mục dị ứng có đi vào,
-                  mà không phải mở nhật ký agent. */}
-              {patientContextSent && (
-                <div className="patient-context-disclosure">
-                  <button
-                    type="button"
-                    className="patient-context-toggle"
-                    onClick={() => setPatientContextOpen(!patientContextOpen)}
-                    aria-expanded={patientContextOpen}
-                  >
-                    {patientContextOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <span>AI đã đọc gì từ bệnh án</span>
-                    <span className="patient-context-hint">đã bỏ tên và mã hồ sơ</span>
-                  </button>
-                  {patientContextOpen && (
-                    <pre className="patient-context-body">{patientContextSent}</pre>
-                  )}
-                </div>
-              )}
-            </div>
 
             {/* Section 1: Nhập mô tả bệnh nhân */}
             <div className="patient-desc-section">
               <div className="patient-desc-header">
                 <span className="patient-desc-header-badge">1</span>
                 <span>Nhập mô tả bệnh nhân</span>
-                <Info size={14} style={{ color: 'var(--text-muted)', cursor: 'pointer' }} title="Mô tả bệnh án được gửi cho DeepSeek để sinh cây chẩn đoán." />
               </div>
-              <div className="patient-desc-container">
+              {/* Mỗi ô một hàng, nút bấm ở hàng riêng cuối cùng — không dồn ngang. */}
+              <textarea
+                className="patient-desc-textarea patient-desc-main"
+                aria-label="Mô tả triệu chứng bệnh nhân"
+                placeholder="Ví dụ: Bệnh nhân nam, 28 tuổi. Sốt nhẹ về chiều, đau họng..."
+                value={patientDesc}
+                onChange={(e) => setPatientDesc(e.target.value)}
+              />
+              <div className="patient-history-block">
+                <label className="patient-history-label" htmlFor="patient-history-input">
+                  Tình trạng bệnh nhân trước đó <span className="optional-tag">(không bắt buộc)</span>
+                </label>
                 <textarea
-                  className="patient-desc-textarea"
-                  placeholder="Ví dụ: Bệnh nhân nam, 28 tuổi. Sốt nhẹ về chiều, đau họng..."
-                  value={patientDesc}
-                  onChange={(e) => setPatientDesc(e.target.value)}
+                  id="patient-history-input"
+                  className="patient-desc-textarea patient-history-textarea"
+                  placeholder="Ví dụ: Tăng huyết áp 5 năm, đang dùng amlodipin 5 mg. Dị ứng penicillin."
+                  value={patientHistory}
+                  onChange={(e) => setPatientHistory(e.target.value)}
                 />
+                {patientContextSent && (
+                  <div className="patient-context-disclosure">
+                    <button
+                      type="button"
+                      className="patient-context-toggle"
+                      onClick={() => setPatientContextOpen(!patientContextOpen)}
+                      aria-expanded={patientContextOpen}
+                    >
+                      {patientContextOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      <span>Xem tình trạng trước đó AI đã đọc</span>
+                    </button>
+                    {patientContextOpen && (
+                      <pre className="patient-context-body">{patientContextSent}</pre>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="patient-desc-actions">
                 <button
                   type="button"
                   className="btn-analyze-desc"
@@ -163,9 +118,9 @@ export default function DiagnosisTreeView({
                   disabled={treeLoading || !patientDesc.trim()}
                 >
                   {treeLoading ? (
-                    <Loader2 size={16} className="animate-spin" />
+                    <Loader2 size={18} className="animate-spin" />
                   ) : (
-                    <Sparkles size={16} />
+                    <Sparkles size={18} />
                   )}
                   <span>Tạo cây chẩn đoán</span>
                 </button>
@@ -177,8 +132,7 @@ export default function DiagnosisTreeView({
               <div className="symptom-tree-header">
                 <div className="symptom-tree-title">
                   <span className="patient-desc-header-badge">2</span>
-                  <span>Cây triệu chứng <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 'normal' }}>(Bác sĩ chọn Có/Không cho từng triệu chứng)</span></span>
-                  <span className="badge-beta" style={{ background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb', textTransform: 'none', marginLeft: '6px' }}>DeepSeek</span>
+                  <span>Cây triệu chứng</span>
                 </div>
 
                 <div className="symptom-tree-header-right">
@@ -245,11 +199,11 @@ export default function DiagnosisTreeView({
                 {treeLoading ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', height: '100%', color: 'var(--text-secondary)', fontSize: '13px' }}>
                     <Loader2 size={26} className="animate-spin" />
-                    <span>DeepSeek đang phân tích mô tả và dựng cây chẩn đoán...</span>
+                    <span>Đang dựng cây chẩn đoán…</span>
                   </div>
                 ) : !treeRoot ? (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center', padding: '0 20px' }}>
-                    Chưa có cây chẩn đoán. Nhập mô tả bệnh nhân và bấm "Tạo cây chẩn đoán" để bắt đầu.
+                    Chưa có cây chẩn đoán.
                   </div>
                 ) : (
                   <div
@@ -275,12 +229,6 @@ export default function DiagnosisTreeView({
                 <span>Gợi ý khám & nội soi</span>
               </div>
               <div className="diagnose-action-bar" style={{ border: 'none', padding: '0', background: 'transparent', marginTop: '0', boxShadow: 'none' }}>
-                <div className="diagnose-action-info">
-                  <div className="diagnose-action-info-icon">
-                    <Info size={20} />
-                  </div>
-                  <p>Hệ thống sẽ tổng hợp các triệu chứng bạn chọn "Có"/"Không" và gợi ý vị trí cần nội soi, khám lâm sàng.</p>
-                </div>
                 <button
                   type="button"
                   className="btn-diagnose-submit"
@@ -348,12 +296,6 @@ export default function DiagnosisTreeView({
                 </div>
 
                 <div className="diagnose-action-bar" style={{ border: 'none', padding: '0', background: 'transparent', marginTop: '14px', boxShadow: 'none' }}>
-                  <div className="diagnose-action-info">
-                    <div className="diagnose-action-info-icon">
-                      <Stethoscope size={20} />
-                    </div>
-                    <p>Kết hợp triệu chứng cơ năng và kết quả khám thực tế để đưa ra Top 10 chẩn đoán phân biệt.</p>
-                  </div>
                   <button
                     type="button"
                     className="btn-diagnose-submit"
@@ -416,14 +358,13 @@ export default function DiagnosisTreeView({
             {/* Final Diagnosis List Card */}
             <div className="results-card" style={{ flex: 1 }}>
               <h3 className="results-card-title">
-                <span>Kết quả chẩn đoán <span style={{ fontSize: '11.5px', fontWeight: 'normal', color: 'var(--text-muted)' }}>(Top 10 nguyên nhân)</span></span>
-                <span className="badge-beta" style={{ background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb', textTransform: 'none' }}>DeepSeek</span>
+                <span>Kết quả chẩn đoán</span>
               </h3>
 
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {finalDiagnoses.length === 0 ? (
                   <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center', padding: '20px' }}>
-                    Nhấp nút "Tiến hành chẩn đoán cuối cùng" ở Bước 4 để xem gợi ý.
+                    Chưa có kết quả.
                   </div>
                 ) : (
                   <div className="causes-list">
@@ -447,7 +388,7 @@ export default function DiagnosisTreeView({
                                 checked={isSelected}
                                 onClick={(e) => e.stopPropagation()}
                                 onChange={() => handleToggleDiagnosisSelected(idx)}
-                                title="Chọn để chuyển sang hồ sơ bệnh nhân"
+                                aria-label={`Chọn chẩn đoán ${diag.disease_name}`}
                                 style={{ marginRight: '6px', cursor: 'pointer' }}
                               />
                               {idx + 1}. {diag.disease_name}
@@ -482,11 +423,6 @@ export default function DiagnosisTreeView({
 
               {finalDiagnoses.length > 0 && (
                 <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-                  <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', margin: '0 0 12px 0', textAlign: 'center', fontStyle: 'italic' }}>
-                    {selectedDiagnosisIds.size === 0
-                      ? 'Nhấp vào một dòng để chọn chẩn đoán chuyển sang hồ sơ bệnh nhân.'
-                      : 'Nhấp biểu tượng ⓘ trên mỗi dòng để xem chi tiết lý luận lâm sàng.'}
-                  </p>
                   <button
                     type="button"
                     className="btn-suggestion-chip"
@@ -503,14 +439,48 @@ export default function DiagnosisTreeView({
                     type="button"
                     className="btn-diagnose-submit"
                     style={{ width: '100%', marginTop: '10px' }}
-                    onClick={handleUpdateDisease}
+                    onClick={handleSuggestTreatment}
                     disabled={selectedDiagnosisIds.size === 0 || isPreparingHandoff}
                   >
-                    {/* Nút nói đúng việc nó làm: nó KHÔNG ghi thẳng vào bệnh án,
-                        nó mở sẵn phiếu khám đã điền để bác sĩ soát rồi tự bấm Lưu.
-                        Dấu ba chấm là quy ước cho "còn một bước nữa". */}
-                    {isPreparingHandoff ? <Loader2 size={16} className="animate-spin" /> : <ClipboardList size={16} />} Đưa sang bệnh án…{selectedDiagnosisIds.size > 0 ? ` (${selectedDiagnosisIds.size})` : ''}
+                    {isPreparingHandoff ? <Loader2 size={16} className="animate-spin" /> : <ClipboardList size={16} />} Gợi ý điều trị{selectedDiagnosisIds.size > 0 ? ` (${selectedDiagnosisIds.size} chẩn đoán)` : ''}
                   </button>
+
+                  {treatmentResult && (
+                    <section className="treatment-result" aria-label="Gợi ý điều trị">
+                      <h3 className="treatment-result-title">Gợi ý điều trị</h3>
+                      <p className="treatment-result-for">
+                        Cho: {treatmentResult.diagnoses.map(d => d.disease_name).join(', ')}
+                      </p>
+                      <AllergyCheckPanel check={allergyCheck} />
+                      {(treatmentResult.medications || []).length > 0 ? (
+                        <ul className="treatment-med-list">
+                          {treatmentResult.medications.map((m, i) => (
+                            <li key={i} className="treatment-med">
+                              <strong>{m.name}</strong>
+                              <span className="treatment-med-dose">
+                                {[m.dosage, m.form, m.frequency].filter(Boolean).join(' · ')}
+                              </span>
+                              {m.instructions && <span className="treatment-med-note">{m.instructions}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="treatment-empty">
+                          Tài liệu trong kho không đủ căn cứ để gợi ý thuốc cụ thể cho chẩn đoán này.
+                        </p>
+                      )}
+                      {[
+                        ['Không dùng thuốc', treatmentResult.no_drug_recommendations],
+                        ['Chăm sóc tại nhà', treatmentResult.care_instructions],
+                        ['Lưu ý', treatmentResult.precautions],
+                      ].filter(([, v]) => v && String(v).trim()).map(([label, v]) => (
+                        <div key={label} className="treatment-block">
+                          <h4>{label}</h4>
+                          <p>{v}</p>
+                        </div>
+                      ))}
+                    </section>
+                  )}
                 </div>
               )}
             </div>
@@ -522,7 +492,7 @@ export default function DiagnosisTreeView({
               <div className="diagnosis-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="diagnosis-modal-header">
                   <h3>Chi tiết bệnh lý gợi ý</h3>
-                  <button className="icon-btn-action" onClick={() => setSelectedDiagnosisDetail(null)}><X size={16} /></button>
+                  <button className="icon-btn-action" aria-label="Đóng chi tiết chẩn đoán" onClick={() => setSelectedDiagnosisDetail(null)}><X size={16} /></button>
                 </div>
                 <div className="diagnosis-modal-body">
                   <div>

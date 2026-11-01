@@ -19,21 +19,25 @@ import config
 import documents
 import google_login
 import mailer
-import patient_db
 import patient_context
 import drug_allergy
+import drug_interaction
+import pediatric_dose
 import text_fold
 import doc_index
+import page_locate
 import profile_db
 import auth_db
-import reminder_db
-import stats_db
 import pdf_export
 import library_db
-import agent
-from pdf_processor import process_pdf_parent_child_summary, SimpleLoader
-from vector_store import VectorStore
-from llm_client import generate_answer, stream_answer, generate_diagnosis_tree, suggest_endoscopy_exam, generate_final_diagnosis, generate_treatment_suggestion, generate_drug_report, stream_drug_report, generate_document_comparison
+import generic_ingest
+import ingest_jobs
+import web_tools
+import answer_verify
+import feedback_db
+from vector_store import VectorStore, IndexUnavailable, SearchHits
+from writer_lock import writer_lock
+from llm_client import coverage_notes, generate_answer, stream_answer, generate_diagnosis_tree, suggest_endoscopy_exam, generate_final_diagnosis, generate_treatment_suggestion, generate_drug_report, stream_drug_report, generate_document_comparison
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,22 +52,32 @@ async def lifespan(app: FastAPI):
     tiên thì model thường đã sẵn sàng. Nếu chưa, search() vẫn tự nạp lười —
     VectorDB có khoá riêng nên hai đường này không dựng trùng nhau.
     """
+    # Ở lifespan chứ không ở cấp module: import main trong test không được
+    # chạm vào dữ liệu thật. Chỉ chạy một lần trong đời của library.db.
+    legacy = library_db.assign_legacy_owners(_unique_user_names())
+    if legacy:
+        print(f"[library_db] Gắn chủ cho lịch sử/ghi chú cũ: {legacy}")
+
     def _warm():
         t0 = time.perf_counter()
         print("[STARTUP] Đang nạp model embedding và chỉ mục BM25 ở nền...")
         try:
+            generic_ingest.cleanup_orphans(db)
+            drug_interaction.chi_muc()
+            for doc in drug_interaction._nguon_duoc_thu():
+                pediatric_dose._cau_lieu_cua_tai_lieu(doc)
             db._get_corpus_and_bm25()
+            db.embedding
             print(f"[STARTUP] Sẵn sàng phục vụ tìm kiếm sau {time.perf_counter() - t0:.1f}s.")
         except Exception as e:
             print(f"[STARTUP] Cảnh báo: nạp trước thất bại ({e}). Sẽ nạp lười khi có truy vấn.")
 
-    threading.Thread(target=_warm, name="warmup", daemon=True).start()
-    yield
+    # Máy chủ giữ quyền ghi trong suốt vòng đời; CLI không được mở Chroma để ghi song song.
+    with writer_lock(config.VECTOR_DB_DIR):
+        threading.Thread(target=_warm, name="warmup", daemon=True).start()
+        yield
 
 app = FastAPI(title="Medical RAG Assistant API", lifespan=lifespan)
-
-# Initialize patient records database (SQLite)
-patient_db.init_db()
 
 # Initialize doctor profile database (SQLite) + xác thực/phân quyền trên cùng bảng
 profile_db.init_db()
@@ -71,6 +85,20 @@ auth_db.init_db()
 
 # Initialize document research database: highlights, notes, search history (SQLite)
 library_db.init_db()
+
+# Nhật ký tra cứu + phản hồi của bác sĩ (feedback_db.py) — tách khỏi library.db.
+feedback_db.init_db()
+
+
+def _unique_user_names() -> Dict[str, str]:
+    """Tên hiển thị / tên đăng nhập -> id, chỉ với tên thuộc đúng một tài khoản."""
+    seen: Dict[str, set] = {}
+    for u in auth_db.list_users():
+        for name in {u.get("display_name"), u.get("username")}:
+            if name:
+                seen.setdefault(name, set()).add(u["id"])
+    return {name: next(iter(ids)) for name, ids in seen.items() if len(ids) == 1}
+
 
 # Configure CORS
 app.add_middleware(
@@ -84,20 +112,29 @@ app.add_middleware(
 # Initialize vector store
 db = VectorStore(config.VECTOR_DB_DIR)
 
-# Path to store full page texts for the reader. Đường dẫn theo tài liệu do
-# documents.py quản lý — mọi thứ khóa theo doc_name để hai cuốn sách không đè nhau.
-PAGES_CACHE_DIR = documents.PAGES_CACHE_DIR
-
 class QueryRequest(BaseModel):
     query: str
     created_by: Optional[str] = None
+    # Bác sĩ bật "Tìm thêm trên web". Mặc định tắt: câu hỏi chỉ rời máy chủ
+    # (tới PubMed/FDA/Tavily) khi bác sĩ chủ động chọn.
+    web: bool = False
+    # "Hỏi về tài liệu này": giới hạn tra cứu trong đúng một cuốn sách, ưu tiên
+    # các đoạn gần trang bác sĩ đang đọc.
+    doc_name: Optional[str] = None
+    near_page: Optional[int] = None
 
 class SearchResultItem(BaseModel):
     id: Optional[str] = None
     text: str
-    doc_name: str
-    page_num: int
-    score: float
+    doc_name: str = ""
+    # Nguồn web không có số trang.
+    page_num: Optional[int] = None
+    score: float = 0.0
+    # "book" = trang sách trong kho; "web" = kết quả từ web_tools (có url).
+    kind: str = "book"
+    url: Optional[str] = None
+    provider: Optional[str] = None
+    published: Optional[str] = None
     # Nhãn để bác sĩ đối chiếu. doc_name là ID kỹ thuật ("DTQGVN-2022-Q1"),
     # không đọc được trên chip nguồn; citation là dạng người đọc, có kèm số
     # quyển vì trong bộ nhiều tập một số trang không định danh duy nhất.
@@ -108,6 +145,9 @@ class SearchResultItem(BaseModel):
     # rõ cái nhãn không đáng tin. Trước đây cờ này dừng lại ở backend: llm_client
     # có nhận, còn model trả về cho UI thì không có trường nào để chở nó đi.
     name_suspect: bool = False
+    # Đoạn con (child chunk) đã khớp — ngắn và đúng chỗ hơn `text` (đoạn cha),
+    # dùng để tô sáng vị trí trích dẫn trên ảnh trang.
+    quote: Optional[str] = None
 
 class QueryResponse(BaseModel):
     answer: str
@@ -142,7 +182,33 @@ def to_search_result(s: dict) -> SearchResultItem:
         doc_title=s.get("doc_title") or doc_name,
         citation=s.get("citation") or documents.display_citation(doc_name, s["page_num"]),
         name_suspect=bool(s.get("name_suspect", False)),
+        quote=s.get("child_text") or None,
     )
+
+def web_hit_to_source(hit: dict) -> dict:
+    """Kết quả web_tools -> nguồn cùng dạng với trang sách, để chung dãy số [n].
+
+    Nhãn bắt đầu bằng "Nguồn web" để chính mô hình cũng phân biệt được, xem
+    quy tắc 6 trong llm_client._build_answer_messages.
+    """
+    when = f", {hit['published']}" if hit.get("published") else ""
+    return {
+        **hit,
+        "id": hit["url"],
+        "doc_name": "",
+        "doc_title": hit["title"],
+        "citation": f"Nguồn web — {hit['provider']}: {hit['title']} ({hit['domain']}{when})",
+        "score": 0.0,
+    }
+
+
+def to_web_result(s: dict) -> SearchResultItem:
+    return SearchResultItem(
+        id=s.get("id"), text=s["text"], kind="web", url=s["url"],
+        provider=s.get("provider"), published=s.get("published") or None,
+        doc_title=s.get("doc_title"), citation=s.get("citation"),
+    )
+
 
 def read_json_data(file_path: str) -> list:
     if not os.path.exists(file_path):
@@ -241,6 +307,11 @@ PUBLIC_PREFIXES = ("/api/share/",)
 # access log của máy chủ.
 DOWNLOAD_TICKET_TTL_SECONDS = 60.0
 DOWNLOAD_TICKET_PATH_RE = re.compile(r"^/api/documents/[^/]+/download$")
+# Mọi endpoint theo từng tài liệu (trang, ảnh scan, tìm trong sách, tô sáng, ghi
+# chú, tải xuống, xoá...) đều nằm dưới tiền tố này. Kiểm quyền xem MỘT chỗ ở
+# middleware thay vì rải vào từng route: thêm endpoint mới dưới tiền tố này là
+# tự được che, không có đường nào quên kiểm.
+DOC_SCOPED_PATH_RE = re.compile(r"^/api/documents/([^/]+)(?:/|$)")
 _download_tickets: Dict[str, Dict[str, Any]] = {}
 
 
@@ -295,6 +366,12 @@ async def authenticate(request: Request, call_next):
         request.state.token = token
         request.state.user = auth_db.resolve_session(token)
 
+    doc_match = DOC_SCOPED_PATH_RE.match(request.scope.get("path") or path)
+    if doc_match and request.state.user is not None and doc_match.group(1) != "ingest":
+        # 404 chứ không 403: không xác nhận cho người ngoài là tài liệu đó tồn tại.
+        if not documents.can_view(request.state.user, get_safe_filename(doc_match.group(1))):
+            return JSONResponse(status_code=404, content={"detail": "Không tìm thấy tài liệu."})
+
     if not _is_public(path) and request.state.user is None:
         # Tải PDF sách bằng vé một lần thay cho header — chính route sẽ đối chiếu vé,
         # ở đây chỉ ngừng trả 401 sớm để request đến được đó.
@@ -332,28 +409,6 @@ def require_write(request: Request) -> Dict[str, Any]:
     if auth_db.is_read_only(user):
         raise HTTPException(status_code=403, detail="Tài khoản của bạn chỉ có quyền xem hồ sơ bệnh nhân.")
     return user
-
-
-def scope_owner_id(user: Dict[str, Any]) -> Optional[str]:
-    """None = xem toàn phòng khám; ngược lại giới hạn theo bác sĩ phụ trách."""
-    return None if auth_db.can_see_all_patients(user) else user["id"]
-
-
-def ensure_patient_access(patient_id: str, user: Dict[str, Any], write: bool = False) -> None:
-    """Ném 404/403 nếu tài khoản không được phép chạm vào hồ sơ này.
-
-    Bệnh nhân không thuộc quyền quản lý trả về 404 chứ không phải 403: bác sĩ
-    khác không nên biết mã hồ sơ nào đang tồn tại trong phòng khám.
-    """
-    if not patient_db.patient_exists(patient_id):
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-    if write and auth_db.is_read_only(user):
-        raise HTTPException(status_code=403, detail="Tài khoản của bạn chỉ có quyền xem hồ sơ bệnh nhân.")
-    if auth_db.can_see_all_patients(user):
-        return
-    owner = patient_db.get_patient_owner(patient_id)
-    if owner is not None and owner != user["id"]:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
 
 
 class LoginRequest(BaseModel):
@@ -444,9 +499,6 @@ def auth_setup(payload: SetupRequest):
     result = auth_db.login(user["username"], payload.password)
     if not result["ok"]:
         raise HTTPException(status_code=500, detail=result["error"])
-    # Hồ sơ cũ tạo từ thời chưa phân quyền chưa có bác sĩ phụ trách — giao hết cho
-    # quản trị viên đầu tiên để không hồ sơ nào rơi vào trạng thái vô chủ.
-    patient_db.claim_unassigned_patients(user["id"])
     return {"token": result["token"], "user": result["user"]}
 
 
@@ -479,10 +531,6 @@ def auth_register_verify(payload: VerifyRegistrationRequest):
     result = auth_db.verify_registration(payload.pending_id, payload.code)
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])
-    if result.get("is_first_account"):
-        # Giống luồng /api/auth/setup: người đầu tiên vào được nhận cả các hồ sơ
-        # bệnh nhân tạo từ thời chưa có đăng nhập, để không hồ sơ nào vô chủ.
-        patient_db.claim_unassigned_patients(result["user"]["id"])
     return {"token": result["token"], "user": result["user"]}
 
 
@@ -513,8 +561,6 @@ def auth_google(payload: GoogleLoginRequest):
     result = auth_db.login_with_google(profile)
     if not result["ok"]:
         raise HTTPException(status_code=403, detail=result["error"])
-    if result.get("is_first_account"):
-        patient_db.claim_unassigned_patients(result["user"]["id"])
     return {"token": result["token"], "user": result["user"], "created": result["created"]}
 
 
@@ -649,144 +695,15 @@ def update_clinic(payload: ClinicInfoRequest, request: Request):
 @app.get("/api/config")
 def get_config_status():
     return {
-        "has_api_key": bool(config.DEEPSEEK_API_KEY)
+        "has_api_key": bool(config.DEEPSEEK_API_KEY),
+        # Rỗng = máy chủ không bật tìm web; giao diện ẩn nút đi.
+        "web_search_tools": web_tools.available_tools(),
     }
 
 # --- Patient records (hồ sơ bệnh nhân) — backed by SQLite (backend/data/patients.db) ---
 
 PATIENT_ATTACHMENTS_DIR = os.path.join(config.DATA_DIR, "patient_attachments")
 os.makedirs(PATIENT_ATTACHMENTS_DIR, exist_ok=True)
-
-class PatientCreateModel(BaseModel):
-    name: str
-    dob: Optional[str] = None
-    gender: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    address: Optional[str] = None
-    occupation: Optional[str] = None
-    blood_type: Optional[str] = None
-    height_cm: Optional[float] = None
-    weight_kg: Optional[float] = None
-    allergies: Optional[str] = None
-    chronic_conditions: Optional[str] = None
-    surgical_history: Optional[str] = None
-    family_history: Optional[str] = None
-    notes: Optional[str] = None
-    created_by: Optional[str] = None
-    owner_doctor_id: Optional[str] = None
-
-class PatientOwnerModel(BaseModel):
-    owner_doctor_id: Optional[str] = None
-
-class QuickNoteModel(BaseModel):
-    note: str
-    updated_by: Optional[str] = None
-
-class VisitCreateModel(BaseModel):
-    visit_date: Optional[str] = None
-    title: Optional[str] = None
-    symptoms: Optional[str] = None
-    diagnosis_primary: Optional[str] = None
-    diagnosis_secondary: Optional[str] = None
-    diagnosis_confidence: Optional[int] = None
-    diagnosis_note: Optional[str] = None
-    differential_diagnoses: Optional[List[Dict[str, Any]]] = None
-    exam_findings: Optional[str] = None
-    treatment: Optional[str] = None
-    subclinical_orders: Optional[str] = None
-    doctor_name: Optional[str] = None
-    doctor_notes: Optional[str] = None
-    medications: Optional[List[Dict[str, Any]]] = None
-    goals: Optional[List[str]] = None
-    protocol_duration: Optional[str] = None
-    treatment_method: Optional[str] = None
-    diet_regimen: Optional[str] = None
-    precautions: Optional[str] = None
-    no_drug_recommendations: Optional[str] = None
-    care_instructions: Optional[str] = None
-    followup_date: Optional[str] = None
-    followup_purpose: Optional[str] = None
-    status: Optional[str] = None
-
-class VisitUpdateModel(BaseModel):
-    visit_date: Optional[str] = None
-    title: Optional[str] = None
-    symptoms: Optional[str] = None
-    diagnosis_primary: Optional[str] = None
-    diagnosis_secondary: Optional[str] = None
-    diagnosis_confidence: Optional[int] = None
-    diagnosis_note: Optional[str] = None
-    differential_diagnoses: Optional[List[Dict[str, Any]]] = None
-    exam_findings: Optional[str] = None
-    treatment: Optional[str] = None
-    subclinical_orders: Optional[str] = None
-    doctor_name: Optional[str] = None
-    doctor_notes: Optional[str] = None
-    medications: Optional[List[Dict[str, Any]]] = None
-    goals: Optional[List[str]] = None
-    protocol_duration: Optional[str] = None
-    treatment_method: Optional[str] = None
-    diet_regimen: Optional[str] = None
-    precautions: Optional[str] = None
-    no_drug_recommendations: Optional[str] = None
-    care_instructions: Optional[str] = None
-    followup_date: Optional[str] = None
-    followup_purpose: Optional[str] = None
-    status: Optional[str] = None
-
-class NoteCreateModel(BaseModel):
-    visit_date: Optional[str] = None
-    doctor_name: Optional[str] = None
-    title: Optional[str] = None
-    reason_for_visit: Optional[str] = None
-    vital_pulse: Optional[str] = None
-    vital_blood_pressure: Optional[str] = None
-    vital_resp_rate: Optional[str] = None
-    vital_temperature: Optional[str] = None
-    general_exam: Optional[str] = None
-    cardio_exam: Optional[str] = None
-    resp_exam: Optional[str] = None
-    abdomen_exam: Optional[str] = None
-    other_exam: Optional[str] = None
-    ent_ear: Optional[str] = None
-    ent_nose: Optional[str] = None
-    ent_throat: Optional[str] = None
-    ent_other: Optional[str] = None
-    ent_scope_nose: Optional[str] = None
-    ent_scope_ear: Optional[str] = None
-    ent_scope_throat: Optional[str] = None
-    status: Optional[str] = None
-
-class NoteUpdateModel(BaseModel):
-    visit_date: Optional[str] = None
-    doctor_name: Optional[str] = None
-    title: Optional[str] = None
-    reason_for_visit: Optional[str] = None
-    vital_pulse: Optional[str] = None
-    vital_blood_pressure: Optional[str] = None
-    vital_resp_rate: Optional[str] = None
-    vital_temperature: Optional[str] = None
-    general_exam: Optional[str] = None
-    cardio_exam: Optional[str] = None
-    resp_exam: Optional[str] = None
-    abdomen_exam: Optional[str] = None
-    other_exam: Optional[str] = None
-    ent_ear: Optional[str] = None
-    ent_nose: Optional[str] = None
-    ent_throat: Optional[str] = None
-    ent_other: Optional[str] = None
-    ent_scope_nose: Optional[str] = None
-    ent_scope_ear: Optional[str] = None
-    ent_scope_throat: Optional[str] = None
-    status: Optional[str] = None
-
-class VitalCreateModel(BaseModel):
-    vital_type: str
-    value: str
-
-class AiDiagnosisRequest(BaseModel):
-    symptoms: str
 
 # --- Hồ sơ bác sĩ (doctor profiles) ---
 
@@ -922,534 +839,167 @@ def delete_profile_avatar(profile_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bác sĩ.")
     return profile
 
-@app.get("/api/patients/next-code")
-def get_next_patient_code(request: Request):
-    current_user(request)
-    return {"code": patient_db.preview_next_code()}
-
-@app.get("/api/patients")
-def get_patients(request: Request, search: Optional[str] = Query(None),
-                 scope: Optional[str] = Query(None)):
-    """Bác sĩ thấy bệnh nhân mình phụ trách; quản trị/điều dưỡng thấy cả phòng khám.
-
-    Quản trị có thể truyền scope=mine để tạm thu hẹp về danh sách của riêng mình.
-    """
-    user = current_user(request)
-    owner_id = user["id"] if scope == "mine" else scope_owner_id(user)
-    return patient_db.list_patients(search, owner_id=owner_id)
-
-@app.get("/api/notifications")
-def get_notifications(request: Request, days_ahead: int = Query(7, ge=0, le=365)):
-    user = current_user(request)
-    return reminder_db.get_notifications(owner_id=scope_owner_id(user), days_ahead=days_ahead)
-
-@app.post("/api/patients")
-def add_patient(patient: PatientCreateModel, request: Request):
-    user = require_write(request)
-    if not patient.name.strip():
-        raise HTTPException(status_code=400, detail="Họ và tên bệnh nhân không được để trống.")
-    data = patient.dict()
-    # Người tạo mặc định là bác sĩ phụ trách, trừ khi quản trị chỉ định người khác.
-    if not (auth_db.is_admin(user) and data.get("owner_doctor_id")):
-        data["owner_doctor_id"] = user["id"]
-    return patient_db.create_patient(data)
-
-@app.get("/api/patients/{patient_id}")
-def get_patient_detail(patient_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user)
-    patient = patient_db.get_patient(patient_id)
-    if not patient:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-    owner = patient.get("owner_doctor_id")
-    owner_user = auth_db.get_user(owner) if owner else None
-    patient["owner_name"] = owner_user["display_name"] if owner_user else None
-    patient["can_edit"] = not auth_db.is_read_only(user)
-    return patient
-
-@app.patch("/api/patients/{patient_id}/owner")
-def reassign_patient(patient_id: str, body: PatientOwnerModel, request: Request):
-    """Bàn giao bệnh nhân sang bác sĩ khác. Quản trị bàn giao được mọi hồ sơ; bác
-    sĩ chỉ chuyển đi hồ sơ đang do mình phụ trách."""
-    user = require_write(request)
-    ensure_patient_access(patient_id, user, write=True)
-    if body.owner_doctor_id:
-        target = auth_db.get_user(body.owner_doctor_id)
-        if not target or target["is_disabled"]:
-            raise HTTPException(status_code=400, detail="Không tìm thấy bác sĩ tiếp nhận.")
-        if target["role"] == "assistant":
-            raise HTTPException(status_code=400, detail="Không thể giao hồ sơ cho tài khoản chỉ có quyền xem.")
-    elif not auth_db.is_admin(user):
-        raise HTTPException(status_code=403, detail="Chỉ quản trị phòng khám mới bỏ gán bác sĩ phụ trách được.")
-    updated = patient_db.set_patient_owner(patient_id, body.owner_doctor_id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-    return updated
-
-@app.delete("/api/patients/{patient_id}")
-def delete_patient(patient_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    if not patient_db.delete_patient(patient_id):
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-    return {"status": "success"}
-
-@app.patch("/api/patients/{patient_id}/note")
-def update_patient_note(patient_id: str, body: QuickNoteModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    patient = patient_db.update_quick_note(patient_id, body.note, body.updated_by or user["display_name"])
-    if not patient:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-    return patient
-
-@app.post("/api/patients/{patient_id}/visits")
-def add_patient_visit(patient_id: str, body: VisitCreateModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    return patient_db.add_visit(patient_id, body.dict())
-
-@app.patch("/api/patients/{patient_id}/visits/{visit_id}")
-def update_patient_visit(patient_id: str, visit_id: str, body: VisitUpdateModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    updated = patient_db.update_visit(patient_id, visit_id, body.dict(exclude_unset=True))
-    if not updated:
-        raise HTTPException(status_code=404, detail="Không tìm thấy kế hoạch điều trị.")
-    return updated
-
-@app.delete("/api/patients/{patient_id}/visits/{visit_id}")
-def delete_patient_visit(patient_id: str, visit_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    if not patient_db.delete_visit(patient_id, visit_id):
-        raise HTTPException(status_code=404, detail="Không tìm thấy lần khám.")
-    return {"success": True}
-
-@app.post("/api/patients/{patient_id}/notes")
-def add_clinical_note(patient_id: str, body: NoteCreateModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    return patient_db.add_note(patient_id, body.dict(exclude_unset=True))
-
-@app.patch("/api/patients/{patient_id}/notes/{note_id}")
-def update_clinical_note(patient_id: str, note_id: str, body: NoteUpdateModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    updated = patient_db.update_note(patient_id, note_id, body.dict(exclude_unset=True))
-    if not updated:
-        raise HTTPException(status_code=404, detail="Không tìm thấy ghi chú.")
-    return updated
-
-@app.delete("/api/patients/{patient_id}/notes/{note_id}")
-def delete_clinical_note(patient_id: str, note_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    if not patient_db.delete_note(patient_id, note_id):
-        raise HTTPException(status_code=404, detail="Không tìm thấy ghi chú.")
-    return {"success": True}
-
-@app.post("/api/patients/{patient_id}/visits/{visit_id}/ai-diagnosis")
-def ai_suggest_diagnosis(patient_id: str, visit_id: str, body: AiDiagnosisRequest, request: Request, x_deepseek_key: Optional[str] = Header(None)):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    if not patient_db.get_visit(patient_id, visit_id):
-        raise HTTPException(status_code=404, detail="Không tìm thấy kế hoạch điều trị.")
-    symptoms = body.symptoms.strip()
-    if not symptoms:
-        raise HTTPException(status_code=400, detail="Cần có triệu chứng để AI gợi ý chẩn đoán.")
-    try:
-        suggestion = agent.run_diagnostic_agent(patient_id, symptoms, search_drug_book, x_deepseek_key or "")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi khi gợi ý chẩn đoán: {str(e)}")
-
-    updated = patient_db.update_visit(patient_id, visit_id, {
-        "diagnosis_primary": suggestion["diagnosis_primary"],
-        "diagnosis_secondary": "\n".join(suggestion["diagnosis_differentials"]),
-    })
-    updated["ai_reasoning"] = suggestion["reasoning"]
-    updated["ai_agent_trace"] = suggestion.get("agent_trace", [])
-    updated["ai_agent_sources"] = suggestion.get("agent_sources", [])
-    return updated
-
-@app.post("/api/patients/{patient_id}/vitals")
-def add_patient_vital(patient_id: str, body: VitalCreateModel, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    return patient_db.add_vital(patient_id, body.vital_type, body.value)
-
-@app.post("/api/patients/{patient_id}/attachments")
-async def upload_patient_attachment(patient_id: str, request: Request, file: UploadFile = File(...)):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-
-    original_name = get_safe_filename(file.filename)
-    ext = os.path.splitext(original_name)[1]
-    stored_name = f"{uuid.uuid4()}{ext}"
-    patient_dir = os.path.join(PATIENT_ATTACHMENTS_DIR, patient_id)
-    os.makedirs(patient_dir, exist_ok=True)
-    save_path = os.path.join(patient_dir, stored_name)
-
-    try:
-        with open(save_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không thể lưu tệp: {str(e)}")
-
-    size_bytes = os.path.getsize(save_path)
-    file_type = (ext.lstrip(".").upper() or "FILE")
-    return patient_db.add_attachment(patient_id, stored_name, original_name, file_type, size_bytes)
-
-@app.get("/api/patients/{patient_id}/attachments/{attachment_id}/download")
-def download_patient_attachment(patient_id: str, attachment_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user)
-    attachment = patient_db.get_attachment(attachment_id)
-    if not attachment or attachment["patient_id"] != patient_id:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tệp đính kèm.")
-    file_path = os.path.join(PATIENT_ATTACHMENTS_DIR, patient_id, attachment["filename"])
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Tệp không tồn tại trên máy chủ.")
-    return FileResponse(file_path, filename=attachment["original_name"])
-
-@app.delete("/api/patients/{patient_id}/attachments/{attachment_id}")
-def delete_patient_attachment(patient_id: str, attachment_id: str, request: Request):
-    user = current_user(request)
-    ensure_patient_access(patient_id, user, write=True)
-    # Kiểm tra tệp thuộc đúng bệnh nhân *trước khi* xóa, nếu không một id lạ sẽ
-    # xóa mất tệp của hồ sơ khác rồi mới báo 404.
-    attachment = patient_db.get_attachment(attachment_id)
-    if not attachment or attachment["patient_id"] != patient_id:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tệp đính kèm.")
-    patient_db.delete_attachment(attachment_id)
-    file_path = os.path.join(PATIENT_ATTACHMENTS_DIR, patient_id, attachment["filename"])
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    return {"status": "success"}
-
-
-# =============================================================================
-# NHẮC LỊCH TÁI KHÁM / THEO DÕI BỆNH NHÂN MÃN TÍNH (reminder engine)
-# =============================================================================
-
-class ReminderCreateModel(BaseModel):
-    patient_id: str
-    kind: str = "followup"
-    title: Optional[str] = None
-    note: Optional[str] = None
-    due_date: Optional[str] = None
-    repeat_interval_days: Optional[int] = None
-    visit_id: Optional[str] = None
-
-
-class ReminderUpdateModel(BaseModel):
-    kind: Optional[str] = None
-    title: Optional[str] = None
-    note: Optional[str] = None
-    due_date: Optional[str] = None
-    repeat_interval_days: Optional[int] = None
-
-
-class SnoozeModel(BaseModel):
-    days: int = 1
-
-
-def _guard_reminder(reminder_id: str, request: Request, write: bool = False):
-    """Trả về (lời nhắc, tài khoản) sau khi đã kiểm tra quyền trên bệnh nhân."""
-    user = current_user(request)
-    reminder = reminder_db.get_reminder(reminder_id)
-    if not reminder:
-        raise HTTPException(status_code=404, detail="Không tìm thấy lời nhắc.")
-    ensure_patient_access(reminder["patient_id"], user, write=write)
-    return reminder, user
-
-
-@app.get("/api/reminders")
-def list_reminders(request: Request,
-                   status: str = Query("pending"),
-                   patient_id: Optional[str] = Query(None),
-                   kind: Optional[str] = Query(None),
-                   days_ahead: Optional[int] = Query(None, ge=0, le=3650),
-                   scope: Optional[str] = Query(None)):
-    user = current_user(request)
-    if patient_id:
-        ensure_patient_access(patient_id, user)
-    owner_id = user["id"] if scope == "mine" else scope_owner_id(user)
-    return reminder_db.list_reminders(
-        owner_id=owner_id, status=status, patient_id=patient_id,
-        kind=kind, days_ahead=days_ahead,
-    )
-
-
-@app.get("/api/reminders/summary")
-def reminders_summary(request: Request, scope: Optional[str] = Query(None)):
-    user = current_user(request)
-    owner_id = user["id"] if scope == "mine" else scope_owner_id(user)
-    summary = reminder_db.summarize(owner_id=owner_id)
-    summary["kinds"] = [{"value": k, "label": v} for k, v in reminder_db.REMINDER_KINDS.items()]
-    return summary
-
-
-@app.post("/api/reminders")
-def create_reminder(payload: ReminderCreateModel, request: Request):
-    user = require_write(request)
-    ensure_patient_access(payload.patient_id, user, write=True)
-    data = payload.dict()
-    data["created_by"] = user["display_name"]
-    data["doctor_id"] = user["id"]
-    return reminder_db.create_reminder(payload.patient_id, data)
-
-
-@app.patch("/api/reminders/{reminder_id}")
-def update_reminder(reminder_id: str, payload: ReminderUpdateModel, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    updated = reminder_db.update_reminder(reminder_id, payload.dict(exclude_unset=True))
-    if not updated:
-        raise HTTPException(status_code=404, detail="Không tìm thấy lời nhắc.")
-    return updated
-
-
-@app.post("/api/reminders/{reminder_id}/complete")
-def complete_reminder(reminder_id: str, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    return reminder_db.complete_reminder(reminder_id)
-
-
-@app.post("/api/reminders/{reminder_id}/snooze")
-def snooze_reminder(reminder_id: str, payload: SnoozeModel, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    return reminder_db.snooze_reminder(reminder_id, payload.days)
-
-
-@app.post("/api/reminders/{reminder_id}/dismiss")
-def dismiss_reminder(reminder_id: str, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    return reminder_db.dismiss_reminder(reminder_id)
-
-
-@app.post("/api/reminders/{reminder_id}/reopen")
-def reopen_reminder(reminder_id: str, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    return reminder_db.reopen_reminder(reminder_id)
-
-
-@app.delete("/api/reminders/{reminder_id}")
-def delete_reminder(reminder_id: str, request: Request):
-    _guard_reminder(reminder_id, request, write=True)
-    reminder_db.delete_reminder(reminder_id)
-    return {"status": "success"}
-
-
-# =============================================================================
-# THỐNG KÊ / DASHBOARD
-# =============================================================================
-
-def _stats_scope(request: Request, scope: Optional[str]) -> Optional[str]:
-    user = current_user(request)
-    return user["id"] if scope == "mine" else scope_owner_id(user)
-
-
-@app.get("/api/stats/overview")
-def stats_overview(request: Request, date_from: Optional[str] = Query(None),
-                   date_to: Optional[str] = Query(None), scope: Optional[str] = Query(None)):
-    owner_id = _stats_scope(request, scope)
-    data = stats_db.overview(owner_id, date_from, date_to)
-    data["reminders"] = reminder_db.summarize(owner_id=owner_id)
-    return data
-
-
-@app.get("/api/stats/diagnoses")
-def stats_diagnoses(request: Request, date_from: Optional[str] = Query(None),
-                    date_to: Optional[str] = Query(None), scope: Optional[str] = Query(None),
-                    limit: int = Query(12, ge=1, le=50)):
-    return stats_db.top_diagnoses(_stats_scope(request, scope), date_from, date_to, limit)
-
-
-@app.get("/api/stats/medications")
-def stats_medications(request: Request, date_from: Optional[str] = Query(None),
-                      date_to: Optional[str] = Query(None), scope: Optional[str] = Query(None),
-                      limit: int = Query(15, ge=1, le=50)):
-    return stats_db.top_medications(_stats_scope(request, scope), date_from, date_to, limit)
-
-
-@app.get("/api/stats/trends")
-def stats_trends(request: Request, date_from: Optional[str] = Query(None),
-                 date_to: Optional[str] = Query(None), scope: Optional[str] = Query(None),
-                 granularity: str = Query("auto")):
-    return stats_db.trends(_stats_scope(request, scope), date_from, date_to, granularity)
-
-
-@app.get("/api/stats/demographics")
-def stats_demographics(request: Request, scope: Optional[str] = Query(None)):
-    return stats_db.demographics(_stats_scope(request, scope))
-
-
-@app.get("/api/stats/doctors")
-def stats_by_doctor(request: Request, date_from: Optional[str] = Query(None),
-                    date_to: Optional[str] = Query(None)):
-    require_admin(request)
-    return stats_db.by_doctor(date_from, date_to)
-
-
-# =============================================================================
-# XUẤT HỒ SƠ RA PDF
-# =============================================================================
-
-class ReferralModel(BaseModel):
-    destination: Optional[str] = None
-    destination_address: Optional[str] = None
-    reason: Optional[str] = None
-    condition_on_transfer: Optional[str] = None
-    recommendation: Optional[str] = None
-    transport: Optional[str] = None
-    escort: Optional[str] = None
-    insurance_number: Optional[str] = None
-    doctor_name: Optional[str] = None
-    diagnosis: Optional[str] = None
-    clinical_signs: Optional[str] = None
-    lab_results: Optional[str] = None
-    treatment_given: Optional[str] = None
-    visit_id: Optional[str] = None
-
-
-def _pdf_response(content: bytes, filename: str) -> Response:
-    """Trả PDF kèm tên tệp mã hóa RFC 5987 để dấu tiếng Việt không vỡ trên header."""
-    from urllib.parse import quote
-    ascii_name = filename.encode("ascii", "ignore").decode() or "ho-so.pdf"
-    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": disposition},
-    )
-
-
-def _slug(text: str) -> str:
-    """Tên tệp không dấu, an toàn trên mọi hệ tệp."""
-    import unicodedata
-    normalized = unicodedata.normalize("NFD", str(text or ""))
-    stripped = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    stripped = stripped.replace("đ", "d").replace("Đ", "D")
-    return re.sub(r"[^A-Za-z0-9]+", "-", stripped).strip("-") or "ho-so"
-
-
-@app.get("/api/patients/{patient_id}/export/pdf")
-def export_patient_pdf(patient_id: str, request: Request,
-                       doc_type: str = Query("full", pattern="^(full|visit)$"),
-                       visit_id: Optional[str] = Query(None)):
-    """Bệnh án tổng hợp (doc_type=full) hoặc phiếu khám một lần khám (doc_type=visit)."""
-    user = current_user(request)
-    ensure_patient_access(patient_id, user)
-    patient = patient_db.get_patient(patient_id)
-    if not patient:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-
-    if doc_type == "visit":
-        visit = patient_db.get_visit(patient_id, visit_id) if visit_id else None
-        if not visit:
-            # Không chỉ định lần khám thì in lần gần nhất — thao tác một cú bấm.
-            visits = patient.get("visits") or []
-            if not visits:
-                raise HTTPException(status_code=400, detail="Bệnh nhân chưa có lần khám nào để xuất phiếu.")
-            visit = visits[0]
-        content = pdf_export.build_visit_record(patient, visit, user["display_name"])
-        filename = f"phieu-kham-{_slug(patient['name'])}-{visit.get('visit_date', '')[:10]}.pdf"
-    else:
-        reminders = reminder_db.list_reminders(patient_id=patient_id, status="pending", sync=True)
-        content = pdf_export.build_full_record(patient, reminders, user["display_name"])
-        filename = f"benh-an-{patient['code']}-{_slug(patient['name'])}.pdf"
-
-    return _pdf_response(content, filename)
-
-
-@app.post("/api/patients/{patient_id}/export/referral")
-def export_patient_referral(patient_id: str, payload: ReferralModel, request: Request):
-    """Giấy chuyển tuyến khám bệnh, chữa bệnh."""
-    user = current_user(request)
-    ensure_patient_access(patient_id, user)
-    patient = patient_db.get_patient(patient_id)
-    if not patient:
-        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ bệnh nhân.")
-
-    visit = None
-    if payload.visit_id:
-        visit = patient_db.get_visit(patient_id, payload.visit_id)
-    if visit is None:
-        visits = patient.get("visits") or []
-        visit = visits[0] if visits else None
-
-    referral = payload.dict()
-    referral.setdefault("doctor_name", None)
-    if not referral.get("doctor_name"):
-        referral["doctor_name"] = user["display_name"]
-
-    content = pdf_export.build_referral(patient, visit, referral, user["display_name"])
-    return _pdf_response(content, f"giay-chuyen-tuyen-{patient['code']}-{_slug(patient['name'])}.pdf")
-
-
 def get_safe_filename(filename: str) -> str:
     """Sanitizes filename to prevent directory traversal."""
     return os.path.basename(filename).replace("..", "")
 
-@app.post("/api/upload")
-async def upload_document(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+@app.post("/api/documents/ingest")
+async def ingest_document(request: Request, file: UploadFile = File(...)):
+    """
+    Bác sĩ tự tải PDF lên — không cần ai viết parser riêng cho tài liệu này.
 
-    safe_name = get_safe_filename(file.filename)
-    save_path = os.path.join(config.UPLOAD_DIR, safe_name)
-
-    # Save PDF locally
+    Trả về ngay {job_id, doc_name}; việc đọc/OCR/cắt đoạn/nạp chỉ mục chạy ở
+    một luồng nền (có thể mất vài phút với PDF scan dày), tiến độ theo dõi
+    qua GET /api/documents/ingest/{job_id}/events (SSE). Xem
+    backend/generic_ingest.py để biết luồng nạp — dùng lại đúng
+    ingest_book.ingest() nên tài liệu ra đời có đủ mọi tính năng của Thư viện
+    (tải xuống, xoá, tô sáng, Đối chiếu, trình đọc trang) mà không cần đụng gì
+    tới các endpoint đó.
+    """
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ tệp PDF.")
     try:
-        with open(save_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e)}")
-
+        job = ingest_jobs.reserve(file.filename, lambda active:
+            generic_ingest.slugify_doc_name(file.filename, active))
+    except ValueError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    job_id, doc_name = job["job_id"], job["doc_name"]
+    user = current_user(request)
+    # Quản trị tải lên = tài liệu chung cho cả phòng khám; bác sĩ tải lên = kho
+    # riêng của chính tài khoản đó.
+    visibility = (documents.VISIBILITY_SHARED if auth_db.is_admin(user)
+                  else documents.VISIBILITY_PRIVATE)
+    # Manifest tạm ghi TRƯỚC khi tệp chạm đĩa: tên tài liệu lấy từ tên tệp nên
+    # đoán được, và không có manifest thì middleware coi là tài liệu chung —
+    # người khác tải được PDF riêng trong lúc nó còn xếp hàng chờ nạp.
+    stub = documents.new_manifest(doc_name=doc_name, doc_title=os.path.splitext(file.filename)[0],
+                                  source_pdf=doc_name, pdf_pages=0, parser="generic")
+    stub.update(owner_id=user["id"], visibility=visibility, uploaded_by=user.get("display_name"))
+    documents.save_manifest(stub)
+    save_path = os.path.join(config.UPLOAD_DIR, doc_name)
     try:
-        # 1. Process document through Parent-Child & Summary Indexer
-        processed_docs = process_pdf_parent_child_summary(save_path)
-        if not processed_docs:
-            if os.path.exists(save_path):
-                os.remove(save_path)
-            raise HTTPException(status_code=400, detail="No readable text found in the PDF.")
-
-        # 2. Cache full page text on disk for reader lookup
-        loader = SimpleLoader()
-        raw_pages = loader.load_pdf(save_path)
-        
-        cache_file = os.path.join(PAGES_CACHE_DIR, f"{safe_name}.json")
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump({str(p.metadata.get("page", 0) + 1): p.page_content for p in raw_pages}, f, ensure_ascii=False, indent=2)
-
-        # 3. Add chunks to vector index
-        db.add_chunks(processed_docs)
-
-        return {
-            "status": "success",
-            "filename": safe_name,
-            "pages": len(raw_pages),
-            "chunks": len(processed_docs)
-        }
-
+        size = 0
+        with open(save_path, "xb") as buffer:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > generic_ingest.MAX_PDF_BYTES:
+                    raise ValueError("PDF vượt giới hạn 64 MiB.")
+                buffer.write(chunk)
+        if size == 0:
+            raise ValueError("Tệp PDF rỗng.")
+        generic_ingest.validate_pdf(save_path)
+    except (ValueError, FileExistsError) as e:
+        ingest_jobs.discard(job_id)
+        _remove_if_exists(documents.manifest_path(doc_name))
+        if not isinstance(e, FileExistsError) and os.path.exists(save_path):
+            os.remove(save_path)
+        raise HTTPException(status_code=400 if not isinstance(e, FileExistsError) else 409, detail=str(e))
     except Exception as e:
-        # Cleanup file if indexing failed
+        ingest_jobs.discard(job_id)
+        _remove_if_exists(documents.manifest_path(doc_name))
         if os.path.exists(save_path):
             os.remove(save_path)
-        raise HTTPException(status_code=500, detail=f"Error indexing document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Không lưu được tệp đã tải lên: {e}")
+
+    doc_title = os.path.splitext(file.filename)[0]
+    uploader = user.get("display_name")
+
+    def _run():
+        try:
+            def warn(page_num):
+                current = ingest_jobs.get(job_id)
+                warnings = current["warnings"] if current else []
+                ingest_jobs.update(job_id, warnings=warnings + [page_num])
+            generic_ingest.ingest_generic_pdf(
+                doc_name, save_path, doc_title,
+                progress_cb=ingest_jobs.make_progress_cb(job_id),
+                vector_store=db,
+                uploaded_by=uploader,
+                warning_cb=warn,
+                owner_id=user["id"],
+                visibility=visibility,
+            )
+            _invalidate_book_metadata()
+            ingest_jobs.update(job_id, status="done", stage="Hoàn tất")
+        except Exception as e:
+            print(f"[ingest] Lỗi nạp '{doc_name}': {type(e).__name__}: {e}")
+            ingest_jobs.update(job_id, status="error", error=str(e))
+            try:
+                generic_ingest.cleanup_orphans(db)
+            except Exception as cleanup_error:
+                print(f"[ingest] Chưa dọn được chỉ mục dở: {cleanup_error}")
+            if not documents.load_manifest(doc_name) and os.path.exists(save_path):
+                os.remove(save_path)
+
+    ingest_jobs.submit(job_id, _run)
+    return {"job_id": job_id, "doc_name": doc_name, "visibility": visibility}
+
+
+def _remove_if_exists(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+@app.get("/api/documents/ingest/{job_id}/events")
+async def ingest_progress_events(job_id: str):
+    async def event_stream():
+        last_snapshot = None
+        ticks = 0
+        while True:
+            job = ingest_jobs.get(job_id)
+            if job is None:
+                yield _sse("error", {"message": "Tiến trình nạp đã mất (máy chủ có thể đã khởi động lại). Hãy tải lại PDF."})
+                return
+            snapshot = (job["status"], job["stage"], job["current"], job["total"], tuple(job["warnings"]))
+            if snapshot != last_snapshot:
+                yield _sse("progress", job)
+                last_snapshot = snapshot
+            if job["status"] in ("done", "error"):
+                return
+            ticks += 1
+            if ticks % 37 == 0:
+                yield ":\n\n"
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+@app.get("/api/index/health")
+def index_health(request: Request):
+    health = db.health()
+    hidden = documents.hidden_doc_names(current_user(request))
+    health["docs"] = [d for d in health["docs"] if d["doc_name"] not in hidden]
+    return health
+
 
 @app.get("/api/documents")
-def list_documents():
+def list_documents(request: Request):
+    user = current_user(request)
     try:
-        docs = db.list_documents()
+        hidden = documents.hidden_doc_names(user)
+        docs = [d for d in db.list_documents() if d["doc_name"] not in hidden]
         # Enrich with the upload file's mtime (proxy for "uploaded_at") for library sorting —
         # read from disk rather than the vector store so existing indexes don't need migration.
         for doc in docs:
             path = documents.upload_path(doc["doc_name"])
             doc["uploaded_at"] = os.path.getmtime(path) if os.path.exists(path) else None
+            manifest = documents.load_manifest(doc["doc_name"]) or {}
+            doc["source_type"] = "self_uploaded" if manifest.get("parser") == "generic" else "reference"
+            doc["uploaded_by"] = manifest.get("uploaded_by") if doc["source_type"] == "self_uploaded" else None
+            doc["visibility"] = documents.visibility_of(manifest)
+            doc["can_delete"] = documents.can_delete(user, doc["doc_name"])
         return docs
+    except IndexUnavailable as e:
+        raise _index_http_error(e)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1482,14 +1032,20 @@ def download_document(doc_name: str, request: Request, ticket: Optional[str] = N
     )
 
 @app.delete("/api/documents/{doc_name}")
-def delete_document(doc_name: str):
+def delete_document(doc_name: str, request: Request):
     safe_name = get_safe_filename(doc_name)
+    # Middleware đã chặn tài liệu riêng của người khác (404). Ở đây chỉ còn một
+    # trường hợp: tài liệu chung, chỉ quản trị phòng khám được xoá.
+    if not documents.can_delete(current_user(request), safe_name):
+        raise HTTPException(status_code=403, detail="Chỉ quản trị phòng khám mới xoá được tài liệu dùng chung.")
+    if ingest_jobs.is_active(safe_name):
+        raise HTTPException(status_code=409, detail="Tài liệu đang nạp; hãy đợi hoàn tất rồi xoá.")
 
     # Delete from vector store
     try:
         db.delete_document(safe_name)
     except Exception as e:
-        print(f"Error removing from vector index: {e}")
+        raise HTTPException(status_code=503, detail="Không xóa được chỉ mục; tài liệu vẫn được giữ để thử lại.") from e
 
     # Delete local files. documents.upload_path() đọc source_pdf từ manifest nên
     # phải gọi TRƯỚC khi xoá manifest, nếu không sẽ trỏ nhầm đường dẫn.
@@ -1519,6 +1075,7 @@ def delete_document(doc_name: str):
         library_db.delete_highlights_for_document(safe_name)
     except Exception as e:
         print(f"Error removing highlights for document: {e}")
+    _invalidate_book_metadata()
 
     return {"status": "success", "message": f"Document '{safe_name}' deleted."}
 
@@ -1541,9 +1098,13 @@ def delete_document(doc_name: str):
 # vì lần đó phải nạp model mất 21,7s — một trần 10s sẽ giết đúng lần tra đầu
 # ngày của bác sĩ. Nên tách làm hai trần riêng.
 SEARCH_WARM_TIMEOUT_S = 5.0    # tìm khi model đã nạp: 29 lần lần chậm nhất đo được
+SCOPED_SEARCH_TIMEOUT_S = 15.0
 SEARCH_COLD_TIMEOUT_S = 60.0   # tìm khi còn phải nạp model: 2,8 lần số đo được
 SEARCH_TOKEN_GAP_TIMEOUT_S = 15.0  # im lặng giữa hai mẩu chữ: 9 lần chữ-đầu chậm nhất
 SEARCH_TOTAL_TIMEOUT_S = 60.0  # trần cứng cả lần tra: 16 lần lần chậm nhất đo được
+# Phần "Tìm thêm trên web": lập kế hoạch 12s + gọi dịch vụ ngoài 10s (song
+# song), cộng dư. Hết trần thì trả lời bằng sách như khi không bật web.
+WEB_PHASE_TIMEOUT_S = 25.0
 
 
 def _sse(event: str, payload: Any) -> str:
@@ -1551,10 +1112,56 @@ def _sse(event: str, payload: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _library_coverage_note(hidden: Optional[set] = None) -> str:
+    """Liệt kê ngắn gọn các tài liệu đang có trong kho, đọc động từ manifest.
+
+    Trước đây thông báo "0 kết quả" hard-code "Dược thư hiện chỉ có quyển 1,
+    chữ A đến H" — đúng lúc viết, nhưng sai ngay khi nạp thêm Quyển 2 vì không
+    ai nhớ sửa câu này. Đọc động từ documents.list_manifests() thì không thể
+    lạc hậu theo kiểu đó nữa: nạp thêm sách nào, câu này tự nhắc đúng sách đó.
+    """
+    parts: List[str] = []
+    for m in documents.list_manifests():
+        if hidden and m.get("doc_name") in hidden:
+            continue
+        title = m.get("short_title") or m.get("doc_title") or m.get("doc_name")
+        vol = m.get("volume")
+        label = f"{title} Q.{vol}" if vol else str(title)
+        coverage = m.get("coverage")
+        if coverage:
+            label += f" ({coverage})"
+        parts.append(label)
+    return "; ".join(parts)
+
+
 # Chat Tab Search & Answer endpoint (uses LLM)
+# Cửa sổ trang coi là "gần trang đang đọc" khi hỏi về một tài liệu.
+NEAR_PAGE_WINDOW = 15
+
+
+def _retrieve(query: str, request: "QueryRequest", hidden: set):
+    """Tra toàn kho, hoặc chỉ trong một tài liệu khi bác sĩ bấm "Hỏi về tài liệu này".
+
+    Khi hỏi về một tài liệu: lấy rộng hơn rồi đẩy các đoạn nằm gần trang đang
+    đọc lên trước — bác sĩ hỏi ngay cạnh trang đang mở thì thường hỏi về chính
+    chuyên luận đó. Thứ tự trong từng nhóm giữ nguyên theo điểm hợp nhất.
+    """
+    doc = (request.doc_name or "").strip()
+    if not doc:
+        return db.search(query, top_k=5, exclude_doc_names=hidden)
+    hits = db.search(query, top_k=8, doc_names=[get_safe_filename(doc)], exclude_doc_names=hidden)
+    if request.near_page:
+        near = [h for h in hits if abs((h.get("page_num") or 0) - request.near_page) <= NEAR_PAGE_WINDOW]
+        far = [h for h in hits if h not in near]
+        hits[:] = near + far
+    del hits[5:]
+    return hits
+
+
 @app.post("/api/search")
 async def search_and_answer(
     request: QueryRequest,
+    http_request: Request,
     x_deepseek_key: Optional[str] = Header(None),
 ):
     """Tra cứu y văn kèm câu trả lời của mô hình, trả về theo luồng SSE.
@@ -1584,6 +1191,8 @@ async def search_and_answer(
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     api_key = x_deepseek_key or ""
+    user = current_user(http_request)
+    hidden = documents.hidden_doc_names(user)
 
     async def event_stream():
         timer = StageTimer("search")
@@ -1591,6 +1200,8 @@ async def search_and_answer(
         answer_parts: List[str] = []
         formatted_sources: List[SearchResultItem] = []
         started = time.perf_counter()
+        log_id: Optional[str] = None
+        verify: Optional[dict] = None
 
         try:
             # ---------- 1. Khâu tìm ----------
@@ -1600,13 +1211,17 @@ async def search_and_answer(
             # hoặc vô dụng cho các lần sau.
             warm = db.is_warm()
             budget = SEARCH_WARM_TIMEOUT_S if warm else SEARCH_COLD_TIMEOUT_S
+            if request.doc_name:
+                # Lọc theo một tài liệu: lượt đầu phải dựng tập id được phép trên
+                # toàn kho (đo ~2,8s trên máy không tải), các lượt sau ~0,2s.
+                budget = max(budget, SCOPED_SEARCH_TIMEOUT_S)
             if not warm:
                 yield _sse("status", {"phase": "loading_model",
                                       "message": "Đang nạp mô hình tra cứu y văn, lần tra đầu tiên chậm hơn…"})
             try:
                 with timer.stage("retrieval"):
                     sources = await asyncio.wait_for(
-                        asyncio.to_thread(lambda: enrich_sources(db.search(query, top_k=5))),
+                        asyncio.to_thread(lambda: enrich_sources(_retrieve(query, request, hidden))),
                         timeout=budget,
                     )
             except asyncio.TimeoutError:
@@ -1619,16 +1234,73 @@ async def search_and_answer(
                 )
                 return
 
+            if sources.degraded:
+                yield _sse("status", {"phase": "bm25_only", "degraded": True,
+                                      "code": "EMBEDDING_UNAVAILABLE",
+                                      "message": "Mô hình tìm theo nghĩa chưa sẵn sàng; đang tra bằng từ khóa BM25."})
             formatted_sources = [to_search_result(s) for s in sources]
-            yield _sse("sources", {"sources": [s.dict() for s in formatted_sources]})
+            yield _sse("sources", {"sources": [s.dict() for s in formatted_sources],
+                                   "degraded": sources.degraded, "reason": sources.reason})
+            if sources.normalized is not None:
+                # Bác sĩ gõ không dấu / quên bật bộ gõ: nói rõ đã tra theo câu nào,
+                # để một lần khôi phục sai ("trị nam" thay vì "trị nấm") không bị giấu.
+                yield _sse("query_normalized", sources.normalized.as_dict())
+            if sources.understood:
+                # Thuốc nào, mục nào, điều kiện nào, viết tắt nào — hiện cho bác
+                # sĩ để một lần hiểu sai ("THA" thành gì khác) không bị giấu.
+                yield _sse("query_understood", sources.understood)
+            if sources.coverage:
+                # Bảng kiểm từng cặp (thuốc, điều kiện) + câu nguyên văn trong
+                # sách — giao diện vẽ khối liều thẳng từ đây, không qua mô hình.
+                yield _sse("coverage", {"items": sources.coverage})
+            try:
+                log_id = await asyncio.to_thread(
+                    feedback_db.log_query, user["id"], query,
+                    sources.normalized.text if sources.normalized is not None else None,
+                    request.doc_name, list(sources),
+                )
+            except Exception as e:
+                print(f"Warning: không ghi được nhật ký tra cứu: {e}")
 
-            if not sources:
+            # ---------- 1b. Tìm thêm trên web (chỉ khi bác sĩ bật) ----------
+            #
+            # Trang sách đã gửi đi ở trên nên bác sĩ đọc được ngay trong lúc chờ
+            # web. Xong thì gửi lại danh sách gộp: sách trước, web sau, chung
+            # một dãy số [n] với câu trả lời.
+            web_context: List[dict] = []
+            if request.web:
+                if not web_tools.available_tools():
+                    yield _sse("status", {"phase": "web_disabled",
+                                          "message": "Máy chủ chưa bật tìm kiếm web; chỉ trả lời theo sách."})
+                else:
+                    yield _sse("status", {"phase": "web_search",
+                                          "message": "Đang tìm thêm trên web (PubMed, nhãn thuốc FDA, trang y khoa)…"})
+                    with timer.stage("web"):
+                        try:
+                            web = await asyncio.wait_for(
+                                asyncio.to_thread(web_tools.gather, query, api_key or config.DEEPSEEK_API_KEY),
+                                timeout=WEB_PHASE_TIMEOUT_S,
+                            )
+                        except asyncio.TimeoutError:
+                            web = {"sources": [], "calls": [], "errors": ["hết thời gian"]}
+                    web_context = [web_hit_to_source(h) for h in web["sources"]]
+                    formatted_sources += [to_web_result(s) for s in web_context]
+                    yield _sse("sources", {"sources": [s.dict() for s in formatted_sources],
+                                           "degraded": sources.degraded, "reason": sources.reason,
+                                           "web_calls": web["calls"]})
+                    if not web_context:
+                        yield _sse("status", {"phase": "web_empty",
+                                              "message": "Không lấy được kết quả web; câu trả lời chỉ dựa trên sách."})
+
+            if not sources and not web_context:
                 outcome = "no_sources"
+                coverage_note = _library_coverage_note(hidden)
                 yield _error_event(
-                    "Không tìm thấy đoạn y văn nào khớp câu hỏi này. "
-                    "Lưu ý Dược thư trong kho hiện chỉ có quyển 1, chữ A đến H.",
+                    ("BM25 đang chạy do mô hình embedding chưa sẵn sàng; chưa tìm thấy "
+                     "đoạn khớp từ khóa" if sources.degraded else
+                     "Không tìm thấy đoạn y văn nào khớp câu hỏi này trong các tài liệu đã nạp") + (f" ({coverage_note})" if coverage_note else "") + ".",
                     degraded=False,
-                    detail="db.search trả về 0 kết quả",
+                    detail="NO_MATCH: chỉ mục có dữ liệu nhưng truy vấn không khớp",
                 )
                 return
 
@@ -1642,7 +1314,8 @@ async def search_and_answer(
             # asyncio.wait_for hủy phần chờ nhưng KHÔNG giết được thread đang
             # nằm trong socket. Thread đó tự thoát khi httpx hết read timeout,
             # nên trần ở llm_client phải cùng cỡ với trần ở đây.
-            pull = _sync_iter_puller(stream_answer(query, sources, api_key))
+            pull = _sync_iter_puller(stream_answer(query, list(sources) + web_context, api_key,
+                                                   coverage_notes(sources.coverage)))
             with timer.stage("llm"):
                 while True:
                     # KHÔNG gọi http_request.is_disconnected() ở đây. Đã thử và
@@ -1707,23 +1380,44 @@ async def search_and_answer(
             # những dòng trông như câu trả lời y khoa mà thật ra là thông báo lỗi,
             # và "câu hỏi tương tự" đem chúng ra dùng lại.
             answer = "".join(answer_parts)
+
+            # ---------- 2b. Cổng số liệu ----------
+            #
+            # Mọi cặp (số, đơn vị) trong câu trả lời phải có trong đúng đoạn [n]
+            # mà câu đó trích, hoặc ít nhất trên cùng trang sách. Không có thì
+            # báo cho bác sĩ, không lặng lẽ sửa chữ nào. Xem answer_verify.py.
+            if answer.strip():
+                with timer.stage("verify"):
+                    try:
+                        verify = await asyncio.to_thread(
+                            answer_verify.verify_answer, answer,
+                            [s.dict() for s in formatted_sources], _book_page_text,
+                        )
+                        yield _sse("verify", verify)
+                    except Exception as e:
+                        print(f"Warning: cổng số liệu lỗi: {type(e).__name__}: {e}")
+
             if answer.strip():
                 with timer.stage("history"):
                     try:
                         await asyncio.to_thread(
                             library_db.add_history,
+                            owner_id=user["id"],
                             query=query,
                             answer=answer,
                             sources=[s.dict() for s in formatted_sources],
                             embedding=db.embed_text(query),
                             embedding_model=db.embedding_model,
-                            created_by=request.created_by,
+                            created_by=user.get("display_name"),
                         )
                     except Exception as e:
                         print(f"Warning: failed to log search history: {e}")
 
-            yield _sse("done", {"timings": timer.timings(), "outcome": outcome})
+            yield _sse("done", {"timings": timer.timings(), "outcome": outcome, "log_id": log_id})
 
+        except IndexUnavailable as e:
+            outcome = e.code
+            yield _error_event(str(e), degraded=False, detail=e.code)
         except asyncio.CancelledError:
             # Bác sĩ bấm nút hủy hoặc đóng tab. Không phải lỗi.
             outcome = "cancelled"
@@ -1740,6 +1434,11 @@ async def search_and_answer(
             # Trong finally để lần hỏng và lần bị hủy cũng để lại số đo — đó
             # chính là những lần cần biết khâu nào đã ngốn hết thời gian.
             timer.log(f"q={len(query)}c outcome={outcome}")
+            if log_id:
+                try:
+                    feedback_db.finish_query(log_id, outcome, verify)
+                except Exception as e:
+                    print(f"Warning: không cập nhật được nhật ký tra cứu: {e}")
 
     return StreamingResponse(
         event_stream(),
@@ -1752,6 +1451,40 @@ async def search_and_answer(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _book_page_text(source: dict) -> str:
+    """Văn bản OCR của cả trang sách chứa nguồn — cho cổng số liệu tìm con số
+    nằm ngoài đoạn đã cắt làm ngữ cảnh. Nguồn web thì không có trang."""
+    if source.get("kind") == "web" or not source.get("doc_name") or not source.get("page_num"):
+        return ""
+    return get_page_content(source["doc_name"], int(source["page_num"])).get("text", "")
+
+
+class FeedbackRequest(BaseModel):
+    log_id: str
+    kind: str
+    source_index: Optional[int] = None
+    note: Optional[str] = None
+
+
+@app.post("/api/feedback")
+def post_feedback(body: FeedbackRequest, http_request: Request):
+    """Bác sĩ đánh giá câu trả lời, mở một trang trích dẫn, hoặc báo trang đó sai."""
+    user = current_user(http_request)
+    try:
+        ok = feedback_db.add_feedback(body.log_id, user["id"], body.kind,
+                                      body.source_index, (body.note or "")[:500] or None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lượt tra cứu này.")
+    return {"ok": True}
+
+
+@app.get("/api/feedback/summary")
+def get_feedback_summary(http_request: Request):
+    return feedback_db.summary(current_user(http_request)["id"])
 
 
 def _error_event(message: str, degraded: bool, detail: str) -> str:
@@ -1785,8 +1518,12 @@ def _sync_iter_puller(generator):
     return pull
 
 # Literature Search Tab endpoint (local retrieval only, NO LLM)
+def _index_http_error(exc):
+    return HTTPException(status_code=503, detail={"code": exc.code, "message": str(exc)})
+
+
 @app.post("/api/literature-search", response_model=QueryResponse)
-def literature_search(request: QueryRequest):
+def literature_search(request: QueryRequest, http_request: Request):
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
@@ -1795,7 +1532,8 @@ def literature_search(request: QueryRequest):
     try:
         # Retrieve matching document contexts using hybrid search (dense + BM25 + RRF)
         with timer.stage("retrieval"):
-            sources = enrich_sources(db.search(query, top_k=10))
+            hidden = documents.hidden_doc_names(current_user(http_request))
+            sources = enrich_sources(db.search(query, top_k=10, exclude_doc_names=hidden))
 
         # Map to Pydantic structure
         formatted_sources = [to_search_result(s) for s in sources]
@@ -1807,9 +1545,12 @@ def literature_search(request: QueryRequest):
         # sai về cách kết quả được xếp hạng — tệ hơn là không nói gì, vì bác sĩ
         # tin vào thứ tự dựa trên một khâu không còn tồn tại.
         return QueryResponse(
-            answer="Kết quả tìm kiếm y văn (xếp hạng bằng hợp nhất RRF của tìm theo nghĩa và BM25):",
+            answer=("Đang tra bằng BM25 vì mô hình embedding chưa sẵn sàng. " if sources.degraded else "")
+                   + "Kết quả tìm kiếm y văn:",
             sources=formatted_sources
         )
+    except IndexUnavailable as e:
+        raise _index_http_error(e)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Literature search failed: {str(e)}")
     finally:
@@ -1833,39 +1574,43 @@ class HighlightUpdateRequest(BaseModel):
     color: Optional[str] = None
 
 @app.get("/api/documents/{doc_name}/highlights")
-def list_document_highlights(doc_name: str, page_num: Optional[int] = Query(None)):
-    return library_db.list_highlights(get_safe_filename(doc_name), page_num)
+def list_document_highlights(doc_name: str, request: Request, page_num: Optional[int] = Query(None)):
+    return library_db.list_highlights(current_user(request)["id"], get_safe_filename(doc_name), page_num)
 
 @app.post("/api/documents/{doc_name}/highlights")
-def create_document_highlight(doc_name: str, payload: HighlightCreateRequest):
+def create_document_highlight(doc_name: str, payload: HighlightCreateRequest, request: Request):
     quote = (payload.quote or "").strip()
     if not quote:
         raise HTTPException(status_code=400, detail="Đoạn văn bản được tô sáng không được để trống.")
     if payload.end_offset <= payload.start_offset:
         raise HTTPException(status_code=400, detail="Vị trí đoạn tô sáng không hợp lệ.")
-    return library_db.create_highlight(get_safe_filename(doc_name), payload.dict())
+    user = current_user(request)
+    data = dict(payload.dict(), created_by=user.get("display_name"))
+    return library_db.create_highlight(user["id"], get_safe_filename(doc_name), data)
 
 @app.get("/api/highlights")
-def list_all_highlights(q: Optional[str] = Query(None)):
+def list_all_highlights(request: Request, q: Optional[str] = Query(None)):
     """Toàn bộ ghi chú của bác sĩ trên mọi tài liệu (dùng cho bảng 'Ghi chú của tôi')."""
+    owner = current_user(request)["id"]
     if q and q.strip():
-        return library_db.search_highlights(q)
-    return library_db.list_highlights()
+        return library_db.search_highlights(owner, q)
+    return library_db.list_highlights(owner)
 
 @app.get("/api/highlights/counts")
-def highlight_counts():
-    return library_db.count_highlights_by_document()
+def highlight_counts(request: Request):
+    return library_db.count_highlights_by_document(current_user(request)["id"])
 
 @app.patch("/api/highlights/{highlight_id}")
-def update_highlight(highlight_id: str, payload: HighlightUpdateRequest):
-    updated = library_db.update_highlight(highlight_id, payload.dict(exclude_unset=True))
+def update_highlight(highlight_id: str, payload: HighlightUpdateRequest, request: Request):
+    updated = library_db.update_highlight(current_user(request)["id"], highlight_id,
+                                          payload.dict(exclude_unset=True))
     if not updated:
         raise HTTPException(status_code=404, detail="Không tìm thấy ghi chú này.")
     return updated
 
 @app.delete("/api/highlights/{highlight_id}")
-def delete_highlight(highlight_id: str):
-    if not library_db.delete_highlight(highlight_id):
+def delete_highlight(highlight_id: str, request: Request):
+    if not library_db.delete_highlight(current_user(request)["id"], highlight_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy ghi chú này.")
     return {"status": "success"}
 
@@ -1874,33 +1619,39 @@ class DocNoteRequest(BaseModel):
     updated_by: Optional[str] = None
 
 @app.get("/api/documents/{doc_name}/note")
-def get_document_note(doc_name: str):
-    return library_db.get_doc_note(get_safe_filename(doc_name))
+def get_document_note(doc_name: str, request: Request):
+    return library_db.get_doc_note(current_user(request)["id"], get_safe_filename(doc_name))
 
 @app.put("/api/documents/{doc_name}/note")
-def save_document_note(doc_name: str, payload: DocNoteRequest):
-    return library_db.save_doc_note(get_safe_filename(doc_name), payload.content, payload.updated_by)
+def save_document_note(doc_name: str, payload: DocNoteRequest, request: Request):
+    user = current_user(request)
+    return library_db.save_doc_note(user["id"], get_safe_filename(doc_name), payload.content,
+                                    user.get("display_name"))
+
+# Lịch sử tra cứu là của từng tài khoản: mọi truy vấn lọc theo id do máy chủ
+# lấy từ phiên đăng nhập. Trường created_by trong body chỉ còn để tương thích
+# với giao diện cũ và không được dùng để phân quyền.
 
 @app.get("/api/search-history")
-def get_search_history(q: Optional[str] = Query(None), limit: int = Query(100, ge=1, le=500)):
-    return library_db.list_history(q, limit)
+def get_search_history(request: Request, q: Optional[str] = Query(None), limit: int = Query(100, ge=1, le=500)):
+    return library_db.list_history(current_user(request)["id"], q, limit)
 
 @app.get("/api/search-history/{record_id}")
-def get_search_history_item(record_id: str):
-    record = library_db.get_history(record_id)
+def get_search_history_item(record_id: str, request: Request):
+    record = library_db.get_history(current_user(request)["id"], record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Không tìm thấy lượt tra cứu này.")
     return record
 
 @app.delete("/api/search-history/{record_id}")
-def delete_search_history_item(record_id: str):
-    if not library_db.delete_history(record_id):
+def delete_search_history_item(record_id: str, request: Request):
+    if not library_db.delete_history(current_user(request)["id"], record_id):
         raise HTTPException(status_code=404, detail="Không tìm thấy lượt tra cứu này.")
     return {"status": "success"}
 
 @app.delete("/api/search-history")
-def clear_search_history():
-    library_db.clear_history()
+def clear_search_history(request: Request):
+    library_db.clear_history(current_user(request)["id"])
     return {"status": "success"}
 
 class SimilarQuestionsRequest(BaseModel):
@@ -1908,13 +1659,14 @@ class SimilarQuestionsRequest(BaseModel):
     limit: int = 4
 
 @app.post("/api/search-history/similar")
-def find_similar_questions(request: SimilarQuestionsRequest):
+def find_similar_questions(request: SimilarQuestionsRequest, http_request: Request):
     """Gợi ý câu hỏi gần nghĩa đã tra cứu trước đây, kèm câu trả lời cũ để dùng lại."""
     query = request.query.strip()
     if len(query) < 4:
         return []
     embedding = db.embed_text(query)
     return library_db.find_similar_questions(
+        current_user(http_request)["id"],
         query,
         embedding,
         limit=max(1, min(request.limit, 10)),
@@ -1927,7 +1679,7 @@ class CompareRequest(BaseModel):
     chunks_per_doc: int = 4
 
 @app.post("/api/compare")
-def compare_documents(request: CompareRequest, x_deepseek_key: Optional[str] = Header(None)):
+def compare_documents(request: CompareRequest, http_request: Request, x_deepseek_key: Optional[str] = Header(None)):
     """Đối chiếu cùng một câu hỏi lâm sàng giữa nhiều tài liệu/guideline."""
     query = request.query.strip()
     if not query:
@@ -1938,16 +1690,23 @@ def compare_documents(request: CompareRequest, x_deepseek_key: Optional[str] = H
     if len(doc_names) > 5:
         raise HTTPException(status_code=400, detail="Chỉ đối chiếu tối đa 5 tài liệu cùng lúc.")
 
+    user = current_user(http_request)
+    for name in doc_names:
+        if not documents.can_view(user, get_safe_filename(name)):
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy tài liệu: {name}")
+
     per_doc = []
     top_k = max(2, min(request.chunks_per_doc, 8))
     for name in doc_names:
         try:
             chunks = db.search(query, top_k=top_k, doc_names=[name])
+        except IndexUnavailable as e:
+            raise _index_http_error(e)
         except Exception as e:
-            print(f"Compare search failed for '{name}': {e}")
-            chunks = []
+            raise HTTPException(status_code=503, detail=f"Không tra được chỉ mục của {name}: {e}")
         per_doc.append({
             "doc_name": name,
+            "degraded": chunks.degraded,
             "chunks": [
                 {"page_num": c.get("page_num"), "text": c.get("text", ""), "score": c.get("score")}
                 for c in chunks
@@ -1969,6 +1728,7 @@ def compare_documents(request: CompareRequest, x_deepseek_key: Optional[str] = H
 
     result["question"] = query
     result["retrieved"] = per_doc
+    result["degraded"] = any(d.get("degraded") for d in per_doc)
     result["created_at"] = time.strftime("%d/%m/%Y %H:%M")
     return result
 
@@ -1998,6 +1758,10 @@ def get_book_metadata():
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
+                # Gắn tên tài liệu để lọc theo quyền xem: chunk của tài liệu tự
+                # tải không mang source_file nên không suy ngược được.
+                for entry in loaded:
+                    entry["_doc_name"] = manifest["doc_name"]
                 entries.extend(loaded)
                 print(f"Loaded {len(loaded)} chunks for {manifest['doc_name']}")
             except Exception as e:
@@ -2005,8 +1769,15 @@ def get_book_metadata():
         _book_metadata_cache = entries
     return _book_metadata_cache
 
-def search_drug_book(query: str, top_k: int = 6) -> List[Dict[str, Any]]:
-    meta_entries = get_book_metadata()
+def _invalidate_book_metadata() -> None:
+    """Gọi sau khi nạp/xoá tài liệu — nếu không, tra thuốc vẫn đọc bản cũ tới lúc khởi động lại."""
+    global _book_metadata_cache
+    _book_metadata_cache = None
+
+
+def search_drug_book(query: str, top_k: int = 6, exclude_doc_names: Optional[set] = None) -> List[Dict[str, Any]]:
+    excluded = set(exclude_doc_names or ())
+    meta_entries = [e for e in get_book_metadata() if e.get("_doc_name") not in excluded]
     q_lower = query.lower().strip()
     q_words = [w for w in re.findall(r'\w+', q_lower) if len(w) > 1]
     
@@ -2042,21 +1813,28 @@ def search_drug_book(query: str, top_k: int = 6) -> List[Dict[str, Any]]:
     content_matches.sort(key=lambda x: x[0], reverse=True)
     
     # 2. Vector DB search as fallback / supplemental
-    vec_results = []
+    #
+    # Nhánh exact/content_matches phía trên đọc thẳng file chunk JSON, không
+    # qua Chroma — vẫn tra được thuốc theo tên dù chỉ mục vector hỏng. Trước
+    # đây db.search() ném lỗi (IndexUnavailable/EmptyIndex) sẽ làm chết cả
+    # search_drug_book, mất luôn phần exact match KHÔNG phụ thuộc Chroma.
+    vec_results = SearchHits([], degraded=False, reason=None, status="OK")
     if db:
         try:
-            vec_results = db.search(query, top_k=top_k)
-        except Exception as e:
-            print(f"Vector search warning: {e}")
-            vec_results = []
-            
+            vec_results = db.search(query, top_k=top_k, exclude_doc_names=excluded)
+        except IndexUnavailable as e:
+            vec_results = SearchHits([], degraded=True, reason=str(e), status=e.code)
+
     combined = []
     seen_pages = set()
     
     # Format exact and high-confidence matches from metadata.json
     for score, item in (exact_matches + content_matches)[:top_k]:
         page = item.get("page_in_file") or item.get("book_page_display", 1)
-        doc_name = item.get("source_file") or "THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf"
+        # Mặc định trung lập khi thiếu source_file — KHÔNG gán cứng tên một
+        # cuốn cụ thể, nếu không trích dẫn sẽ trỏ sai sách khi rơi vào nhánh
+        # này (xem chú thích ở nhánh vector_results bên dưới, cùng lớp lỗi).
+        doc_name = item.get("source_file") or "(không rõ tài liệu)"
         field_name = item.get("field_name", "Chuyên luận Dược học")
         content = item.get("content", "")
         gen_title = item.get("generic_name", "")
@@ -2087,7 +1865,7 @@ def search_drug_book(query: str, top_k: int = 6) -> List[Dict[str, Any]]:
         # cuốn Thuốc Biệt Dược cho MỌI kết quả vector, nên từ khi index thêm sách
         # thứ hai, một đoạn của Dược thư vẫn hiện là trích từ Thuốc Biệt Dược —
         # bác sĩ bấm kiểm chứng sẽ mở nhầm sách.
-        v_doc = v.get("doc_name") or "THUOC-BIET-DUOC-VA-CACH-SU-DUNG.pdf"
+        v_doc = v.get("doc_name") or "(không rõ tài liệu)"
         # Khoá trùng phải gồm cả tên sách: hai cuốn đều có trang 300.
         key = (v_doc, p_num)
         if key not in seen_pages:
@@ -2106,7 +1884,8 @@ def search_drug_book(query: str, top_k: int = 6) -> List[Dict[str, Any]]:
             })
             seen_pages.add(key)
             
-    return combined[:top_k]
+    return SearchHits(combined[:top_k], degraded=vec_results.degraded,
+                      reason=vec_results.reason, status=vec_results.status)
 
 class DrugReportRequest(BaseModel):
     query: str
@@ -2114,7 +1893,7 @@ class DrugReportRequest(BaseModel):
 # _sse dùng chung với đường tra cứu y văn, định nghĩa ở trên.
 
 @app.post("/api/drugs/report")
-def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optional[str] = Header(None)):
+def api_generate_drug_report(request: DrugReportRequest, http_request: Request, x_deepseek_key: Optional[str] = Header(None)):
     """Trả báo cáo tra cứu thuốc theo luồng SSE.
 
     Trước đây endpoint này chặn ~18,7s: chờ DeepSeek sinh xong toàn bộ JSON
@@ -2126,14 +1905,17 @@ def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optiona
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Tên thuốc hoặc triệu chứng không được để trống.")
+    hidden = documents.hidden_doc_names(current_user(http_request))
 
     def event_stream():
         try:
             # 1. Tìm ngữ cảnh từ sách. Gửi nguồn đi trước để giao diện dựng
             #    được khối trích dẫn trong lúc LLM còn đang sinh chữ.
-            sources = search_drug_book(query, top_k=6)
+            sources = search_drug_book(query, top_k=6, exclude_doc_names=hidden)
             yield _sse("meta", {
                 "sources": sources,
+                "degraded": sources.degraded,
+                "reason": sources.reason,
                 "created_at": time.strftime("%d/%m/%Y %H:%M"),
                 "model_used": "Deepseek",
             })
@@ -2146,6 +1928,8 @@ def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optiona
                 yield _sse("update", payload)
 
             yield _sse("done", {})
+        except IndexUnavailable as e:
+            yield _sse("error", {"detail": str(e), "code": e.code})
         except Exception as e:
             print(f"Lỗi khi stream báo cáo thuốc: {e}")
             yield _sse("error", {"detail": f"Lỗi khi tạo báo cáo tra cứu thuốc: {str(e)}"})
@@ -2165,45 +1949,61 @@ def api_generate_drug_report(request: DrugReportRequest, x_deepseek_key: Optiona
 
 # Diagnosis Tree Pipeline (3-step agent pipeline)
 #
-# Cả bốn bước đều nhận `patient_id` KHÔNG bắt buộc. Có id thì backend tự đọc hồ
-# sơ và tự dựng khối tiền sử đã khử danh; không có thì prompt y hệt như trước,
-# nên đường tra tự do (gõ mô tả, không chọn bệnh nhân) không hề đổi.
-#
-# Khử danh làm ở BACKEND chứ không ở frontend, dù frontend đã có sẵn tên trong
-# tay: để tên bệnh nhân chỉ có đúng MỘT chỗ có thể lọt ra, thay vì bốn chỗ gọi
-# API đều phải nhớ tự cắt tên, mãi mãi.
-#
+# Cả bốn bước nhận `patient_history` KHÔNG bắt buộc: chữ bác sĩ gõ vào ô
+# "Tình trạng bệnh nhân trước đó". Để trống thì prompt y hệt đường tra tự do.
 # Mỗi endpoint trả lại `patient_context` — đúng chuỗi đã gửi đi — để giao diện
-# hiện nguyên văn cho bác sĩ. Đó cũng là cách tự kiểm: tên bệnh nhân mà lọt vào
-# thì nó hiện ngay trên màn hình, không phải đào nhật ký agent mới thấy.
+# hiện nguyên văn cho bác sĩ.
 
-def _doi_chieu_di_ung(patient_id: Optional[str],
+def _doi_chieu_di_ung(patient_history: Optional[str],
                       medications: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
-    """Đối chiếu ô dị ứng của bệnh nhân với danh sách thuốc vừa gợi ý.
+    """Đối chiếu phần nói về dị ứng trong ô tiền sử với danh sách thuốc vừa gợi ý.
 
-    Trả None khi bác sĩ không chọn hồ sơ nào — không có bệnh án thì không có gì
-    để đối chiếu, và một khối "chưa kiểm" ở đường tra tự do chỉ là tiếng ồn.
-    Có hồ sơ mà ô dị ứng bỏ trống thì KHÔNG trả None: đó chính là trạng thái
-    "chưa kiểm" cần phải hiện ra.
+    Trả None khi bác sĩ để trống ô tiền sử — không có gì để đối chiếu, và một
+    khối "chưa kiểm" ở đường tra tự do chỉ là tiếng ồn. Có tiền sử nhưng không
+    nhắc tới dị ứng thì vẫn trả kết quả "chưa kiểm" để bác sĩ thấy rõ.
     """
-    if not patient_id:
+    if not patient_context.clean_history(patient_history):
         return None
-    patient = patient_db.get_patient(patient_id)
-    if not patient:
-        return None
-    return drug_allergy.kiem_tra(patient.get("allergies"), medications)
+    return drug_allergy.kiem_tra(patient_context.allergy_text(patient_history), medications)
+
+
+class InteractionCheckRequest(BaseModel):
+    medications: List[Dict[str, Any]]
+
+
+@app.get("/api/drugs/pediatric-dosing")
+def api_pediatric_dosing(name: str = Query(..., min_length=2, max_length=200)):
+    """Câu liều mg/kg của một hoạt chất trong Dược thư, kèm con số máy đọc ra.
+
+    Chỉ trả câu trong sách — KHÔNG chọn liều. Phép nhân với cân nặng nằm ở
+    frontend/src/lib/doseCalc.js. Xem pediatric_dose.py vì sao máy không tự chọn.
+    """
+    return pediatric_dose.tra_cuu(name)
+
+
+@app.post("/api/drugs/interactions")
+def api_check_interactions(payload: InteractionCheckRequest):
+    """Đối chiếu tương tác thuốc–thuốc của một đơn, đọc từ Dược thư.
+
+    Giao diện gọi mỗi khi đơn thay đổi (thêm/bớt thuốc), nên phải rẻ: không
+    gọi mô hình, không chạm chỉ mục vector — chỉ so token trên bảng dựng sẵn.
+    Chỉ cần tên thuốc; không có dữ liệu bệnh nhân nào đi qua đây.
+    """
+    meds = [{"name": str(m.get("name") or "")[:200]} for m in payload.medications[:30]]
+    return drug_interaction.kiem_tra(meds)
 
 
 class GenerateTreeRequest(BaseModel):
     description: str
-    patient_id: Optional[str] = None
+    # Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — xem patient_context.
+    patient_history: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/generate")
 def api_generate_diagnosis_tree(request: GenerateTreeRequest, x_deepseek_key: Optional[str] = Header(None)):
     description = request.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="Mô tả bệnh nhân không được để trống.")
-    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
         tree = generate_diagnosis_tree(description, x_deepseek_key or "", patient_block=patient_block)
         tree["patient_context"] = patient_ctx
@@ -2216,7 +2016,8 @@ def api_generate_diagnosis_tree(request: GenerateTreeRequest, x_deepseek_key: Op
 class EndoscopyRequest(BaseModel):
     confirmed_symptoms: List[str]
     excluded_symptoms: List[str] = []
-    patient_id: Optional[str] = None
+    # Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — xem patient_context.
+    patient_history: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/endoscopy")
 def api_suggest_endoscopy(request: EndoscopyRequest, x_deepseek_key: Optional[str] = Header(None)):
@@ -2224,7 +2025,7 @@ def api_suggest_endoscopy(request: EndoscopyRequest, x_deepseek_key: Optional[st
     if not confirmed:
         raise HTTPException(status_code=400, detail="Cần ít nhất một triệu chứng đã xác nhận 'Có'.")
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
-    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
         result = suggest_endoscopy_exam(confirmed, excluded, x_deepseek_key or "", patient_block=patient_block)
         result["patient_context"] = patient_ctx
@@ -2238,7 +2039,8 @@ class FinalDiagnosisRequest(BaseModel):
     confirmed_symptoms: List[str]
     excluded_symptoms: List[str] = []
     exam_notes: str
-    patient_id: Optional[str] = None
+    # Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — xem patient_context.
+    patient_history: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/final")
 def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional[str] = Header(None)):
@@ -2247,7 +2049,7 @@ def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional
         raise HTTPException(status_code=400, detail="Cần nhập kết quả khám lâm sàng & nội soi.")
     confirmed = [s.strip() for s in request.confirmed_symptoms if s.strip()]
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
-    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
         diagnoses = generate_final_diagnosis(confirmed, excluded, exam_notes, x_deepseek_key or "",
                                              patient_block=patient_block)
@@ -2260,7 +2062,8 @@ def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional
 class TreatmentSuggestionRequest(BaseModel):
     diagnoses: List[Dict[str, Any]]
     exam_notes: Optional[str] = None
-    patient_id: Optional[str] = None
+    # Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — xem patient_context.
+    patient_history: Optional[str] = None
 
 @app.post("/api/diagnosis-tree/treatment")
 def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key: Optional[str] = Header(None)):
@@ -2270,7 +2073,7 @@ def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key
     # đúng là chỗ dị ứng thuốc bị bỏ sót gây hại nhất. Trước đợt này nó nhận
     # đúng hai thứ — chẩn đoán và ghi chú khám — và không có đường nào để biết
     # bệnh nhân dị ứng penicillin.
-    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_id)
+    patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
         result = generate_treatment_suggestion(request.diagnoses, request.exam_notes or "",
                                                x_deepseek_key or "", patient_block=patient_block)
@@ -2284,7 +2087,7 @@ def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key
         # Chạy ở backend vì ô dị ứng nằm trong bệnh án, và bệnh án không rời
         # khỏi máy. Kết quả trả ra chỉ chứa chữ trong ô dị ứng và tên thuốc —
         # không có tên người bệnh, không có mã hồ sơ.
-        result["allergy_check"] = _doi_chieu_di_ung(request.patient_id,
+        result["allergy_check"] = _doi_chieu_di_ung(request.patient_history,
                                                     result.get("medications"))
         return result
     except ValueError as e:
@@ -2375,6 +2178,39 @@ def get_page_image(doc_name: str, page_num: int, dpi: int = 150):
         media_type="image/jpeg",
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+class LocateRequest(BaseModel):
+    quote: str
+
+
+@app.post("/api/documents/{doc_name}/pages/{page_num}/locate")
+async def locate_quote_on_page(doc_name: str, page_num: int, payload: LocateRequest, request: Request):
+    """
+    Hộp tô sáng (toạ độ 0–1) của đoạn trích dẫn trên ảnh trang — xem page_locate.
+
+    page_num là số trang IN, cùng đơn vị với trích dẫn và endpoint ảnh. Lần đầu
+    mở một trang scan phải OCR lại trang đó (vài giây), nên chạy ở thread riêng.
+    """
+    user = current_user(request)
+    safe_name = get_safe_filename(doc_name)
+    if not documents.can_view(user, safe_name):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
+    quote = (payload.quote or "").strip()
+    if not quote:
+        return {"rects": [], "confidence": 0.0, "matched": 0, "method": None}
+    pdf_page = documents.printed_to_pdf_page(safe_name, page_num)
+    try:
+        result = await asyncio.to_thread(page_locate.locate_on_page, safe_name, pdf_page, quote[:4000])
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tệp tài liệu.")
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Trang không tồn tại.")
+    except Exception as e:
+        # Không tô được thì giao diện vẫn mở đúng trang và nói rõ; không phải lỗi chặn.
+        return {"rects": [], "confidence": 0.0, "matched": 0, "method": None, "error": str(e)}
+    result["pdf_page"] = pdf_page
+    return result
 
 
 SEARCH_IN_DOC_MAX_PAGES = 200
