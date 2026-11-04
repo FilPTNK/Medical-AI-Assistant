@@ -117,6 +117,13 @@ Then open http://127.0.0.1:3000. Operational details are in `RUNBOOK.md`;
 deployment notes (frontend on Vercel, backend on a server with a persistent
 disk) are in `DEPLOY_VERCEL.md`.
 
+The medical Q&A page (`/hoi-dap`) greets the signed-in doctor and uses a compact
+chat composer. Its source panel supports PDF upload and selecting one or more
+documents for retrieval; clearing the selection searches no local documents.
+Web search runs automatically when the backend advertises available web tools.
+The API still accepts the legacy single-document scope and requests without a
+source selection.
+
 ### Managing the drug directory
 
 Sign in with an administrator account, open `/quan-tri`, and download a CSV or

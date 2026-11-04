@@ -63,6 +63,41 @@ class HttpVisibilityTests(unittest.TestCase):
     def delete(self, path, tok):
         return self.client.delete(path, headers={'Authorization': f'Bearer {tok}'})
 
+    def test_selected_chat_sources_restrict_retrieval_and_keep_visibility_filter(self):
+        hidden = {'rieng-b.pdf'}
+        hits = main.SearchHits([{'doc_name': 'chung.pdf', 'page_num': 1}])
+        with patch.object(main.db, 'search', return_value=hits) as search:
+            request = main.QueryRequest(query='câu hỏi', doc_names=['chung.pdf', 'rieng-a.pdf', 'chung.pdf'])
+            self.assertEqual(main._retrieve(request.query, request, hidden), hits)
+            search.assert_called_once_with(
+                request.query, top_k=8, doc_names=['chung.pdf', 'rieng-a.pdf'], exclude_doc_names=hidden,
+            )
+
+    def test_no_selected_chat_sources_does_not_fall_back_to_entire_library(self):
+        with patch.object(main.db, 'search') as search:
+            request = main.QueryRequest(query='câu hỏi', doc_names=[])
+            hits = main._retrieve(request.query, request, {'rieng-b.pdf'})
+            self.assertEqual(list(hits), [])
+            self.assertEqual(hits.status, 'NO_MATCH')
+            search.assert_not_called()
+
+    def test_legacy_chat_scope_and_near_page_still_take_precedence(self):
+        hits = main.SearchHits([
+            {'doc_name': 'chung.pdf', 'page_num': 200},
+            {'doc_name': 'chung.pdf', 'page_num': 20},
+        ])
+        with patch.object(main.db, 'search', return_value=hits) as search:
+            request = main.QueryRequest(query='câu hỏi', doc_name='chung.pdf', near_page=20, doc_names=[])
+            result = main._retrieve(request.query, request, set())
+            self.assertEqual(result[0]['page_num'], 20)
+            search.assert_called_once_with(request.query, top_k=8, doc_names=['chung.pdf'], exclude_doc_names=set())
+
+    def test_legacy_chat_without_selection_searches_visible_library(self):
+        with patch.object(main.db, 'search', return_value=main.SearchHits()) as search:
+            request = main.QueryRequest(query='câu hỏi')
+            main._retrieve(request.query, request, {'rieng-b.pdf'})
+            search.assert_called_once_with(request.query, top_k=5, exclude_doc_names={'rieng-b.pdf'})
+
     def test_catalog_import_requires_admin_and_updates_atomically(self):
         record = {
             'id': 'sample', 'name': 'Bản ghi kiểm thử', 'source_title': 'Nguồn kiểm thử',

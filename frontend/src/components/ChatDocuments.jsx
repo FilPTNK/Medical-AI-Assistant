@@ -1,35 +1,53 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { BookOpen, Download, Eye, FileText, MoreHorizontal, Paperclip, Trash2, Upload, X } from 'lucide-react';
+import { Download, Eye, FileText, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Trash2, Upload, X } from 'lucide-react';
 import { documentScopeLabel } from '../lib/library';
 
 export default function ChatDocuments({
-  clinical, readOnly, pickerOpen, setPickerOpen, onAttach, onUpload, onPreview, onDownload, onDelete,
+  clinical, readOnly, pickerOpen, setPickerOpen, selectedNames, onToggleSource, onToggleAll,
+  onUpload, onPreview, onDownload, onDelete,
 }) {
   const inputRef = useRef(null);
-  const attachUpload = useRef(false);
+  const [collapsed, setCollapsed] = useState(false);
   const { documents, documentError, refreshDocuments, upload } = clinical;
+  const allSelected = documents.length > 0 && selectedNames.length === documents.length;
+  const someSelected = selectedNames.length > 0 && !allSelected;
 
-  function chooseFile(attach) {
-    attachUpload.current = attach;
+  function chooseFile() {
     inputRef.current?.click();
   }
 
   return (
     <section className="fil-chat-documents" aria-labelledby="chat-documents-title">
-      <h2 id="chat-documents-title"><BookOpen size={21} aria-hidden="true" /> Tài liệu y khoa</h2>
-      <p>Tài liệu dùng để tra cứu và đối chứng câu trả lời.</p>
+      <div className="fil-source-heading">
+        <h2 id="chat-documents-title">Nguồn tài liệu</h2>
+        <button type="button" className="fil-source-collapse" aria-label={collapsed ? 'Mở danh sách nguồn' : 'Thu gọn danh sách nguồn'}
+          aria-expanded={!collapsed} aria-controls="fil-source-content" onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
+        </button>
+      </div>
+      <div id="fil-source-content" hidden={collapsed}>
+      <button className="fil-source-add" type="button" disabled={upload?.pending}
+        onClick={() => readOnly ? setPickerOpen(true) : chooseFile()}>
+        <Plus size={20} aria-hidden="true" /> Thêm nguồn
+      </button>
       {documentError && <div role="alert" className="fil-doc-status">
         {documentError} <button type="button" onClick={refreshDocuments}>Tải lại</button>
       </div>}
       {!documentError && documents.length === 0 && <p className="fil-chat-empty">Danh sách tài liệu đang trống.</p>}
-      <ul className="fil-chat-doc-list">
+      {documents.length > 0 && <div className="fil-source-select-all">
+        <span aria-live="polite">{selectedNames.length} nguồn đã chọn</span>
+        <label>Chọn tất cả <input ref={element => {
+          if (element) element.indeterminate = someSelected;
+        }} type="checkbox" checked={allSelected} onChange={() => onToggleAll(!allSelected)} /></label>
+      </div>}
+      <ul className="fil-chat-doc-list" aria-label="Nguồn dùng để trả lời">
         {documents.map(doc => (
           <li key={doc.doc_name} className="fil-chat-doc">
             <button type="button" className="fil-chat-doc-open" onClick={() => onPreview(doc)}>
               <span className="fil-pdf-icon"><FileText size={19} aria-hidden="true" /></span>
-              <span><strong>{doc.doc_title || doc.doc_name}</strong>
+              <span><strong title={doc.doc_title || doc.doc_name}>{doc.doc_title || doc.doc_name}</strong>
                 <small>{[doc.page_count && `${doc.page_count} trang`, documentScopeLabel(doc)].filter(Boolean).join(' · ')}</small>
               </span>
             </button>
@@ -42,9 +60,6 @@ export default function ChatDocuments({
                   <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onPreview(doc)}>
                     <Eye size={15} /> Xem tài liệu
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onAttach(doc)}>
-                    <Paperclip size={15} /> Đính kèm vào câu hỏi
-                  </DropdownMenu.Item>
                   <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onDownload(doc.doc_name)}>
                     <Download size={15} /> Tải xuống PDF
                   </DropdownMenu.Item>
@@ -54,6 +69,10 @@ export default function ChatDocuments({
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
+            <label className="fil-source-check">
+              <span className="sr-only">Dùng nguồn {doc.doc_title || doc.doc_name}</span>
+              <input type="checkbox" checked={selectedNames.includes(doc.doc_name)} onChange={() => onToggleSource(doc.doc_name)} />
+            </label>
           </li>
         ))}
       </ul>
@@ -63,34 +82,33 @@ export default function ChatDocuments({
           event.target.value = '';
           if (!file) return;
           setPickerOpen(false);
-          onUpload(file, attachUpload.current);
+          onUpload(file);
         }} />
-        <button className="fil-tool-action fil-doc-upload" type="button" disabled={upload?.pending} onClick={() => chooseFile(false)}>
-          <Upload size={17} aria-hidden="true" /> Thêm tài liệu (PDF)
-        </button>
       </>}
       {upload && <div className="fil-doc-status" role={upload.error ? 'alert' : 'status'}>
         {upload.error || upload.message || `${upload.stage || 'Đang xử lý…'} · ${upload.name}`}
         {upload.pending && upload.total > 0 && <progress value={upload.current} max={upload.total} aria-label="Tiến độ nạp PDF" />}
       </div>}
+      </div>
       <Dialog.Root open={pickerOpen} onOpenChange={setPickerOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="dialog-content fil-attachment-dialog">
-            <Dialog.Title className="dialog-title">Đính kèm PDF</Dialog.Title>
+            <Dialog.Title className="dialog-title">Nguồn tài liệu</Dialog.Title>
             <Dialog.Description className="dialog-description">
-              Chọn một tài liệu để giới hạn câu hỏi tiếp theo trong tài liệu đó.
+              Chọn các tài liệu được dùng để trả lời. Bạn cũng có thể quản lý nguồn ở cột bên trái.
             </Dialog.Description>
             <div className="fil-attachment-list">
-              {documents.map(doc => <button type="button" className="fil-tool-action" key={doc.doc_name} onClick={() => {
-                setPickerOpen(false);
-                onAttach(doc);
-              }}><FileText size={17} aria-hidden="true" /> {doc.doc_title || doc.doc_name}</button>)}
+              {documents.map(doc => <label className="fil-source-picker-row" key={doc.doc_name}>
+                <FileText size={18} aria-hidden="true" />
+                <span>{doc.doc_title || doc.doc_name}</span>
+                <input type="checkbox" checked={selectedNames.includes(doc.doc_name)} onChange={() => onToggleSource(doc.doc_name)} />
+              </label>)}
               {documents.length === 0 && <p>Chưa có PDF để chọn.</p>}
             </div>
             <div className="dialog-actions">
               <Dialog.Close asChild><button type="button" className="btn-dialog-secondary"><X size={15} /> Đóng</button></Dialog.Close>
-              {!readOnly && <button type="button" className="btn-dialog-secondary" disabled={upload?.pending} onClick={() => chooseFile(true)}>
+              {!readOnly && <button type="button" className="btn-dialog-secondary" disabled={upload?.pending} onClick={chooseFile}>
                 <Upload size={15} /> Tải PDF mới
               </button>}
             </div>

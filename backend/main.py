@@ -117,13 +117,15 @@ db = VectorStore(config.VECTOR_DB_DIR)
 class QueryRequest(BaseModel):
     query: str
     created_by: Optional[str] = None
-    # Bác sĩ bật "Tìm thêm trên web". Mặc định tắt: câu hỏi chỉ rời máy chủ
-    # (tới PubMed/FDA/Tavily) khi bác sĩ chủ động chọn.
+    # Giao diện tự bật khi máy chủ cấu hình công cụ web. Giữ mặc định False
+    # cho các client cũ không truyền lựa chọn này.
     web: bool = False
     # "Hỏi về tài liệu này": giới hạn tra cứu trong đúng một cuốn sách, ưu tiên
     # các đoạn gần trang bác sĩ đang đọc.
     doc_name: Optional[str] = None
     near_page: Optional[int] = None
+    # None: toàn kho; []: không dùng sách; danh sách: chỉ các nguồn đã chọn.
+    doc_names: Optional[List[str]] = None
 
 class SearchResultItem(BaseModel):
     id: Optional[str] = None
@@ -1142,17 +1144,23 @@ NEAR_PAGE_WINDOW = 15
 
 
 def _retrieve(query: str, request: "QueryRequest", hidden: set):
-    """Tra toàn kho, hoặc chỉ trong một tài liệu khi bác sĩ bấm "Hỏi về tài liệu này".
+    """Tra các nguồn đã chọn, toàn kho cho client cũ, hoặc một tài liệu cụ thể.
 
     Khi hỏi về một tài liệu: lấy rộng hơn rồi đẩy các đoạn nằm gần trang đang
     đọc lên trước — bác sĩ hỏi ngay cạnh trang đang mở thì thường hỏi về chính
     chuyên luận đó. Thứ tự trong từng nhóm giữ nguyên theo điểm hợp nhất.
     """
     doc = (request.doc_name or "").strip()
-    if not doc:
+    selected = [get_safe_filename(doc)] if doc else (
+        list(dict.fromkeys(get_safe_filename(name.strip()) for name in request.doc_names if name.strip()))
+        if request.doc_names is not None else None
+    )
+    if selected is None:
         return db.search(query, top_k=5, exclude_doc_names=hidden)
-    hits = db.search(query, top_k=8, doc_names=[get_safe_filename(doc)], exclude_doc_names=hidden)
-    if request.near_page:
+    if not selected:
+        return SearchHits(status="NO_MATCH")
+    hits = db.search(query, top_k=8, doc_names=selected, exclude_doc_names=hidden)
+    if doc and request.near_page:
         near = [h for h in hits if abs((h.get("page_num") or 0) - request.near_page) <= NEAR_PAGE_WINDOW]
         far = [h for h in hits if h not in near]
         hits[:] = near + far
@@ -1213,7 +1221,7 @@ async def search_and_answer(
             # hoặc vô dụng cho các lần sau.
             warm = db.is_warm()
             budget = SEARCH_WARM_TIMEOUT_S if warm else SEARCH_COLD_TIMEOUT_S
-            if request.doc_name:
+            if request.doc_name or request.doc_names:
                 # Lọc theo một tài liệu: lượt đầu phải dựng tập id được phép trên
                 # toàn kho (đo ~2,8s trên máy không tải), các lượt sau ~0,2s.
                 budget = max(budget, SCOPED_SEARCH_TIMEOUT_S)
@@ -1264,7 +1272,7 @@ async def search_and_answer(
             except Exception as e:
                 print(f"Warning: không ghi được nhật ký tra cứu: {e}")
 
-            # ---------- 1b. Tìm thêm trên web (chỉ khi bác sĩ bật) ----------
+            # ---------- 1b. Tìm thêm trên web khi client yêu cầu ----------
             #
             # Trang sách đã gửi đi ở trên nên bác sĩ đọc được ngay trong lúc chờ
             # web. Xong thì gửi lại danh sách gộp: sách trước, web sau, chung

@@ -22,7 +22,6 @@ import DiagnosisTreeView from './components/DiagnosisTreeView';
 import { apiJson, apiSend } from './lib/apiClient';
 import {
   AlertCircle,
-  Activity,
   BookOpen,
   Check,
   CheckCircle2,
@@ -41,13 +40,13 @@ import {
   MessageSquare,
   Mic,
   MoreHorizontal,
-  Paperclip,
+  Plus,
+  ArrowUp,
   PencilLine,
   Pin,
   PinOff,
   ScanLine,
   Search,
-  Send,
   Share2,
   Sparkles,
   Square,
@@ -64,16 +63,26 @@ import {
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 const MAX_PINNED_CONVERSATIONS = 3;
-const CHAT_PROMPTS = [
-  ['Liều paracetamol trẻ em', 'Cách xác định liều paracetamol cho trẻ em theo tài liệu tham khảo?'],
-  ['Tương tác warfarin', 'Những tương tác thuốc nào cần lưu ý khi dùng warfarin?'],
-  ['Phác đồ COPD', 'Tra cứu hướng dẫn điều trị COPD ổn định.'],
-  ['Chẩn đoán đái tháo đường thai kỳ', 'Tra cứu tiêu chuẩn chẩn đoán đái tháo đường thai kỳ.'],
-];
+
 
 export default function App({ user, settings, clinical, activeTab, onOpenChat }) {
   const { documents, config, conversations, setConversations, apiKey } = clinical;
-  const doctorName = user?.display_name || 'Bác sĩ';
+  const doctorName = user?.display_name || user?.username || '';
+  const greetingName = doctorName.replace(/^(?:BS\.?|Bác sĩ)\s*/iu, '').trim();
+  const [excludedSources, setExcludedSources] = useState(() => new Set());
+  const selectedSourceNames = documents.filter(doc => !excludedSources.has(doc.doc_name)).map(doc => doc.doc_name);
+  function toggleSource(name) {
+    setChatScope(null);
+    setExcludedSources(previous => {
+      const next = new Set(previous);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  }
+  function toggleAllSources(selected) {
+    setChatScope(null);
+    setExcludedSources(selected ? new Set() : new Set(documents.map(doc => doc.doc_name)));
+  }
   const webSearchTools = config?.web_search_tools || [];
   const goToChat = () => {
     if (activeTab !== 'chat') onOpenChat();
@@ -81,7 +90,6 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
   const [historyOpen, setHistoryOpen] = useState(null);
   const [showAllRecent, setShowAllRecent] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [uploadFromComposer, setUploadFromComposer] = useState(false);
   const [deleteDocTarget, setDeleteDocTarget] = useState(null);
   const [deletingDocument, setDeletingDocument] = useState(false);
   const activeConversationRef = useRef(null);
@@ -116,14 +124,6 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
   const [readerHighlight, setReaderHighlight] = useState('');
 
   const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
-  // "Tìm thêm trên web": danh sách công cụ máy chủ bật (rỗng = ẩn nút), và lựa
-  // chọn của bác sĩ — nhớ theo trình duyệt, mặc định tắt.
-  const [webSearchOn, setWebSearchOn] = useState(() => {
-    try { return localStorage.getItem('web_search_on') === '1'; } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('web_search_on', webSearchOn ? '1' : '0'); } catch { /* chế độ riêng tư */ }
-  }, [webSearchOn]);
 
   // Hierarchical multi-layer decision tree data structure
   const [nodeStatusMap, setNodeStatusMap] = useState({});
@@ -143,6 +143,23 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
   const recognitionTargetRef = useRef(null);
   const autoSendAfterDictationRef = useRef(null); // set per-dictation; fires on recognition end
   const chatInputRef = useRef(null);
+  useEffect(() => {
+    const input = chatInputRef.current;
+    if (!input || activeTab !== 'chat') return;
+    const fit = () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 208)}px`;
+    };
+    fit();
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (width === input.clientWidth) return;
+      width = input.clientWidth;
+      fit();
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [query, activeTab]);
   // AbortController của lần tra cứu đang chạy. Đóng nó là server ngừng
   // gọi mô hình thật, không phải chỉ giao diện thôi ngóng.
   const searchAbortRef = useRef(null);
@@ -568,7 +585,8 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
         body: JSON.stringify({
           query: q,
           created_by: doctorName,
-          web: webSearchOn && webSearchTools.length > 0,
+          web: webSearchTools.length > 0,
+          doc_names: attachment ? [attachment.doc_name] : selectedSourceNames,
           doc_name: attachment?.doc_name || null,
           near_page: attachment?.page_num || null,
         }),
@@ -1376,6 +1394,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
   const askAboutDocument = (src) => {
     if (!src?.doc_name) return;
     const doc = documents.find(d => d.doc_name === src.doc_name);
+    setExcludedSources(new Set(documents.filter(item => item.doc_name !== src.doc_name).map(item => item.doc_name)));
     setChatScope({
       doc_name: src.doc_name,
       doc_title: src.doc_title || doc?.doc_title || src.doc_name,
@@ -1399,11 +1418,14 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
     openSource(source, index, message.logId || null);
   };
 
-  async function handleUploadPdf(file, attach) {
-    const version = draftVersion.current;
-    setUploadFromComposer(attach);
+  async function handleUploadPdf(file) {
+    setHistoryOpen(true);
     const doc = await clinical.uploadDocument(file, settings.notifyEnabled);
-    if (doc && attach && version === draftVersion.current) askAboutDocument(doc);
+    if (doc) setExcludedSources(previous => {
+      const next = new Set(previous);
+      next.delete(doc.doc_name);
+      return next;
+    });
   }
 
   async function deleteChatDocument() {
@@ -1474,13 +1496,19 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
       {activeTab === 'chat' && (
         <aside className="fil-chat-tools" data-open={historyOpen ?? 'auto'} aria-label="Phiên hỏi đáp và tài liệu">
           <div className="fil-chat-toolbar">
-            <h2><MessageSquare size={21} aria-hidden="true" /> Phiên hỏi đáp</h2>
+            <h2 className="sr-only">Nguồn và cuộc trò chuyện</h2>
             <button type="button" className="fil-tool-action fil-mobile-history" aria-expanded={historyOpen === true}
               aria-controls="fil-chat-sidebar" onClick={toggleHistory}>
               Phiên hỏi đáp và tài liệu <ChevronDown size={15} aria-hidden="true" />
             </button>
           </div>
           <div id="fil-chat-sidebar">
+          <ChatDocuments clinical={clinical} readOnly={user?.read_only} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen}
+            onPreview={doc => handleOpenDocumentPreview(doc.doc_name, readerMinPage(doc.doc_name))}
+            onUpload={handleUploadPdf} onDownload={handleDownloadDocument}
+            onDelete={setDeleteDocTarget} selectedNames={selectedSourceNames}
+            onToggleSource={toggleSource} onToggleAll={toggleAllSources} />
+          <div className="fil-source-history-heading">Cuộc trò chuyện</div>
             <button type="button" className="fil-button fil-new-chat" onClick={() => { handleNewChat(); chatInputRef.current?.focus(); }}>
               <SquarePen size={17} aria-hidden="true" /> Cuộc trò chuyện mới
             </button>
@@ -1534,10 +1562,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
               );
             })()}
           </div>
-          <ChatDocuments clinical={clinical} readOnly={user?.read_only} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen}
-            onPreview={doc => handleOpenDocumentPreview(doc.doc_name, readerMinPage(doc.doc_name))}
-            onAttach={askAboutDocument} onUpload={handleUploadPdf} onDownload={handleDownloadDocument}
-            onDelete={setDeleteDocTarget} />
+
           </div>
         </aside>
       )}
@@ -1691,17 +1716,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
               <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
                 <h2 className="sr-only">{activeConversation?.title || 'Đặt câu hỏi'}</h2>
                 {!messages.length && <div className="fil-qa-empty">
-                  <span className="fil-tile"><MessageSquare size={23} aria-hidden="true" /></span>
-                  <h2>Bắt đầu một câu hỏi</h2>
-                  <p>Chọn một gợi ý hoặc nhập câu hỏi của bạn bên dưới.</p>
-                  <div className="fil-qa-prompts" aria-label="Câu hỏi gợi ý">
-                    {CHAT_PROMPTS.map(([label, prompt], index) => (
-                      <button type="button" key={label} onClick={() => {
-                        setQuery(prompt);
-                        chatInputRef.current?.focus();
-                      }}>{index === 0 && <Sparkles size={15} aria-hidden="true" />}{label}</button>
-                    ))}
-                  </div>
+                  <h2>Xin chào, bác sĩ{greetingName ? ` ${greetingName}` : ''}</h2>
                 </div>}
 
                 {/* Conversation Scroller */}
@@ -1709,7 +1724,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
                   {messages.map((msg, index) => (
                     <div key={index} className={`message-row ${msg.role === 'user' ? 'row-user' : 'row-assistant'}`}>
                       <div className={`fil-message-avatar ${msg.role === 'assistant' ? 'fil-assistant-mark' : ''}`} aria-hidden="true">
-                        {msg.role === 'assistant' ? <Activity size={19} /> : <UserRound size={19} />}
+                        {msg.role === 'assistant' ? <img src="/fil-mark.svg" width="26" height="26" alt="" /> : <UserRound size={19} />}
                       </div>
                       <div className="message-bubble">
                       {msg.attachment && (
@@ -1848,16 +1863,11 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* Ô nhập kiểu ChatGPT: thẻ đính kèm ở trên, chữ ở giữa, nút ở dưới */}
+                {/* Một hàng soạn tin: nguồn, nội dung, mic và gửi. */}
                 <form
                   onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
                   className="chat-input-container composer"
                 >
-                  {uploadFromComposer && (clinical.upload?.pending || clinical.upload?.error) && (
-                    <p className="fil-doc-status fil-composer-upload-status" role={clinical.upload.error ? 'alert' : 'status'}>
-                      {clinical.upload.error || clinical.upload.stage || 'Đang nạp PDF…'}
-                    </p>
-                  )}
                   {chatScope && (
                     <div className="att-row">
                       <AttachmentCard
@@ -1869,14 +1879,14 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
                   )}
                   <div className="fil-composer-line">
                   <button type="button" className="composer-icon-btn fil-composer-attach"
-                    aria-label="Chọn tài liệu PDF" title="Chọn tài liệu PDF" onClick={() => setPickerOpen(true)}>
-                    <Paperclip size={19} aria-hidden="true" />
+                    aria-label="Thêm nguồn và công cụ" title="Thêm nguồn và công cụ" onClick={() => setPickerOpen(true)}>
+                    <Plus size={23} aria-hidden="true" />
                   </button>
                   <textarea
                     ref={chatInputRef}
                     className="input-textarea composer-textarea"
                     aria-label="Câu hỏi tra cứu y văn"
-                    placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Đặt câu hỏi về bệnh lý, thuốc, phác đồ…'}
+                    placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Tôi có thể giúp gì cho bạn hôm nay?'}
                     rows={1}
                     value={query}
                     onChange={(e) => {
@@ -1892,54 +1902,24 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
                       }
                     }}
                   />
-                      {loading ? (
-                        <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
-                          <span className="composer-stop-square" aria-hidden="true" />
-                        </button>
-                      ) : (
-                        <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
-                          <Send size={22} strokeWidth={2.25} />
-                        </button>
-                      )}
-                  </div>
-                  <div className="composer-actions">
-                    <div className="composer-actions-left">
-                      <button type="button" className="fil-attach-label" onClick={() => setPickerOpen(true)}>
-                        <Paperclip size={15} aria-hidden="true" /> Đính kèm PDF
-                      </button>
-                      {!webSearchOn && webSearchTools.length > 0 && (
-                        <button
-                          type="button"
-                          className="composer-icon-btn"
-                          aria-label="Tìm thêm trên web"
-                          title="Tìm thêm trên web"
-                          onClick={() => setWebSearchOn(true)}
-                        >
-                          <Globe size={19} aria-hidden="true" />
-                        </button>
-                      )}
-                      {webSearchOn && webSearchTools.length > 0 && (
-                        <span className="composer-mode-chip">
-                          <Globe size={16} aria-hidden="true" /> Web
-                          <button type="button" aria-label="Tắt tìm trên web" onClick={() => setWebSearchOn(false)}>
-                            <X size={14} />
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                    <div className="composer-actions-right">
-                      {settings.voiceInputEnabled && (
-                        <button
-                          type="button"
-                          className={`composer-icon-btn ${isRecording === 'chat' ? 'recording' : ''}`}
-                          onClick={() => handleToggleMic('chat', setQuery, () => handleSearch())}
-                          aria-label={isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói'}
-                          title={!micSupported ? 'Trình duyệt không hỗ trợ ghi âm' : (isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói')}
-                        >
-                          {isRecording === 'chat' ? <Square size={14} /> : <Mic size={20} />}
-                        </button>
-                      )}
-                    </div>
+                  {settings.voiceInputEnabled && (
+                    <button type="button" className={`composer-icon-btn ${isRecording === 'chat' ? 'recording' : ''}`}
+                      onClick={() => handleToggleMic('chat', setQuery, () => handleSearch())}
+                      aria-label={isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói'}
+                      aria-pressed={isRecording === 'chat'}
+                      title={!micSupported ? 'Trình duyệt không hỗ trợ ghi âm' : (isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói')}>
+                      {isRecording === 'chat' ? <Square size={16} /> : <Mic size={21} />}
+                    </button>
+                  )}
+                  {loading ? (
+                    <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
+                      <span className="composer-stop-square" aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
+                      <ArrowUp size={23} strokeWidth={2.25} aria-hidden="true" />
+                    </button>
+                  )}
                   </div>
                 </form>
 

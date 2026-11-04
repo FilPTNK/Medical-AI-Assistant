@@ -197,7 +197,7 @@ export default function Website() {
       <header className="fil-header">
         <div className="fil-wrap fil-header-inner">
           <a className="fil-brand" href="/" onClick={followLink} aria-label="Fil, trang chủ">
-            <span className="fil-mark"><Activity size={22} aria-hidden="true" /></span> Fil
+            <img className="fil-logo" src="/fil-logo.svg" alt="Fil" width="118" height="50" />
           </a>
           <nav className="fil-nav" aria-label="Điều hướng chính">
             {tools.map(({ path: href, title }) => (

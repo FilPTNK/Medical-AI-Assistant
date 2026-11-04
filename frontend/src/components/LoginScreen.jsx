@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Pill, Loader2, Eye, EyeOff, ShieldCheck, AlertCircle, RefreshCw,
+  Loader2, Eye, EyeOff, ShieldCheck, AlertCircle, RefreshCw,
   MailCheck, ArrowLeft, Terminal,
 } from 'lucide-react';
 import './LoginScreen.css';
@@ -248,7 +248,7 @@ export default function LoginScreen({
     }
   };
 
-  const brandMark = <div className="lg-mark"><Pill size={26} /></div>;
+  const brandMark = <img className="lg-fil-logo" src="/fil-logo.svg" alt="Fil" width="144" height="61" />;
 
   if (isOffline) {
     return (
