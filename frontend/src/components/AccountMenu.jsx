@@ -9,9 +9,7 @@ import AuthedImage from './AuthedImage';
 import './SettingsDialog.css';
 
 /**
- * Sidebar profile pill + account menu, cloned from chatgpt.com's bottom-left
- * menu. "Help" is a Radix DropdownMenu.Sub trigger — confirmed on the live site
- * by aria-haspopup="menu" on that item.
+ * Account menu in the shared website header.
  *
  * Trước đây menu này có bộ chuyển hồ sơ bác sĩ không mật khẩu. Từ khi phòng khám
  * dùng đăng nhập thật, đổi người dùng nghĩa là đăng xuất rồi đăng nhập lại —
@@ -41,18 +39,14 @@ export function ProfileAvatar({ profile, className = '' }) {
 }
 
 export default function AccountMenu({
-  activeProfile, onOpenSettings, onOpenSection, onEditProfile, onLogout,
-  currentUser, onOpenClinicAdmin,
+  currentUser: account, onOpenSettings, onOpenSection, onEditProfile, onLogout, onOpenClinicAdmin,
 }) {
-  // Tài khoản đang đăng nhập là nguồn sự thật; activeProfile chỉ dùng khi
-  // component được render ngoài luồng đăng nhập (ví dụ bản xem trước).
-  const account = currentUser || activeProfile;
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = account?.role === 'admin';
 
   return (
     <>
       <DropdownMenu.Root>
-        <DropdownMenu.Trigger className="st-pill st-scope" title="Tài khoản">
+        <DropdownMenu.Trigger className="st-pill st-scope fil-account-trigger" aria-label={`Tài khoản: ${account?.display_name || 'Bác sĩ'}`} title="Tài khoản">
           <ProfileAvatar profile={account} className="st-avatar-md" />
           <div className="st-pill-meta">
             <span className="st-pill-name">{account?.display_name}</span>
@@ -60,14 +54,14 @@ export default function AccountMenu({
               {account?.role_label || account?.specialty || 'Bác sĩ'}
             </span>
           </div>
-          <ChevronRight size={15} className="st-pill-chevron" />
+          <ChevronRight size={15} className="st-pill-chevron" aria-hidden="true" />
         </DropdownMenu.Trigger>
 
         <DropdownMenu.Portal>
           <DropdownMenu.Content
             className="st-menu st-scope"
-            side="top"
-            align="start"
+            side="bottom"
+            align="end"
             sideOffset={8}
           >
             <div className="st-menu-account st-menu-account-static">

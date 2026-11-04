@@ -13,7 +13,8 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Any, Dict
+from starlette.concurrency import run_in_threadpool
+from typing import Annotated, List, Optional, Any, Dict
 
 import config
 import documents
@@ -21,6 +22,7 @@ import google_login
 import mailer
 import patient_context
 import drug_allergy
+import drug_catalog
 import drug_interaction
 import pediatric_dose
 import text_fold
@@ -1732,8 +1734,47 @@ def compare_documents(request: CompareRequest, http_request: Request, x_deepseek
     result["created_at"] = time.strftime("%d/%m/%Y %H:%M")
     return result
 
-# Drug / Medicine Lookup AI Report Endpoint
-# Cache for drug textbook metadata
+# Structured drug reference catalog
+@app.get("/api/drug-catalog")
+def list_drug_catalog(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return drug_catalog.list_drugs()
+
+
+@app.get("/api/drug-catalog/{drug_id}")
+def get_catalog_drug(drug_id: str, response: Response):
+    record = drug_catalog.get_drug(drug_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bản ghi thuốc.")
+    response.headers["Cache-Control"] = "no-store"
+    return record
+
+
+@app.post("/api/admin/drug-import")
+async def import_drug_catalog(
+    request: Request,
+    file_format: str,
+    publish: bool = False,
+    admin: Dict[str, Any] = Depends(require_admin),
+):
+    content = bytearray()
+    async for block in request.stream():
+        if len(content) + len(block) > drug_catalog.MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Tệp vượt quá giới hạn 8 MB.")
+        content.extend(block)
+    try:
+        records = await run_in_threadpool(drug_catalog.parse_upload, content, file_format)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if publish:
+        await run_in_threadpool(drug_catalog.publish, records)
+    return {
+        "count": len(records),
+        "sample": [{key: row[key] for key in ("name", "source_title")} for row in records[:5]],
+    }
+
+
+# Drug report support and textbook metadata
 _book_metadata_cache = None
 
 def get_book_metadata():
@@ -2165,20 +2206,24 @@ def get_share(share_id: str):
     return record
 
 @app.get("/api/documents/{doc_name}/pages/{page_num}/image")
-def get_page_image(doc_name: str, page_num: int, dpi: int = 150):
+def get_page_image(
+    doc_name: str, page_num: int, dpi: int = 150,
+    source_pdf_page: Annotated[Optional[int], Query(ge=1)] = None,
+):
     """
     Ảnh scan gốc của một trang, để bác sĩ tự kiểm chứng trích dẫn.
 
     Với sách scan, text OCR luôn có sạn — chính bản OCR có thể là chỗ sai. Bác sĩ
     cần nhìn được trang thật thì việc fact-check mới có nghĩa. page_num là số
-    trang IN; bản đồ trang lo việc quy về đúng trang PDF.
+    trang IN; bản đồ trang lo việc quy về đúng trang PDF. Danh mục thuốc có
+    sẵn số trang PDF để đối chiếu cả khi số trang in bị lặp trong bản quét.
     """
     safe_name = get_safe_filename(doc_name)
     pdf_path = documents.upload_path(safe_name)
     if not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy tệp tài liệu.")
 
-    pdf_page = documents.printed_to_pdf_page(safe_name, page_num)
+    pdf_page = source_pdf_page or documents.printed_to_pdf_page(safe_name, page_num)
     dpi = max(72, min(dpi, 300))
 
     cache_dir = documents.page_images_dir(safe_name)

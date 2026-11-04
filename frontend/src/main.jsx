@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
+import Website from './Website.jsx'
 import { installAuthFetch } from './lib/apiClient'
 
 // Phông NHÚNG THẲNG vào bản dựng, không tải từ Google Fonts. Phòng khám có thể
@@ -13,6 +13,7 @@ import '@fontsource/be-vietnam-pro/600.css'
 import '@fontsource/be-vietnam-pro/700.css'
 
 import './index.css'
+import './website.css'
 
 // Vá fetch trước khi React render: mọi lệnh gọi /api/ trong App tự mang theo
 // session token, và phản hồi 401 sẽ đưa người dùng về màn hình đăng nhập.
@@ -20,6 +21,6 @@ installAuthFetch()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <Website />
   </React.StrictMode>,
 )

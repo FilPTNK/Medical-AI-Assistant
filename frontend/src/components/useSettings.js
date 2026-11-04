@@ -69,7 +69,6 @@ export default function useSettings() {
   const [appearance, setAppearanceState] = useState(() => readString('set_appearance_v2', 'light'));
   const [accentColor, setAccentColorState] = useState(() => readString('set_accent', 'default'));
   const [language, setLanguageState] = useState(() => readString('set_language', 'vi'));
-  const [libraryViewMode, setLibraryViewModeState] = useState(() => readString('med_library_view', 'grid'));
   const [followUpSuggestions, setFollowUpSuggestionsState] = useState(() => readBool('followup_suggestions', true));
 
   // --- Notifications ---
@@ -112,7 +111,6 @@ export default function useSettings() {
   const setAppearance = useMemo(() => persist('set_appearance_v2', setAppearanceState), [persist]);
   const setAccentColor = useMemo(() => persist('set_accent', setAccentColorState), [persist]);
   const setLanguage = useMemo(() => persist('set_language', setLanguageState), [persist]);
-  const setLibraryViewMode = useMemo(() => persist('med_library_view', setLibraryViewModeState), [persist]);
   const setFollowUpSuggestions = useMemo(() => persist('followup_suggestions', setFollowUpSuggestionsState), [persist]);
   const setNotifyEnabled = useMemo(() => persist('notify_enabled', setNotifyEnabledState), [persist]);
   const setNotifyRecheck = useMemo(() => persist('set_notify_recheck', setNotifyRecheckState), [persist]);
@@ -136,24 +134,29 @@ export default function useSettings() {
   }, []);
 
   // Appearance: 'system' follows the OS, otherwise it is pinned.
-  const isDarkMode = useMemo(() => {
-    if (appearance === 'system') {
-      return typeof window !== 'undefined' && window.matchMedia
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
-        : true;
-    }
-    return appearance === 'dark';
-  }, [appearance]);
+  const [systemDark, setSystemDark] = useState(() =>
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
+  const isDarkMode = appearance === 'system' ? systemDark : appearance === 'dark';
 
   // Re-render on OS theme change while "system" is selected.
-  const [, forceTick] = useState(0);
   useEffect(() => {
     if (appearance !== 'system' || !window.matchMedia) return undefined;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => forceTick((n) => n + 1);
+    const onChange = () => setSystemDark(mq.matches);
+    onChange();
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, [appearance]);
+
+  useEffect(() => {
+    const syncAppearance = (event) => {
+      if (event.key === 'set_appearance_v2') {
+        setAppearanceState(['light', 'dark', 'system'].includes(event.newValue) ? event.newValue : 'light');
+      }
+    };
+    window.addEventListener('storage', syncAppearance);
+    return () => window.removeEventListener('storage', syncAppearance);
+  }, []);
 
   // Apply theme + accent to the document so plain CSS can react to both.
   useEffect(() => {
@@ -171,7 +174,6 @@ export default function useSettings() {
     appearance, setAppearance, isDarkMode,
     accentColor, setAccentColor,
     language, setLanguage,
-    libraryViewMode, setLibraryViewMode,
     followUpSuggestions, setFollowUpSuggestions,
     notifyEnabled, setNotifyEnabled,
     notifyRecheck, setNotifyRecheck,

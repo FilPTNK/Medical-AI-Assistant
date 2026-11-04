@@ -6,8 +6,8 @@ those books, and every answer points to the exact page, with the passage
 highlighted on the scan, so he can check it against the original.
 
 > **Tóm tắt.** Trợ lý tra cứu y văn cho bác sĩ, chạy trên chính các cuốn sách
-> scan (Dược thư Quốc gia 2022, sách thuốc biệt dược). Ba tính năng: hỏi đáp có
-> trích dẫn trang, cây chẩn đoán, thư viện thuốc. Lõi truy xuất được thiết kế
+> scan (Dược thư Quốc gia 2022, sách thuốc biệt dược). Ba công cụ: hỏi đáp có
+> trích dẫn trang, hỗ trợ chẩn đoán và danh mục tra cứu thuốc. Lõi truy xuất được thiết kế
 > riêng cho cách bác sĩ Việt gõ và cho cấu trúc cố định của Dược thư.
 
 | Evidence checklist for a two-condition question | The quoted sentence highlighted on the scanned page |
@@ -20,9 +20,11 @@ highlighted on the scan, so he can check it against the original.
 
 | Feature | What the doctor sees |
 |---|---|
-| **Ask the books** | A chat answer with numbered citations. Clicking a citation opens the scanned page with the sentence highlighted. A library document can be attached to the chat to ask only about that document. |
-| **Diagnosis** | A symptom decision tree built from the patient description, with an optional box for prior history. Nothing about the patient is stored. |
-| **Drug library** | Drug lookup, interaction check, allergy cross-check, pediatric dose calculator, and the original books with a page viewer. |
+| **Home** (`/`) | A public homepage with a drug search and links to each tool. |
+| **Drug reference** (`/thuoc`) | Search by generic name or an available alias and filter by initial letter. Read stored monograph sections and open their cited scans. Lookup works without an AI key. |
+| **Ask the books** (`/hoi-dap`) | A separate chat page with numbered citations. Clicking a citation opens the scanned page with the sentence highlighted. |
+| **Diagnosis** (`/chan-doan`) | A symptom decision tree built from one patient description, including any history, current medication and allergies supplied by the doctor. |
+| **Drug administration** (`/quan-tri`) | Administrators can validate and publish CSV or JSON records. The page provides both templates. |
 
 The interface is deliberately plain: one font (Be Vietnam Pro), hospital blue,
 large targets, and no usage instructions to read. My father is not comfortable
@@ -103,8 +105,9 @@ feedback. No external database is needed.
 
 ## Running it
 
-Requirements: Python 3, Node.js, Tesseract OCR with the Vietnamese language
-pack, and a DeepSeek API key in `.env` (`DEEPSEEK_API_KEY=...`).
+Requirements for the website: Python 3 and Node.js. Configure a DeepSeek API key in
+`.env` (`DEEPSEEK_API_KEY=...`) for AI answers and diagnosis. OCR workflows also
+use Tesseract with the Vietnamese language pack.
 
 ```bash
 python run.py        # installs dependencies, starts backend :8000 and frontend :3000
@@ -113,6 +116,24 @@ python run.py        # installs dependencies, starts backend :8000 and frontend 
 Then open http://127.0.0.1:3000. Operational details are in `RUNBOOK.md`;
 deployment notes (frontend on Vercel, backend on a server with a persistent
 disk) are in `DEPLOY_VERCEL.md`.
+
+### Managing the drug directory
+
+Sign in with an administrator account, open `/quan-tri`, and download a CSV or
+JSON template. Upload a UTF-8 file to validate it, then publish it. Each record
+needs a stable `id`, drug name, source title and at least one section. Reusing
+an import ID replaces that entire imported record. The backend stores imports
+in `backend/data/drug_catalog.db`.
+
+When available locally, shared Dược thư Quốc gia Việt Nam 2022 chunks appear
+alongside imported records and are labeled as OCR. Each scan link opens the
+page cited for its section. Manually transcribed monographs in
+`backend/data/verified_monographs/<doc_name>.json` take precedence over OCR
+under the same catalog link. Keep these files with the locally licensed
+corpus. Each manually transcribed section has text blocks and the original
+printed and PDF page numbers.
+A fresh checkout has no bundled monographs. Add the licensed local corpus or
+import reviewed records. See the [redesign and retrieval research](docs/website-and-drug-directory-research.md).
 
 ```bash
 python -m unittest discover -s tests     # backend tests

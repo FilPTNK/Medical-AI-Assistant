@@ -11,148 +11,89 @@ import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
 import { readSseStream } from './lib/sse';
 import { findMatches, bestAnchor } from './lib/fold';
-import SettingsDialog from './components/SettingsDialog';
-import AccountMenu from './components/AccountMenu';
 import PageViewer from './components/PageViewer';
 import AttachmentCard from './components/AttachmentCard';
+import ChatDocuments from './components/ChatDocuments';
 import NumberCheck from './components/NumberCheck';
 import QueryUnderstood from './components/QueryUnderstood';
 import CoverageChecklist from './components/CoverageChecklist';
-import EditProfileDialog from './components/EditProfileDialog';
-import useSettings from './components/useSettings';
-import useProfiles from './components/useProfiles';
 import Pagination from './components/Pagination';
-import LibraryView from './components/LibraryView';
-import useAuth from './components/useAuth';
-import LoginScreen from './components/LoginScreen';
-import ClinicAdminDialog, { ChangePasswordDialog } from './components/ClinicAdmin';
 import DiagnosisTreeView from './components/DiagnosisTreeView';
-import { apiSend } from './lib/apiClient';
+import { apiJson, apiSend } from './lib/apiClient';
 import {
   AlertCircle,
-  ArrowUp,
-  Ban,
+  Activity,
   BookOpen,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
   Copy,
   Download,
   ExternalLink,
+  Eye,
   Globe,
   FileText,
   History,
-  Library,
+  Layers,
   Loader2,
   MessageSquare,
   Mic,
-  Moon,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Paperclip,
   PencilLine,
-  Pill,
   Pin,
   PinOff,
-  Plus,
   ScanLine,
   Search,
+  Send,
   Share2,
   Sparkles,
   Square,
   SquarePen,
   Stethoscope,
-  Sun,
   ThumbsDown,
   Flag,
   ThumbsUp,
   Trash2,
+  UserRound,
   X,
 } from 'lucide-react';
 
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 const MAX_PINNED_CONVERSATIONS = 3;
-
-const DRUG_QUICK_SUGGESTIONS = [
-  "Amoxicilin",
-  "Thuốc hạ huyết áp",
-  "PPI",
-  "Insulin",
-  "Thuốc chống đông",
-  "Paracetamol",
-  "Cephalosporin"
+const CHAT_PROMPTS = [
+  ['Liều paracetamol trẻ em', 'Cách xác định liều paracetamol cho trẻ em theo tài liệu tham khảo?'],
+  ['Tương tác warfarin', 'Những tương tác thuốc nào cần lưu ý khi dùng warfarin?'],
+  ['Phác đồ COPD', 'Tra cứu hướng dẫn điều trị COPD ổn định.'],
+  ['Chẩn đoán đái tháo đường thai kỳ', 'Tra cứu tiêu chuẩn chẩn đoán đái tháo đường thai kỳ.'],
 ];
 
-// Ba chức năng duy nhất của app. `match` gom các tab con: "Tra cứu thuốc" gồm cả
-// tra thuốc lẫn kệ sách tài liệu gốc.
-const MAIN_TABS = [
-  { id: 'chat', label: 'Cuộc trò chuyện mới', Icon: SquarePen, match: ['chat'] },
-  { id: 'diagnosisTree', label: 'Chẩn đoán', Icon: Stethoscope, match: ['diagnosisTree'] },
-  { id: 'medicine', label: 'Tra cứu thuốc', Icon: Pill, match: ['medicine', 'library'] },
-];
-
-export default function App() {
-  // Read-only "shared conversation" route: /?share=<id> (query-based so any static host works)
-  const shareViewId = new URLSearchParams(window.location.search).get('share');
-
-  // Navigation & Page state
-  const [activeTab, setActiveTab] = useState('chat'); // Mở thẳng vào Hỏi đáp y khoa, không màn giới thiệu
-  // Every persisted preference behind the settings dialog lives in this hook.
-  const settings = useSettings();
-  const { isDarkMode, libraryViewMode, setLibraryViewMode } = settings;
-  // Phiên đăng nhập & phân quyền — quyết định thấy hồ sơ của ai, sửa được gì.
-  const auth = useAuth();
-  const { user: currentUser, permissions } = auth;
-  // Doctor identity (name/username/avatar) is API-backed — see components/useProfiles.js
-  const profiles = useProfiles();
-  const doctorName = currentUser?.display_name || profiles.activeProfile?.display_name || 'BS. Hà Thanh Hùng';
-  const [clinicAdminOpen, setClinicAdminOpen] = useState(false);
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const toggleTheme = () => settings.setAppearance(isDarkMode ? 'light' : 'dark');
-
-  // Gỡ màn hình khởi động nằm trong index.html. Nó phải sống cho tới khi biết
-  // chắc sẽ hiện cái gì tiếp theo — màn đăng nhập hay giao diện chính. Gỡ sớm
-  // hơn là bác sĩ lại nhìn thấy một nhịp trắng đúng như trước.
-  useEffect(() => {
-    if (auth.status !== 'loading') window.__bootDone?.();
-  }, [auth.status]);
-
-  // Mọi API hồ sơ đều trả 401 khi chưa có phiên, nên dữ liệu ban đầu được tải ở
-  // đây thay vì lúc mount — nếu không, danh sách bệnh nhân và tài liệu sẽ rỗng
-  // vĩnh viễn sau khi đăng nhập.
-  useEffect(() => {
-    if (auth.status !== 'ready') return;
-    profiles.refresh();
-    fetchDocuments();
-  }, [auth.status]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [showSourcesPanel, setShowSourcesPanel] = useState(true);
+export default function App({ user, settings, clinical, activeTab, onOpenChat }) {
+  const { documents, config, conversations, setConversations, apiKey } = clinical;
+  const doctorName = user?.display_name || 'Bác sĩ';
+  const webSearchTools = config?.web_search_tools || [];
+  const goToChat = () => {
+    if (activeTab !== 'chat') onOpenChat();
+  };
+  const [historyOpen, setHistoryOpen] = useState(null);
+  const [showAllRecent, setShowAllRecent] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [uploadFromComposer, setUploadFromComposer] = useState(false);
+  const [deleteDocTarget, setDeleteDocTarget] = useState(null);
+  const [deletingDocument, setDeletingDocument] = useState(false);
+  const activeConversationRef = useRef(null);
+  const readerCardRef = useRef(null);
+  const readerRequest = useRef(0);
+  const draftVersion = useRef(0);
+  const toggleHistory = () => setHistoryOpen(value => !(value ?? window.matchMedia('(min-width: 1100px)').matches));
 
   // Core Data State
-  const [documents, setDocuments] = useState([]);
-  const [documentsError, setDocumentsError] = useState('');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  // "Thư viện" tab — ChatGPT Library-style gallery state
-  const [librarySearch, setLibrarySearch] = useState('');
-  const [librarySortBy, setLibrarySortBy] = useState('newest'); // 'newest' | 'oldest' | 'name' | 'pages'
-  const [deleteDocTarget, setDeleteDocTarget] = useState(null); // doc_name | null
-  const [libraryPreview, setLibraryPreview] = useState(null); // { doc_name, page_num, text } | null
-  // Đợt 6 — gộp tab "Đối chiếu" vào Thư viện: chọn nhiều thẻ rồi so sánh ngay
-  // tại chỗ, thay vì phải nhảy sang một tab riêng để chọn lại từ đầu.
-  const [librarySelectMode, setLibrarySelectMode] = useState(false);
-  const [librarySelectedDocs, setLibrarySelectedDocs] = useState([]); // [doc_name]
-  const [showComparePanel, setShowComparePanel] = useState(false);
-  const compareViewRef = useRef(null);
-  // Tiến độ các lượt nạp PDF đang chạy nền (bác sĩ tự tải lên), theo dõi qua SSE —
-  // xem handleFileUpload và backend/generic_ingest.py.
-  const [uploadJobs, setUploadJobs] = useState([]); // [{jobId, docName, fileName, stage, current, total, status, error}]
+  const [documentPreview, setDocumentPreview] = useState(null);
   // Reader: mặc định xem TRANG GỐC có tô sáng đoạn trích dẫn (PageViewer);
   // bật cái này để đọc bản chữ OCR thay vì ảnh.
   const [readerShowText, setReaderShowText] = useState(false);
@@ -174,32 +115,15 @@ export default function App() {
   // tìm kiếm gõ tiếp không làm nhấp nháy phần tô sáng của kết quả đang đọc.
   const [readerHighlight, setReaderHighlight] = useState('');
 
-  // Lịch sử tra cứu (tái sử dụng kết quả cũ thay vì hỏi lại AI)
-  // { doc_name: số đoạn đã tô sáng }
-  const [highlightCounts, setHighlightCounts] = useState({});
   const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('deepseek_api_key') || '');
   // "Tìm thêm trên web": danh sách công cụ máy chủ bật (rỗng = ẩn nút), và lựa
   // chọn của bác sĩ — nhớ theo trình duyệt, mặc định tắt.
-  const [webSearchTools, setWebSearchTools] = useState([]);
   const [webSearchOn, setWebSearchOn] = useState(() => {
     try { return localStorage.getItem('web_search_on') === '1'; } catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem('web_search_on', webSearchOn ? '1' : '0'); } catch { /* chế độ riêng tư */ }
   }, [webSearchOn]);
-  const [bannerMessage, setBannerMessage] = useState('');
-  const [backendHasKey, setBackendHasKey] = useState(false);
-
-  // "Cài đặt" tab state — doctor profile (moved here from the header pill) + ChatGPT-style preference toggles
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState('general');
-
-  const openSettings = (section) => {
-    if (section) setSettingsSection(section);
-    setSettingsOpen(true);
-  };
 
   // Hierarchical multi-layer decision tree data structure
   const [nodeStatusMap, setNodeStatusMap] = useState({});
@@ -213,19 +137,7 @@ export default function App() {
   const [activeLogId, setActiveLogId] = useState(null);
   const [wrongPages, setWrongPages] = useState(() => new Set());
 
-  // "Thuốc" (medicine lookup & AI report) state
-  const [drugQuery, setDrugQuery] = useState('');
-  const [drugLoading, setDrugLoading] = useState(false);
-  // null = chưa tra cứu gì — hiện trạng thái rỗng thay vì báo cáo mẫu.
-  const [drugReport, setDrugReport] = useState(null);
-  const [activeDrugTocId, setActiveDrugTocId] = useState('1');
-  const [selectedFactCheckDoc, setSelectedFactCheckDoc] = useState(null);
-  const [showAllResourcesDialog, setShowAllResourcesDialog] = useState(false);
-  const [copiedDrugToast, setCopiedDrugToast] = useState(false);
-  const [resourceSearch, setResourceSearch] = useState('');
-
-  // Voice input (Web Speech API) — shared between the Chat and Thuốc search bars
-  const [isRecording, setIsRecording] = useState(null); // null | 'chat' | 'medicine'
+  const [isRecording, setIsRecording] = useState(null); // null | 'chat'
   const [micSupported] = useState(() => typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window));
   const recognitionRef = useRef(null);
   const recognitionTargetRef = useRef(null);
@@ -256,22 +168,15 @@ export default function App() {
   const [selectedDiagnosisIds, setSelectedDiagnosisIds] = useState(new Set());
   const [isPreparingHandoff, setIsPreparingHandoff] = useState(false);
 
-  // Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — gửi kèm cả bốn bước
-  // của cây chẩn đoán. App không lưu hồ sơ bệnh nhân; chữ này chỉ sống trong phiên.
-  const [patientHistory, setPatientHistory] = useState('');
-  // Nguyên văn khối tiền sử backend đã gửi ra DeepSeek, trả ngược về để hiện
-  // cho bác sĩ.
-  const [patientContextSent, setPatientContextSent] = useState(null);
+  // Keep follow-up requests tied to the description used to generate this tree.
+  const [submittedPatientDesc, setSubmittedPatientDesc] = useState('');
   const [allergyCheck, setAllergyCheck] = useState(null);
-  const [patientContextOpen, setPatientContextOpen] = useState(false);
   // Gợi ý điều trị cho các chẩn đoán bác sĩ đã chọn, hiện ngay trong tab Chẩn đoán.
   const [treatmentResult, setTreatmentResult] = useState(null);
 
   // Multi-conversation state (ChatGPT-style): each conversation is its own thread with
   // a title, message list, and pin flag. Conversations persist to localStorage.
-  const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null); // null = draft "new chat", not yet in the list
-  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [renamingConvId, setRenamingConvId] = useState(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTargetId, setDeleteTargetId] = useState(null);
@@ -285,111 +190,45 @@ export default function App() {
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
   const messages = activeConversation ? activeConversation.messages : draftWelcome;
 
-  const fileInputRef = useRef(null);
+  useEffect(() => {
+    if (!activeConversationId || activeConversation) return;
+    activeConversationRef.current = null;
+    readerRequest.current += 1;
+    setActiveConversationId(null);
+    setActiveSources([]);
+    setActiveLogId(null);
+    setActivePage(null);
+    setSelectedSourceIndex(0);
+  }, [activeConversationId, activeConversation]);
+
   const chatEndRef = useRef(null);
 
-  // Suggested queries for Vietnamese UI
-  const [greeting] = useState(() => {
-    const options = [
-      'Hôm nay bác sĩ cần tra cứu gì?',
-      'Tôi có thể giúp gì cho bác sĩ?',
-      'Bác sĩ muốn hỏi điều gì?',
-    ];
-    return options[Math.floor(Math.random() * options.length)];
-  });
-  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
-  const [convSearchOpen, setConvSearchOpen] = useState(false);
-  const [convSearch, setConvSearch] = useState('');
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [recentsOpen, setRecentsOpen] = useState(true);
 
-  // The dark-mode class and accent variable are applied by useSettings().
-
-  // Global shortcuts — these are the ones listed in Settings → Phím tắt.
   useEffect(() => {
-    const onKeyDown = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
-
+    if (activeTab !== 'chat') return undefined;
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
       if (key === 'k') {
-        e.preventDefault();
-        setActiveTab('chat');
-        // wait for the chat view to mount before focusing
-        setTimeout(() => chatInputRef.current?.focus(), 0);
-      } else if (key === 'o' && e.shiftKey) {
-        e.preventDefault();
+        event.preventDefault();
+        chatInputRef.current?.focus();
+      } else if (key === 'o' && event.shiftKey) {
+        event.preventDefault();
         handleNewChat();
       } else if (key === 'b') {
-        e.preventDefault();
-        setIsSidebarCollapsed(v => !v);
-      } else if (key === '/') {
-        e.preventDefault();
-        openSettings('keyboard');
-      } else if (key === ',') {
-        e.preventDefault();
-        openSettings('general');
+        event.preventDefault();
+        toggleHistory();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cuộc trò chuyện nằm trong localStorage nên đọc được ngay; tài liệu và bệnh
-  // nhân phải chờ đăng nhập xong (xem effect theo auth.status ở trên).
   useEffect(() => {
-    const saved = localStorage.getItem('med_conversations');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setConversations(parsed);
-      } catch (err) {
-        console.error("Error parsing saved conversations:", err);
-      }
-    }
-    setConversationsLoaded(true);
-
-    // Check if backend already has DeepSeek API key configured
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.has_api_key) {
-          setBackendHasKey(true);
-        }
-        setWebSearchTools(data?.web_search_tools || []);
-      })
-      .catch(err => console.error("Error fetching config status:", err));
-  }, []);
-
-  // Refresh documents list when switching tabs to ensure freshness (handles backend startup lag)
-  useEffect(() => {
-    fetchDocuments();
-  }, [activeTab]);
-
-  // Đếm lại số đoạn đã tô sáng khi mở Thư viện và sau khi đóng trình đọc
-  useEffect(() => {
-    if (activeTab === 'library' && !libraryPreview) fetchHighlightCounts();
-  }, [activeTab, libraryPreview]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Sync API warning banner
-  useEffect(() => {
-    if (!apiKey && !backendHasKey) {
-      setBannerMessage("Chưa cấu hình khóa AI: câu trả lời AI sẽ không hiển thị, chỉ hiện trang sách.");
-    } else {
-      setBannerMessage("");
-    }
-  }, [apiKey, backendHasKey]);
-
-  // Auto-scroll chat window when new messages arrive
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
-
-  // Persist conversations to localStorage (skip the very first render, before the saved list has loaded)
-  useEffect(() => {
-    if (!conversationsLoaded) return;
-    localStorage.setItem('med_conversations', JSON.stringify(conversations));
-  }, [conversations, conversationsLoaded]);
+    if (loading && activeTab === 'chat') chatEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [messages, loading, activeTab]);
 
   // Focus the inline rename input when entering rename mode
   useEffect(() => {
@@ -398,32 +237,6 @@ export default function App() {
       renameInputRef.current.select();
     }
   }, [renamingConvId]);
-
-  const fetchDocuments = async () => {
-    setDocumentsError('');
-    try {
-      const res = await fetch('/api/documents');
-      if (res.ok) {
-        const data = await res.json();
-        setDocuments(data || []);
-      } else {
-        setDocumentsError('Không tải được thư viện. Vui lòng thử lại.');
-      }
-    } catch (err) {
-      console.error("Error fetching documents:", err);
-      setDocumentsError('Không kết nối được với thư viện. Vui lòng thử lại.');
-    }
-  };
-
-  // Số đoạn đã tô sáng theo từng tài liệu, hiển thị trên thẻ ở Thư viện
-  const fetchHighlightCounts = async () => {
-    try {
-      const res = await fetch('/api/highlights/counts');
-      if (res.ok) setHighlightCounts(await res.json());
-    } catch (err) {
-      console.error("Error fetching highlight counts:", err);
-    }
-  };
 
   const showStatus = (type, text) => {
     setStatusMsg({ type, text });
@@ -498,7 +311,11 @@ export default function App() {
   };
 
   const handleNewChat = () => {
+    draftVersion.current += 1;
     setChatScope(null);
+    if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
+    activeConversationRef.current = null;
+    readerRequest.current += 1;
     setActiveConversationId(null);
     setDraftWelcome([]);
     setActiveSources([]);
@@ -506,13 +323,21 @@ export default function App() {
     setActivePage(null);
     setSelectedSourceIndex(0);
     setQuery('');
-    setActiveTab('chat');
+    goToChat();
   };
 
   const handleSelectConversation = (id) => {
     if (renamingConvId === id) return; // don't switch away while editing the title
+    if (id !== activeConversationRef.current) {
+      draftVersion.current += 1;
+      setChatScope(null);
+      setQuery('');
+    }
+    activeConversationRef.current = id;
+    readerRequest.current += 1;
     setActiveConversationId(id);
-    setActiveTab('chat');
+    if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
+    goToChat();
     const conv = conversations.find(c => c.id === id);
     const lastWithSources = conv ? [...conv.messages].reverse().find(m => m.sources && m.sources.length > 0) : null;
     if (lastWithSources) {
@@ -606,7 +431,6 @@ export default function App() {
           exit={{ opacity: 0, height: 0 }}
           transition={{ duration: 0.16 }}
           className={`conv-item ${conv.id === activeConversationId ? 'active' : ''}`}
-          onClick={() => handleSelectConversation(conv.id)}
         >
                     {renamingConvId === conv.id ? (
             <input
@@ -622,14 +446,20 @@ export default function App() {
               }}
             />
           ) : (
-            <span className="conv-item-title" title={conv.title}>{conv.title}</span>
+            <button type="button" className="conv-item-title fil-conv-select" title={conv.title}
+              onClick={() => handleSelectConversation(conv.id)} aria-current={conv.id === activeConversationId ? 'true' : undefined}>
+              {conv.pinned ? <Pin size={15} aria-hidden="true" /> : <MessageSquare size={15} aria-hidden="true" />}
+              <span><strong>{conv.title}</strong>{conv.updatedAt && <small>{new Date(conv.updatedAt).toLocaleString('vi-VN', {
+                dateStyle: 'short', timeStyle: 'short',
+              })}</small>}</span>
+            </button>
           )}
 
           {renamingConvId !== conv.id && (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button
-                  className="conv-item-menu-btn"
+                  type="button" className="conv-item-menu-btn"
                   onClick={(e) => e.stopPropagation()}
                   title="Tùy chọn cuộc trò chuyện"
                 >
@@ -673,9 +503,9 @@ export default function App() {
   // Chat search (uses LLM) — creates a new conversation on the first message of a draft chat
   const handleSearch = async (searchQuery) => {
     const q = searchQuery || query;
-    if (!q.trim()) return;
+    if (!q.trim() || searchAbortRef.current) return;
 
-    setActiveTab('chat'); // Redirect to chat view when running search
+    goToChat();
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -683,6 +513,11 @@ export default function App() {
     // trong ô nhập biến mất, còn tin nhắn đã gửi giữ thẻ để biết câu nào hỏi
     // riêng trong sách nào.
     const attachment = chatScope;
+    draftVersion.current += 1;
+    readerRequest.current += 1;
+    setActiveSources([]);
+    setActivePage(null);
+    setActiveLogId(null);
     const userMsg = { role: 'user', text: q, time: timeStr, ...(attachment ? { attachment } : {}) };
     setChatScope(null);
 
@@ -698,6 +533,7 @@ export default function App() {
         updatedAt: Date.now()
       };
       setConversations(prev => [newConversation, ...prev]);
+      activeConversationRef.current = convId;
       setActiveConversationId(convId);
     } else {
       appendMessageToConversation(convId, userMsg);
@@ -755,15 +591,10 @@ export default function App() {
         } else if (event === 'sources') {
           const sources = data.sources || [];
           patchLastMessage(convId, m => ({ ...m, sources, statusNote: null }));
-          setActiveLogId(null);
-          if (sources.length > 0) {
-            // Trình đọc trang chỉ mở được trang sách; nguồn web mở ở tab mới.
-            const firstBook = sources.findIndex(s => !isWebSource(s));
+          if (activeConversationRef.current === convId) {
+            setActiveLogId(null);
             setActiveSources(sources);
-            setSelectedSourceIndex(Math.max(firstBook, 0));
-            setActivePage(firstBook >= 0 ? sources[firstBook] : null);
-          } else {
-            setActiveSources([]);
+            setSelectedSourceIndex(0);
             setActivePage(null);
           }
         } else if (event === 'query_normalized') {
@@ -775,9 +606,12 @@ export default function App() {
         } else if (event === 'verify') {
           patchLastMessage(convId, m => ({ ...m, verify: data }));
         } else if (event === 'done') {
+          if (settings.notifyEnabled && document.visibilityState !== 'visible') {
+            clinical.addNotification('Tra cứu y khoa đã hoàn tất.');
+          }
           if (data.log_id) {
             patchLastMessage(convId, m => ({ ...m, logId: data.log_id }));
-            setActiveLogId(data.log_id);
+            if (activeConversationRef.current === convId) setActiveLogId(data.log_id);
           }
         } else if (event === 'delta') {
           patchLastMessage(convId, m => ({ ...m, text: m.text + data.text }));
@@ -819,285 +653,6 @@ export default function App() {
   };
 
   // AI Drug Lookup (Generates comprehensive clinical report with NotebookLM-style citations)
-  const handleDrugLookup = async (queryText) => {
-    const q = (typeof queryText === 'string' ? queryText : drugQuery).trim();
-    if (!q) return;
-
-    setDrugLoading(true);
-    if (typeof queryText === 'string') {
-      setDrugQuery(queryText);
-    }
-
-    try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (apiKey) {
-        headers['X-DeepSeek-Key'] = apiKey;
-      }
-
-      const res = await fetch('/api/drugs/report', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query: q })
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        const detail = errorData?.detail;
-        let message = "Không thể tạo báo cáo tra cứu thuốc.";
-        if (typeof detail === 'string' && detail.trim()) {
-          message = detail;
-        } else if (Array.isArray(detail) && detail.length > 0) {
-          message = detail.map(d => (typeof d === 'string' ? d : d?.msg)).filter(Boolean).join('; ') || message;
-        } else if (detail && typeof detail === 'object' && detail.msg) {
-          message = detail.msg;
-        }
-        throw new Error(message);
-      }
-
-      // Báo cáo về theo luồng SSE thay vì một cục JSON: nguồn trích dẫn đến
-      // trước, rồi từng đoạn nội dung. Nhờ vậy chữ đầu tiên hiện sau khoảng
-      // nửa giây thay vì phải chờ trọn ~19s như bản chặn trước đây.
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      let meta = {};
-      let data = null;
-      let streamError = null;
-
-      const handleFrame = (frame) => {
-        const lines = frame.split('\n');
-        const evLine = lines.find(l => l.startsWith('event: '));
-        const dataLine = lines.find(l => l.startsWith('data: '));
-        if (!evLine || !dataLine) return;
-        const ev = evLine.slice(7).trim();
-        let payload;
-        try {
-          payload = JSON.parse(dataLine.slice(6));
-        } catch {
-          return;
-        }
-
-        if (ev === 'meta') {
-          meta = payload;
-          // Xoá báo cáo cũ ngay, nếu không nội dung cũ còn dính lại trên màn
-          // hình trong lúc báo cáo mới đang chảy về.
-          setDrugReport({
-            drug_name: q,
-            subtitle: 'Đang tổng hợp dữ liệu dược lý...',
-            confidence_overall: 'Cao',
-            quick_summary: [],
-            sections: [],
-            ...payload
-          });
-          setActiveDrugTocId('1');
-        } else if (ev === 'update') {
-          data = { ...payload, ...meta };
-          setDrugReport(data);
-          // Tắt skeleton ngay khi có chữ đầu tiên, nếu không người dùng vẫn
-          // chỉ thấy ô chờ tải trong suốt cả quá trình stream.
-          setDrugLoading(false);
-        } else if (ev === 'error') {
-          streamError = payload?.detail || 'Không thể tạo báo cáo tra cứu thuốc.';
-        }
-      };
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const frames = buf.split('\n\n');
-        buf = frames.pop();
-        frames.forEach(handleFrame);
-        if (streamError) break;
-      }
-      if (buf.trim()) handleFrame(buf);
-
-      if (streamError) throw new Error(streamError);
-      showStatus('success', `Đã tạo báo cáo tra cứu thuốc "${data?.drug_name || q}".`);
-    } catch (err) {
-      console.error("Error generating drug report:", err);
-      showStatus('error', err.message);
-    } finally {
-      setDrugLoading(false);
-    }
-  };
-
-  const handleCopyDrugReport = () => {
-    if (!drugReport) return;
-    let text = `# BÁO CÁO Y KHOA: ${drugReport.drug_name || 'TRA CỨU THUỐC'}\n`;
-    if (drugReport.subtitle) text += `*${drugReport.subtitle}*\n`;
-    text += `\n`;
-
-    if (drugReport.quick_summary && drugReport.quick_summary.length > 0) {
-      text += `## TÓM TẮT NHANH:\n`;
-      drugReport.quick_summary.forEach(qs => {
-        text += `- ${qs.text}\n`;
-      });
-      text += `\n`;
-    }
-
-    if (drugReport.sections && drugReport.sections.length > 0) {
-      drugReport.sections.forEach(sec => {
-        text += `## ${sec.title}\n${sec.content}\n\n`;
-      });
-    }
-
-
-    navigator.clipboard.writeText(text);
-    setCopiedDrugToast(true);
-    setTimeout(() => setCopiedDrugToast(false), 2500);
-    showStatus('success', 'Đã sao chép toàn bộ báo cáo vào bộ nhớ tạm.');
-  };
-
-  const handleCitationClick = (citationId) => {
-    if (!drugReport || !drugReport.sources) return;
-    const cleanId = String(citationId).replace(/[^\d]/g, '');
-    const foundDoc = drugReport.sources.find(s => String(s.id) === cleanId) || drugReport.sources[parseInt(cleanId, 10) - 1] || drugReport.sources[0];
-    if (foundDoc) {
-      setSelectedFactCheckDoc(foundDoc);
-    }
-  };
-
-  const renderDrugSectionContent = (content) => {
-    if (!content) return null;
-    const parts = content.split(/(\[\d+\])/g);
-    return (
-      <div className="drug-sec-text">
-        {parts.map((part, index) => {
-          const match = part.match(/^\[(\d+)\]$/);
-          if (match) {
-            const citeNum = match[1];
-            return (
-              <button
-                key={index}
-                type="button"
-                className="drug-inline-citation"
-                title={`Kiểm chứng nguồn [${citeNum}]`}
-                onClick={() => handleCitationClick(citeNum)}
-              >
-                [{citeNum}]
-              </button>
-            );
-          }
-          return (
-            <ReactMarkdown
-              key={index}
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => <span>{children}</span>
-              }}
-            >
-              {part}
-            </ReactMarkdown>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // Đợt 6 — nạp PDF không còn chờ một request duy nhất tới lúc xong (có thể
-  // mất nhiều phút với PDF scan dày, phải OCR): tải lên trả về ngay job_id,
-  // rồi theo dõi tiến độ thật qua SSE và hiện một thẻ tiến độ trong lưới Thư
-  // viện — xem backend/generic_ingest.py + /api/documents/ingest.
-  const updateUploadJob = (jobId, patch) => {
-    setUploadJobs(prev => prev.map(j => (j.jobId === jobId ? { ...j, ...patch } : j)));
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (fileInputRef.current) fileInputRef.current.value = '';
-
-    if (!file.name.toLowerCase().endsWith('.pdf') || file.size > 64 * 1024 * 1024) {
-      showStatus('error', 'Chỉ hỗ trợ PDF tối đa 64 MiB và 300 trang.');
-      return;
-    }
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
-    let jobId, docName, visibility;
-    try {
-      const res = await fetch('/api/documents/ingest', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        throw new Error(errorData?.detail || 'Tải lên tệp thất bại.');
-      }
-      ({ job_id: jobId, doc_name: docName, visibility } = await res.json());
-    } catch (err) {
-      console.error(err);
-      showStatus('error', err.message);
-      setUploading(false);
-      return;
-    } finally {
-      setUploading(false);
-    }
-
-    setUploadJobs(prev => [
-      ...prev,
-      { jobId, docName, fileName: file.name, stage: 'Đang chờ xử lý...', current: 0, total: 0, status: 'queued' },
-    ]);
-
-    try {
-      const res = await fetch(`/api/documents/ingest/${encodeURIComponent(jobId)}/events`);
-      await readSseStream(res, (event, data) => {
-        if (event === 'error') {
-          updateUploadJob(jobId, { status: 'error', error: data?.message || 'Lỗi không rõ.' });
-          return;
-        }
-        // event === 'progress': dữ liệu là job dict của backend/ingest_jobs.py
-        updateUploadJob(jobId, {
-          stage: data.stage, current: data.current, total: data.total,
-          status: data.status, error: data.error, warnings: data.warnings || [],
-        });
-        if (data.status === 'done') {
-          const scope = visibility === 'private' ? 'vào kho riêng của bạn' : 'vào thư viện chung của phòng khám';
-          showStatus('success', `Đã nạp xong "${file.name}" (${data.total || '?'} trang) ${scope}.`);
-          fetchDocuments();
-          setTimeout(() => setUploadJobs(prev => prev.filter(j => j.jobId !== jobId)), 2000);
-        } else if (data.status === 'error') {
-          showStatus('error', `Nạp "${file.name}" thất bại: ${data.error || 'lỗi không rõ.'}`);
-        }
-      });
-    } catch (err) {
-      console.error(err);
-      updateUploadJob(jobId, { status: 'error', error: err.message });
-    }
-  };
-
-  const dismissUploadJob = (jobId) => setUploadJobs(prev => prev.filter(j => j.jobId !== jobId));
-
-  const handleDeleteDoc = async (docName) => {
-    try {
-      const res = await fetch(`/api/documents/${encodeURIComponent(docName)}`, {
-        method: 'DELETE'
-      });
-
-      if (res.ok) {
-        showStatus('success', `Đã xóa tài liệu "${docName}".`);
-        fetchDocuments();
-        if (activePage && activePage.doc_name === docName) {
-          setActivePage(null);
-        }
-        if (libraryPreview && libraryPreview.doc_name === docName) {
-          setLibraryPreview(null);
-        }
-      } else {
-        const errData = await res.json();
-        throw new Error(errData.detail || "Không thể xóa tài liệu.");
-      }
-    } catch (err) {
-      showStatus('error', err.message);
-    }
-  };
-
-  const confirmDeleteDocument = () => {
-    if (!deleteDocTarget) return;
-    handleDeleteDoc(deleteDocTarget);
-    setDeleteDocTarget(null);
-  };
-
   const handleDownloadDocument = async (docName) => {
     // PDF sách gốc nặng hàng trăm MB (Dược thư Quyển 1: ~835 MB), nên không fetch về
     // blob như các tệp nhỏ — cả tệp sẽ nằm trong RAM của tab. Để trình duyệt tự
@@ -1119,8 +674,8 @@ export default function App() {
   };
 
   // Xem sách = ảnh trang PDF gốc (PageViewer tự tải ảnh), không cần lấy text.
-  const handleOpenLibraryPreview = (docName, pageNum = 1) => {
-    setLibraryPreview({ doc_name: docName, page_num: pageNum });
+  const handleOpenDocumentPreview = (docName, pageNum = 1) => {
+    setDocumentPreview({ doc_name: docName, page_num: pageNum });
   };
 
   // Biên chuyển trang của reader. Số trang trong trích dẫn là số trang IN, mà
@@ -1141,10 +696,12 @@ export default function App() {
   // mở đúng trang VÀ tô sáng sẵn đúng đoạn đó — không bắt bác sĩ tự dò lại bằng
   // mắt trên một trang sách đầy chữ.
   const handleOpenPageReader = async (docName, pageNum, fallbackSource = null, quoteToHighlight = null) => {
+    const request = ++readerRequest.current;
     try {
       const res = await fetch(`/api/documents/${encodeURIComponent(docName)}/pages/${pageNum}`);
       if (res.ok) {
         const data = await res.json();
+        if (request !== readerRequest.current) return;
         setActivePage(data);
         if (quoteToHighlight) setReaderQuote({ doc_name: docName, page_num: pageNum, quote: quoteToHighlight });
         if (quoteToHighlight) {
@@ -1153,6 +710,7 @@ export default function App() {
           setReaderHighlight(bestAnchor(data.text || '', quoteToHighlight));
         }
       } else {
+        if (request !== readerRequest.current) return;
         if (fallbackSource) {
           setActivePage(fallbackSource);
         } else {
@@ -1161,6 +719,7 @@ export default function App() {
         }
       }
     } catch (err) {
+      if (request !== readerRequest.current) return;
       if (fallbackSource) {
         setActivePage(fallbackSource);
       } else {
@@ -1268,9 +827,11 @@ export default function App() {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (activePage?.doc_name) {
+      urlPageOpened.current = true;
       url.searchParams.set('doc', activePage.doc_name);
       url.searchParams.set('page', String(activePage.page_num));
     } else {
+      if (!urlPageOpened.current) return;
       url.searchParams.delete('doc');
       url.searchParams.delete('page');
     }
@@ -1287,71 +848,13 @@ export default function App() {
     const page = parseInt(params.get('page') || '', 10);
     if (doc && Number.isFinite(page)) {
       urlPageOpened.current = true;
-      setActiveTab('library');
       handleOpenPageReader(doc, page);
     }
   }, [documents]);
 
-  const handleSaveApiKey = (value) => {
-    setApiKey(value);
-    localStorage.setItem('deepseek_api_key', value);
-    showStatus('success', 'Đã cập nhật DeepSeek API Key thành công!');
-  };
-
-  // Settings → Kiểm soát dữ liệu → Xuất dữ liệu
-  const handleExportData = () => {
-    const payload = {
-      exported_at: new Date().toISOString(),
-      doctor: {
-        name: profiles.activeProfile?.display_name,
-        username: profiles.activeProfile?.username,
-        specialty: profiles.activeProfile?.specialty,
-        email: profiles.activeProfile?.email,
-      },
-      custom_instructions: settings.customInstructions,
-      conversations,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tro-ly-y-khoa-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showStatus('success', 'Đã xuất dữ liệu ra tệp JSON.');
-  };
-
-  // Settings → Kiểm soát dữ liệu → Lưu trữ tất cả (hides from the sidebar, keeps content)
-  const handleArchiveAllConversations = () => {
-    setConversations(prev => prev.map(c => ({ ...c, archived: true })));
-    showStatus('success', 'Đã lưu trữ toàn bộ cuộc trò chuyện.');
-  };
-
-  // Settings → Tài khoản → Xóa toàn bộ dữ liệu cục bộ
-  const handleResetLocalData = () => {
-    if (!confirm('Xóa toàn bộ cài đặt và cuộc trò chuyện trên trình duyệt này? Hành động này không thể hoàn tác.')) return;
-    localStorage.clear();
-    window.location.reload();
-  };
-
-  const handleLogout = async () => {
-    if (!confirm('Đăng xuất khỏi thiết bị này?')) return;
-    setSettingsOpen(false);
-    await auth.logout();
-  };
-
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     showStatus('success', 'Đã sao chép nội dung vào bộ nhớ tạm.');
-  };
-
-  const handleDeleteAllConversations = () => {
-    if (!confirm("Xóa toàn bộ lịch sử trò chuyện? Hành động này không thể hoàn tác.")) return;
-    setConversations([]);
-    handleNewChat();
-    showStatus('success', 'Đã xóa toàn bộ cuộc trò chuyện.');
   };
 
   // Voice input via the browser's SpeechRecognition API, shared by the Chat and Thuốc search bars
@@ -1497,18 +1000,19 @@ export default function App() {
     };
   }, [isPanningTree]);
 
-  // Native (non-passive) wheel listener so we can preventDefault and zoom instead of scrolling the page
+  // Plain wheel scrolls the page; Ctrl+wheel zooms the symptom tree.
   useEffect(() => {
     const wrapper = treeWrapperRef.current;
-    if (!wrapper) return;
+    if (!wrapper || !diagnosisTree) return;
     const handleWheel = (e) => {
+      if (!e.ctrlKey) return;
       e.preventDefault();
       const rect = wrapper.getBoundingClientRect();
       zoomTreeAroundPoint(e.clientX - rect.left, e.clientY - rect.top, clampTreeZoom(zoomScale * Math.exp(-e.deltaY * 0.001)));
     };
     wrapper.addEventListener('wheel', handleWheel, { passive: false });
     return () => wrapper.removeEventListener('wheel', handleWheel);
-  }, [zoomScale]);
+  }, [zoomScale, activeTab, diagnosisTree]);
 
   // Walks the tree honoring the reveal-on-answer rule: only descends into a branch once it has
   // been explicitly answered — boolean 'yes', a chosen 'choice' option, or a filled 'text' value.
@@ -1552,7 +1056,8 @@ export default function App() {
   };
 
   const handleGenerateTree = async () => {
-    if (!patientDesc.trim()) return;
+    const description = patientDesc.trim();
+    if (!description) return;
     setTreeLoading(true);
     setDiagnosisTree(null);
     setNodeStatusMap({});
@@ -1569,7 +1074,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-Deepseek-Key': apiKey || ''
         },
-        body: JSON.stringify({ description: patientDesc, patient_history: patientHistory.trim() || null })
+        body: JSON.stringify({ description })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -1577,10 +1082,8 @@ export default function App() {
       }
       const data = await res.json();
       setDiagnosisTree(data);
-      setPatientContextSent(data.patient_context || null);
-      showStatus('success', patientHistory.trim()
-        ? "Đã tạo cây chẩn đoán từ mô tả bệnh nhân và tình trạng trước đó."
-        : "Đã tạo cây chẩn đoán từ mô tả bệnh nhân.");
+      setSubmittedPatientDesc(description);
+      showStatus('success', "Đã tạo cây chẩn đoán từ mô tả bệnh nhân.");
     } catch (err) {
       console.error(err);
       showStatus('error', err.message);
@@ -1745,7 +1248,7 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded,
-                               patient_history: patientHistory.trim() || null })
+                               patient_history: submittedPatientDesc || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -1753,7 +1256,6 @@ export default function App() {
       }
       const data = await res.json();
       setExamResult(data);
-      if (data.patient_context) setPatientContextSent(data.patient_context);
       showStatus('success', "Đã có gợi ý khám & nội soi.");
     } catch (err) {
       console.error(err);
@@ -1779,7 +1281,7 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ confirmed_symptoms: confirmed, excluded_symptoms: excluded, exam_notes: examNotes,
-                               patient_history: patientHistory.trim() || null })
+                               patient_history: submittedPatientDesc || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -1787,7 +1289,6 @@ export default function App() {
       }
       const data = await res.json();
       setFinalDiagnoses(data.diagnoses || []);
-      if (data.patient_context) setPatientContextSent(data.patient_context);
       setSelectedDiagnosisIds(new Set());
       showStatus('success', "Đã có kết quả chẩn đoán cuối cùng.");
     } catch (err) {
@@ -1808,7 +1309,7 @@ export default function App() {
   };
 
   // "Gợi ý điều trị" — phác đồ gợi ý cho các chẩn đoán bác sĩ đã chọn, kèm đối
-  // chiếu dị ứng với ô tiền sử. Hiện ngay trong tab Chẩn đoán, không ghi đi đâu.
+  // chiếu dị ứng trong mô tả bệnh nhân. Hiện ngay trong tab Chẩn đoán, không ghi đi đâu.
   const handleSuggestTreatment = async () => {
     if (selectedDiagnosisIds.size === 0) return;
     const chosen = finalDiagnoses.filter((_, idx) => selectedDiagnosisIds.has(idx));
@@ -1823,14 +1324,13 @@ export default function App() {
           'X-Deepseek-Key': apiKey || ''
         },
         body: JSON.stringify({ diagnoses: ranked, exam_notes: examNotes,
-                               patient_history: patientHistory.trim() || null })
+                               patient_history: submittedPatientDesc || null })
       });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || "Gợi ý điều trị thất bại.");
       }
       const treatment = await res.json();
-      if (treatment.patient_context) setPatientContextSent(treatment.patient_context);
       // Gán thẳng, kể cả khi null: "đã đối chiếu và không thấy gì" khác hẳn
       // "chưa đối chiếu".
       setAllergyCheck(treatment.allergy_check || null);
@@ -1854,19 +1354,21 @@ export default function App() {
     || documents.find(d => d.doc_name === src?.doc_name)?.doc_title
     || src?.doc_name || '';
   const sourceCitation = (src) =>
-    src?.citation || `${src?.doc_name || ''} — tr. ${src?.page_num ?? '?'}`;
+    src?.citation || (src?.kind === 'web' ? sourceTitle(src) || src.provider || 'Nguồn web'
+      : `${sourceTitle(src)} — tr. ${src?.page_num ?? '?'}`);
 
   const isWebSource = (src) => src?.kind === 'web';
 
   /** Mở một nguồn: trang sách vào trình đọc, nguồn web sang tab mới. */
-  const openSource = (src, idx) => {
+  const openSource = async (src, idx, logId = activeLogId) => {
     setSelectedSourceIndex(idx);
-    if (activeLogId && !isWebSource(src)) sendFeedback(activeLogId, 'open', idx);
+    if (logId && !isWebSource(src)) sendFeedback(logId, 'open', idx);
     if (isWebSource(src)) {
       if (src.url) window.open(src.url, '_blank', 'noopener,noreferrer');
       return;
     }
-    handleOpenPageReader(src.doc_name, src.page_num, src, src.quote || src.text || src.snippet);
+    await handleOpenPageReader(src.doc_name, src.page_num, src, src.quote || src.text || src.snippet);
+    requestAnimationFrame(() => readerCardRef.current?.focus());
   };
 
   // "Hỏi về tài liệu này" — gắn tài liệu vào ô hỏi đáp; câu hỏi tiếp theo chỉ
@@ -1879,9 +1381,8 @@ export default function App() {
       doc_title: src.doc_title || doc?.doc_title || src.doc_name,
       page_num: src.page_num || null,
     });
-    setSelectedFactCheckDoc(null);
-    setLibraryPreview(null);
-    setActiveTab('chat');
+    setDocumentPreview(null);
+    goToChat();
     setTimeout(() => chatInputRef.current?.focus(), 0);
   };
 
@@ -1890,14 +1391,40 @@ export default function App() {
     readerQuote && activePage && readerQuote.doc_name === activePage.doc_name
       && readerQuote.page_num === activePage.page_num ? readerQuote.quote : null;
 
-  const sourcePublisher = (src) => {
-    if (isWebSource(src)) return [src.provider, src.published].filter(Boolean).join(' • ');
-    const name = sourceTitle(src);
-    if (name.includes('Dược thư')) return 'Bộ Y tế Việt Nam';
-    if (name.includes('Hướng dẫn')) return 'Cục Quản lý Dược';
-    if (name.includes('Hen')) return 'GINA Guidelines';
-    return 'British National Formulary';
+  const openMessageSource = (message, index) => {
+    const source = message.sources?.[index];
+    if (!source) return;
+    setActiveSources(message.sources);
+    setActiveLogId(message.logId || null);
+    openSource(source, index, message.logId || null);
   };
+
+  async function handleUploadPdf(file, attach) {
+    const version = draftVersion.current;
+    setUploadFromComposer(attach);
+    const doc = await clinical.uploadDocument(file, settings.notifyEnabled);
+    if (doc && attach && version === draftVersion.current) askAboutDocument(doc);
+  }
+
+  async function deleteChatDocument() {
+    if (!deleteDocTarget || deletingDocument) return;
+    const { doc_name } = deleteDocTarget;
+    setDeletingDocument(true);
+    try {
+      await apiJson(`/api/documents/${encodeURIComponent(doc_name)}`, { method: 'DELETE' });
+      setDeleteDocTarget(null);
+      setChatScope(scope => scope?.doc_name === doc_name ? null : scope);
+      setDocumentPreview(preview => preview?.doc_name === doc_name ? null : preview);
+      setActivePage(page => page?.doc_name === doc_name ? null : page);
+      await clinical.refreshDocuments();
+      showStatus('success', 'Đã xóa tài liệu.');
+    } catch (error) {
+      setDeleteDocTarget(null);
+      showStatus('error', error.message);
+    } finally {
+      setDeletingDocument(false);
+    }
+  }
 
   const citationBadgeClass = (num) => {
     if (num === 2) return 'citation-badge-2';
@@ -1906,16 +1433,16 @@ export default function App() {
     return 'citation-badge-1';
   };
 
-  const citationLinkComponent = (sources) => ({ href, children, ...props }) => {
+  const citationLinkComponent = (message) => ({ href, children, ...props }) => {
     if (href && href.startsWith('#cite-')) {
       const num = parseInt(href.replace('#cite-', ''), 10);
-      const source = sources?.[num - 1];
+      const source = message.sources?.[num - 1];
       return (
         <button
           type="button"
           className={`citation-badge ${citationBadgeClass(num)}`}
           onClick={() => {
-            if (source) openSource(source, num - 1);
+            if (source) openMessageSource(message, num - 1);
           }}
           title={source ? (source.citation || `${source.doc_name} - Trang ${source.page_num}`) : `Nguồn ${num}`}
         >
@@ -1932,120 +1459,35 @@ export default function App() {
     </ReactMarkdown>
   );
 
-  const renderMessageText = (text, sources) => (
+  const renderMessageText = (message) => (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex, rehypeHighlight]}
-      components={{ a: citationLinkComponent(sources) }}
+      components={{ a: citationLinkComponent(message) }}
     >
-      {preprocessCitations(text)}
+      {preprocessCitations(message.text)}
     </ReactMarkdown>
   );
 
-  if (shareViewId) {
-    return <SharedConversationView shareId={shareViewId} />;
-  }
-
-  // Cổng đăng nhập: mọi API hồ sơ bệnh nhân đều đòi phiên hợp lệ, nên không
-  // render giao diện chính khi chưa đăng nhập.
-  if (auth.status === 'loading') {
-    return (
-      <div className="app-boot">
-        <Loader2 size={22} className="animate-spin" />
-        <span>Đang khởi động Trợ lý Fil…</span>
-      </div>
-    );
-  }
-
-  if (auth.status !== 'ready') {
-    return (
-      <LoginScreen
-        mode={auth.status}
-        onLogin={auth.login}
-        onSetup={auth.setup}
-        onRetry={auth.recheck}
-        serverAuth={auth.serverAuth}
-        onGoogleLogin={auth.loginWithGoogle}
-        onRegister={auth.startRegistration}
-        onVerifyRegistration={auth.verifyRegistration}
-        onResendCode={auth.resendRegistrationCode}
-      />
-    );
-  }
-
   return (
-    <div className="desktop-layout">
-      {/* 1. Left Vertical Navigation Sidebar (ChatGPT-style expanded rail) */}
-      <aside className={`left-sidebar${isSidebarCollapsed ? ' collapsed' : ''}`}>
-        {/* Thanh bên kiểu ChatGPT: tên app + tìm/thu gọn, ba mục chính, rồi
-            "Đã ghim" và "Gần đây". Số đo lấy từ chatgpt.com (28/10/2026):
-            dòng 36px, chữ 14px, biểu tượng 20px, bo 8px. */}
-        <div className="sidebar-brand">
-          {!isSidebarCollapsed && <span className="sidebar-brand-name">Trợ lý Fil</span>}
-          <div className="sidebar-brand-actions">
-            {!isSidebarCollapsed && (
-              <button
-                type="button"
-                className="sidebar-icon-btn"
-                aria-label="Tìm đoạn chat"
-                title="Tìm đoạn chat"
-                aria-pressed={convSearchOpen}
-                onClick={() => { setConvSearchOpen(v => !v); setConvSearch(''); }}
-              >
-                <Search size={20} />
-              </button>
-            )}
-            <button
-              type="button"
-              className="sidebar-icon-btn"
-              aria-label={isSidebarCollapsed ? 'Mở thanh bên' : 'Đóng thanh bên'}
-              title={isSidebarCollapsed ? 'Mở thanh bên' : 'Đóng thanh bên'}
-              onClick={() => setIsSidebarCollapsed(v => !v)}
-            >
-              {isSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+    <div className="fil-clinical-body">
+      {activeTab === 'chat' && (
+        <aside className="fil-chat-tools" data-open={historyOpen ?? 'auto'} aria-label="Phiên hỏi đáp và tài liệu">
+          <div className="fil-chat-toolbar">
+            <h2><MessageSquare size={21} aria-hidden="true" /> Phiên hỏi đáp</h2>
+            <button type="button" className="fil-tool-action fil-mobile-history" aria-expanded={historyOpen === true}
+              aria-controls="fil-chat-sidebar" onClick={toggleHistory}>
+              Phiên hỏi đáp và tài liệu <ChevronDown size={15} aria-hidden="true" />
             </button>
           </div>
-        </div>
-
-        <nav className="sidebar-nav" aria-label="Chức năng chính">
-          {MAIN_TABS.map(({ id, label, Icon, match }) => {
-            const isActive = id === 'chat'
-              ? activeTab === 'chat' && !activeConversationId
-              : match.includes(activeTab);
-            return (
-              <button
-                key={id}
-                type="button"
-                className={`side-item ${isActive ? 'active' : ''}`}
-                aria-current={isActive ? 'page' : undefined}
-                onClick={() => (id === 'chat' ? handleNewChat() : setActiveTab(id))}
-                title={label}
-              >
-                <Icon size={20} aria-hidden="true" />
-                {!isSidebarCollapsed && <span className="side-item-label">{label}</span>}
-              </button>
-            );
-          })}
-        </nav>
-
-        {!isSidebarCollapsed && (
-          <div className="sidebar-history-section">
-            {convSearchOpen && (
-              <input
-                className="sidebar-search-input"
-                type="search"
-                autoFocus
-                placeholder="Tìm đoạn chat…"
-                aria-label="Tìm đoạn chat"
-                value={convSearch}
-                onChange={(e) => setConvSearch(e.target.value)}
-              />
-            )}
+          <div id="fil-chat-sidebar">
+            <button type="button" className="fil-button fil-new-chat" onClick={() => { handleNewChat(); chatInputRef.current?.focus(); }}>
+              <SquarePen size={17} aria-hidden="true" /> Cuộc trò chuyện mới
+            </button>
+          <div id="fil-chat-history" className="fil-history-panel">
             {(() => {
-              const needle = convSearch.trim().toLowerCase();
               const visible = conversations
                 .filter(c => !c.archived)
-                .filter(c => !needle || (c.title || '').toLowerCase().includes(needle))
                 .sort((x, y) => y.updatedAt - x.updatedAt);
               const pinned = visible.filter(c => c.pinned);
               const recents = visible.filter(c => !c.pinned);
@@ -2077,47 +1519,44 @@ export default function App() {
                     </button>
                     {recentsOpen && (recents.length === 0 ? (
                       <div className="sidebar-history-empty">
-                        {needle ? 'Không có đoạn chat nào khớp.' : 'Chưa có cuộc trò chuyện nào.'}
+                        Chưa có cuộc trò chuyện nào.
                       </div>
                     ) : (
-                      <AnimatePresence initial={false}>{recents.map(renderConvItem)}</AnimatePresence>
+                      <AnimatePresence initial={false}>{(showAllRecent ? recents : recents.slice(0, 4)).map(renderConvItem)}</AnimatePresence>
                     ))}
+                    {recentsOpen && recents.length > 4 && (
+                      <button type="button" className="fil-show-more" aria-expanded={showAllRecent} onClick={() => setShowAllRecent(value => !value)}>
+                        {showAllRecent ? 'Thu gọn' : `Xem thêm (${recents.length - 4})`} <ChevronDown size={15} aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 </>
               );
             })()}
           </div>
-        )}
+          <ChatDocuments clinical={clinical} readOnly={user?.read_only} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen}
+            onPreview={doc => handleOpenDocumentPreview(doc.doc_name, readerMinPage(doc.doc_name))}
+            onAttach={askAboutDocument} onUpload={handleUploadPdf} onDownload={handleDownloadDocument}
+            onDelete={setDeleteDocTarget} />
+          </div>
+        </aside>
+      )}
 
-        <div className="sidebar-footer">
-          <ClinicAdminDialog
-            open={clinicAdminOpen}
-            onOpenChange={setClinicAdminOpen}
-            currentUser={currentUser}
-          />
-
-          {/* Mở từ Cài đặt → Tài khoản, nên phải xếp lớp trên hộp thoại Cài đặt. */}
-          <ChangePasswordDialog
-            open={changePasswordOpen}
-            onOpenChange={setChangePasswordOpen}
-            onChangePassword={auth.changePassword}
-            elevated
-            hasPassword={currentUser?.has_password !== false}
-          />
-
-          <AccountMenu
-            profiles={profiles.profiles}
-            activeProfile={profiles.activeProfile}
-            profileActions={profiles}
-            onOpenSettings={() => openSettings('general')}
-            onOpenSection={openSettings}
-            onEditProfile={() => setEditProfileOpen(true)}
-            onLogout={handleLogout}
-            currentUser={currentUser}
-            onOpenClinicAdmin={() => setClinicAdminOpen(true)}
-          />
-        </div>
-      </aside>
+      <Dialog.Root open={!!deleteDocTarget} onOpenChange={open => { if (!open && !deletingDocument) setDeleteDocTarget(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="dialog-content">
+            <Dialog.Title className="dialog-title">Xóa tài liệu?</Dialog.Title>
+            <Dialog.Description className="dialog-description">
+              {deleteDocTarget?.doc_title || deleteDocTarget?.doc_name} sẽ bị xóa khỏi kho tra cứu.
+            </Dialog.Description>
+            <div className="dialog-actions">
+              <Dialog.Close asChild><button type="button" className="btn-dialog-secondary" disabled={deletingDocument}>Hủy</button></Dialog.Close>
+              <button type="button" className="btn-dialog-danger" disabled={deletingDocument} onClick={deleteChatDocument}>Xóa tài liệu</button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Delete-conversation confirmation dialog */}
       <Dialog.Root open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
@@ -2175,47 +1614,28 @@ export default function App() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* Delete-document confirmation dialog (Thư viện) */}
-      <Dialog.Root open={!!deleteDocTarget} onOpenChange={(open) => !open && setDeleteDocTarget(null)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content">
-            <Dialog.Title className="dialog-title">Xóa tài liệu?</Dialog.Title>
-            <Dialog.Description className="dialog-description">
-              "{deleteDocTarget}" sẽ bị xóa khỏi chỉ mục và không thể tra cứu được nữa. Hành động này không thể hoàn tác.
-            </Dialog.Description>
-            <div className="dialog-actions">
-              <Dialog.Close asChild>
-                <button type="button" className="btn-dialog-secondary">Hủy</button>
-              </Dialog.Close>
-              <button type="button" className="btn-dialog-danger" onClick={confirmDeleteDocument}>Xóa</button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      {/* Document preview lightbox (Thư viện) — mirrors ChatGPT Library's inline file preview */}
-      <Dialog.Root open={!!libraryPreview} onOpenChange={(open) => !open && setLibraryPreview(null)}>
+      {/* Source preview for chat attachments */}
+      <Dialog.Root open={!!documentPreview} onOpenChange={(open) => !open && setDocumentPreview(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="lightbox-content lightbox-content-wide">
-            {libraryPreview && (
+            {documentPreview && (
               <>
                 <div className="lightbox-header">
                   <div className="lightbox-header-left">
                     <FileText size={17} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <Dialog.Title className="lightbox-title">{sourceTitle(libraryPreview)}</Dialog.Title>
+                    <Dialog.Title className="lightbox-title">{sourceTitle(documentPreview)}</Dialog.Title>
                   </div>
                   <div className="lightbox-header-actions">
                     <button
                       type="button"
                       className="btn-ask-document"
-                      onClick={() => askAboutDocument(libraryPreview)}
+                      onClick={() => askAboutDocument(documentPreview)}
                     >
                       <MessageSquare size={18} aria-hidden="true" />
                       Hỏi về tài liệu này
                     </button>
-                    <button className="icon-btn-action" onClick={() => handleDownloadDocument(libraryPreview.doc_name)} title="Tải xuống">
+                    <button className="icon-btn-action" onClick={() => handleDownloadDocument(documentPreview.doc_name)} title="Tải xuống">
                       <Download size={16} />
                     </button>
                     <Dialog.Close asChild>
@@ -2224,20 +1644,20 @@ export default function App() {
                   </div>
                 </div>
                 <Dialog.Description className="sr-only">
-                  Trang gốc của tài liệu {sourceTitle(libraryPreview)}
+                  Trang gốc của tài liệu {sourceTitle(documentPreview)}
                 </Dialog.Description>
                 <div className="library-page-body">
                   <PageViewer
-                    key={`${libraryPreview.doc_name}-${libraryPreview.page_num}`}
-                    docName={libraryPreview.doc_name}
-                    pageNum={libraryPreview.page_num}
-                    alt={`${sourceTitle(libraryPreview)} — trang ${libraryPreview.page_num}`}
+                    key={`${documentPreview.doc_name}-${documentPreview.page_num}`}
+                    docName={documentPreview.doc_name}
+                    pageNum={documentPreview.page_num}
+                    alt={`${sourceTitle(documentPreview)} — trang ${documentPreview.page_num}`}
                   />
                 </div>
                 <Pagination
-                  current={libraryPreview.page_num}
-                  total={documents.find(d => d.doc_name === libraryPreview.doc_name)?.page_count || libraryPreview.page_num}
-                  onChange={(p) => handleOpenLibraryPreview(libraryPreview.doc_name, p)}
+                  current={documentPreview.page_num}
+                  total={documents.find(d => d.doc_name === documentPreview.doc_name)?.page_count || documentPreview.page_num}
+                  onChange={(p) => handleOpenDocumentPreview(documentPreview.doc_name, p)}
                 />
               </>
             )}
@@ -2245,189 +1665,11 @@ export default function App() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* Fact-Check Reader Dialog (NotebookLM-style citation & page inspector) */}
-      <Dialog.Root open={!!selectedFactCheckDoc} onOpenChange={(open) => !open && setSelectedFactCheckDoc(null)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="factcheck-lightbox-content">
-            {selectedFactCheckDoc && (
-              <>
-                <div className="factcheck-header">
-                  <div className="factcheck-header-left">
-                    <div className="drug-pdf-icon-badge">
-                      <FileText size={16} />
-                      <span className="pdf-label">PDF</span>
-                    </div>
-                    <div>
-                      <Dialog.Title className="factcheck-title">
-                        {sourceTitle(selectedFactCheckDoc)}
-                      </Dialog.Title>
-                      <div className="factcheck-subtitle">
-                        Kiểm chứng trích dẫn • {sourceCitation(selectedFactCheckDoc)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="factcheck-header-actions">
-                    <button
-                      className="icon-btn-action"
-                      onClick={() => handleDownloadDocument(selectedFactCheckDoc.doc_name)}
-                      title="Tải xuống PDF"
-                    >
-                      <Download size={16} />
-                    </button>
-                    <Dialog.Close asChild>
-                      <button className="icon-btn-action" title="Đóng">
-                        <X size={16} />
-                      </button>
-                    </Dialog.Close>
-                  </div>
-                </div>
-
-                <div className="factcheck-body">
-                  <div className="factcheck-highlight-box">
-                    <div className="factcheck-highlight-label">
-                      <Sparkles size={15} />
-                      <span>Đoạn trích dẫn đối chiếu từ AI (Evidence Snippet):</span>
-                    </div>
-                    <div className="factcheck-highlight-text">
-                      "{selectedFactCheckDoc.snippet || selectedFactCheckDoc.text || 'Thông tin trích xuất từ tài liệu y khoa chính thức.'}"
-                    </div>
-                  </div>
-
-                  {selectedFactCheckDoc.doc_name && selectedFactCheckDoc.page_num ? (
-                    <div className="factcheck-page">
-                      <PageViewer
-                        docName={selectedFactCheckDoc.doc_name}
-                        pageNum={selectedFactCheckDoc.page_num}
-                        quote={selectedFactCheckDoc.quote || selectedFactCheckDoc.text || selectedFactCheckDoc.snippet}
-                        alt={`Ảnh trang gốc ${sourceCitation(selectedFactCheckDoc)}`}
-                      />
-                    </div>
-                  ) : (
-                    <div className="factcheck-full-text-body">
-                      {renderSimpleMarkdown(selectedFactCheckDoc.text || selectedFactCheckDoc.snippet || '')}
-                    </div>
-                  )}
-                </div>
-
-                <div className="factcheck-footer">
-                  <span className="factcheck-footer-note">
-                    <CheckCircle2 size={15} className="text-accent" />
-                    Kiểm tra nội dung và trang gốc trước khi sử dụng thông tin.
-                  </span>
-                  {selectedFactCheckDoc.doc_name && (
-                    <button
-                      type="button"
-                      className="btn-ask-document"
-                      onClick={() => askAboutDocument(selectedFactCheckDoc)}
-                    >
-                      <MessageSquare size={18} aria-hidden="true" />
-                      Hỏi về tài liệu này
-                    </button>
-                  )}
-                  <Dialog.Close asChild>
-                    <button type="button" className="btn-dialog-secondary">
-                      Đóng
-                    </button>
-                  </Dialog.Close>
-                </div>
-              </>
-            )}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      {/* All Resources Dialog */}
-      <Dialog.Root open={showAllResourcesDialog} onOpenChange={setShowAllResourcesDialog}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="all-resources-dialog-content">
-            <div className="lightbox-header">
-              <div className="lightbox-header-left">
-                <BookOpen size={18} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                <Dialog.Title className="lightbox-title">
-                  Tất cả tài liệu tham khảo ({(drugReport?.sources || []).length})
-                </Dialog.Title>
-              </div>
-              <Dialog.Close asChild>
-                <button className="icon-btn-action" title="Đóng"><X size={16} /></button>
-              </Dialog.Close>
-            </div>
-            <div className="all-resources-body">
-              <div className="all-resources-search-wrap">
-                <Search size={16} />
-                <input
-                  type="text"
-                  placeholder="Tìm tài liệu theo tên..."
-                  value={resourceSearch}
-                  onChange={(e) => setResourceSearch(e.target.value)}
-                  className="all-resources-search-input"
-                />
-              </div>
-              <div className="all-resources-grid">
-                {(drugReport?.sources || [])
-                  .filter(s => s.doc_name.toLowerCase().includes(resourceSearch.toLowerCase()))
-                  .map((src, idx) => (
-                    <div
-                      key={idx}
-                      className="all-resource-card"
-                      onClick={() => {
-                        setSelectedFactCheckDoc(src);
-                        setShowAllResourcesDialog(false);
-                      }}
-                    >
-                      <div className="all-res-top">
-                        <div className="drug-pdf-icon-badge">
-                          <FileText size={16} />
-                          <span className="pdf-label">PDF</span>
-                        </div>
-                        <span className="all-res-page">{src.page_num}</span>
-                      </div>
-                      <h4 className="all-res-title" title={sourceCitation(src)}>{sourceTitle(src)}</h4>
-                      <p className="all-res-snippet">{src.snippet || src.text}</p>
-                      <div className="all-res-footer">
-                        <span className="all-res-size">{src.file_size || 'PDF • 2.5 MB'}</span>
-                        <span className="all-res-action">Đối chiếu <ChevronRight size={14} /></span>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      {/* 2. Main Content Workspace */}
-      <div className="main-workspace">
-        {/* Top Header Bar */}
-        <header className="workspace-header">
-          <div className="header-info">
-            <div className="brand-title-row">
-              <h1 className="header-brand-title">
-                {activeTab === 'chat'
-                  ? (conversations.find(c => c.id === activeConversationId)?.title || 'Trợ lý Fil')
-                  : (MAIN_TABS.find(t => t.match.includes(activeTab)) || MAIN_TABS[0]).label}
-              </h1>
-            </div>
-          </div>
-          <div className="header-actions">
-            <button
-              className="btn-theme-toggle"
-              onClick={toggleTheme}
-              aria-label={isDarkMode ? "Chuyển sang nền sáng" : "Chuyển sang nền tối"}
-              title={isDarkMode ? "Chuyển sang nền sáng" : "Chuyển sang nền tối"}
-            >
-              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-              <span>{isDarkMode ? 'Nền sáng' : 'Nền tối'}</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Global Toast Alert Banners */}
-        {bannerMessage && (
+      <div className="fil-clinical-content">
+        {config && !config.has_api_key && !apiKey && (
           <div className="alert-banner warning-banner">
-            <AlertCircle size={16} />
-            <span>{bannerMessage}</span>
+            <AlertCircle size={16} aria-hidden="true" />
+            <span>Chưa cấu hình khóa AI: câu trả lời AI sẽ không hiển thị, chỉ hiện trang sách.</span>
           </div>
         )}
 
@@ -2440,30 +1682,44 @@ export default function App() {
         )}
 
         {/* Page / Tab Content Area */}
-        <div className="workspace-body">
+        <div className="fil-clinical-workflow">
           {/* TAB 1: Chat Dashboard (Split View) */}
           {activeTab === 'chat' && (
             <div className="chat-dashboard-split">
-              {/* Left Column: Chat Area */}
+              <div className="fil-qa-main">
+                <h1 className="sr-only">Hỏi đáp y khoa</h1>
               <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
+                <h2 className="sr-only">{activeConversation?.title || 'Đặt câu hỏi'}</h2>
+                {!messages.length && <div className="fil-qa-empty">
+                  <span className="fil-tile"><MessageSquare size={23} aria-hidden="true" /></span>
+                  <h2>Bắt đầu một câu hỏi</h2>
+                  <p>Chọn một gợi ý hoặc nhập câu hỏi của bạn bên dưới.</p>
+                  <div className="fil-qa-prompts" aria-label="Câu hỏi gợi ý">
+                    {CHAT_PROMPTS.map(([label, prompt], index) => (
+                      <button type="button" key={label} onClick={() => {
+                        setQuery(prompt);
+                        chatInputRef.current?.focus();
+                      }}>{index === 0 && <Sparkles size={15} aria-hidden="true" />}{label}</button>
+                    ))}
+                  </div>
+                </div>}
+
                 {/* Conversation Scroller */}
                 <div className="chat-messages-container">
                   {messages.map((msg, index) => (
                     <div key={index} className={`message-row ${msg.role === 'user' ? 'row-user' : 'row-assistant'}`}>
-                      {msg.role === 'assistant' && (
-                        <div className="assistant-avatar">
-                          <Sparkles size={16} className="avatar-spark" />
-                        </div>
-                      )}
+                      <div className={`fil-message-avatar ${msg.role === 'assistant' ? 'fil-assistant-mark' : ''}`} aria-hidden="true">
+                        {msg.role === 'assistant' ? <Activity size={19} /> : <UserRound size={19} />}
+                      </div>
+                      <div className="message-bubble">
                       {msg.attachment && (
                         <div className="msg-attachments">
                           <AttachmentCard
                             title={msg.attachment.doc_title}
-                            onOpen={() => handleOpenLibraryPreview(msg.attachment.doc_name, msg.attachment.page_num || 1)}
+                            onOpen={() => handleOpenDocumentPreview(msg.attachment.doc_name, msg.attachment.page_num || readerMinPage(msg.attachment.doc_name))}
                           />
                         </div>
                       )}
-                      <div className="message-bubble">
                         {msg.normalized && (
                           <p className="bubble-normalized">
                             Đã tra theo: <strong>{msg.normalized.text}</strong>
@@ -2486,7 +1742,7 @@ export default function App() {
                         )}
                         <div className="bubble-text">
                           {msg.role === 'assistant'
-                            ? renderMessageText(msg.text, msg.sources)
+                            ? renderMessageText(msg)
                             : <p className="markdown-paragraph">{msg.text}</p>
                           }
                           {msg.streaming && msg.text && <span className="stream-caret" aria-hidden="true" />}
@@ -2544,6 +1800,14 @@ export default function App() {
                             </div>
                           </div>
                         )}
+                        {msg.role === 'assistant' && !!msg.sources?.length && <div className="fil-message-sources">
+                          <span>Nguồn</span>
+                          {msg.sources.map((source, sourceIndex) => (
+                            <button type="button" key={sourceIndex} onClick={() => openMessageSource(msg, sourceIndex)}>
+                              <strong>[{sourceIndex + 1}]</strong> {sourceCitation(source)}
+                            </button>
+                          ))}
+                        </div>}
                         <div className="bubble-footer">
                           {msg.reused && (
                             <span className="bubble-reused-tag" title="Kết quả lấy lại từ lịch sử tra cứu, không gọi lại AI">
@@ -2584,27 +1848,35 @@ export default function App() {
                   <div ref={chatEndRef} />
                 </div>
 
-                {messages.length === 0 && <h1 className="chat-greeting">{greeting}</h1>}
-
                 {/* Ô nhập kiểu ChatGPT: thẻ đính kèm ở trên, chữ ở giữa, nút ở dưới */}
                 <form
                   onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
                   className="chat-input-container composer"
                 >
+                  {uploadFromComposer && (clinical.upload?.pending || clinical.upload?.error) && (
+                    <p className="fil-doc-status fil-composer-upload-status" role={clinical.upload.error ? 'alert' : 'status'}>
+                      {clinical.upload.error || clinical.upload.stage || 'Đang nạp PDF…'}
+                    </p>
+                  )}
                   {chatScope && (
                     <div className="att-row">
                       <AttachmentCard
                         title={chatScope.doc_title}
-                        onOpen={() => handleOpenLibraryPreview(chatScope.doc_name, chatScope.page_num || 1)}
+                        onOpen={() => handleOpenDocumentPreview(chatScope.doc_name, chatScope.page_num || readerMinPage(chatScope.doc_name))}
                         onRemove={() => setChatScope(null)}
                       />
                     </div>
                   )}
+                  <div className="fil-composer-line">
+                  <button type="button" className="composer-icon-btn fil-composer-attach"
+                    aria-label="Chọn tài liệu PDF" title="Chọn tài liệu PDF" onClick={() => setPickerOpen(true)}>
+                    <Paperclip size={19} aria-hidden="true" />
+                  </button>
                   <textarea
                     ref={chatInputRef}
                     className="input-textarea composer-textarea"
                     aria-label="Câu hỏi tra cứu y văn"
-                    placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Hỏi bất kỳ điều gì'}
+                    placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Đặt câu hỏi về bệnh lý, thuốc, phác đồ…'}
                     rows={1}
                     value={query}
                     onChange={(e) => {
@@ -2620,43 +1892,32 @@ export default function App() {
                       }
                     }}
                   />
+                      {loading ? (
+                        <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
+                          <span className="composer-stop-square" aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
+                          <Send size={22} strokeWidth={2.25} />
+                        </button>
+                      )}
+                  </div>
                   <div className="composer-actions">
                     <div className="composer-actions-left">
-                      <div className="composer-menu-wrap">
+                      <button type="button" className="fil-attach-label" onClick={() => setPickerOpen(true)}>
+                        <Paperclip size={15} aria-hidden="true" /> Đính kèm PDF
+                      </button>
+                      {!webSearchOn && webSearchTools.length > 0 && (
                         <button
                           type="button"
                           className="composer-icon-btn"
-                          aria-label="Thêm"
-                          aria-haspopup="menu"
-                          aria-expanded={composerMenuOpen}
-                          title="Thêm tài liệu hoặc công cụ"
-                          onClick={() => setComposerMenuOpen(v => !v)}
+                          aria-label="Tìm thêm trên web"
+                          title="Tìm thêm trên web"
+                          onClick={() => setWebSearchOn(true)}
                         >
-                          <Plus size={20} />
+                          <Globe size={19} aria-hidden="true" />
                         </button>
-                        {composerMenuOpen && (
-                          <div className="composer-menu" role="menu" onMouseLeave={() => setComposerMenuOpen(false)}>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => { setComposerMenuOpen(false); setActiveTab('library'); }}
-                            >
-                              <FileText size={18} /> Đính kèm tài liệu từ thư viện
-                            </button>
-                            {webSearchTools.length > 0 && (
-                              <button
-                                type="button"
-                                role="menuitemcheckbox"
-                                aria-checked={webSearchOn}
-                                onClick={() => { setComposerMenuOpen(false); setWebSearchOn(v => !v); }}
-                              >
-                                <Globe size={18} /> Tìm thêm trên web
-                                {webSearchOn && <Check size={16} className="composer-menu-check" />}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      )}
                       {webSearchOn && webSearchTools.length > 0 && (
                         <span className="composer-mode-chip">
                           <Globe size={16} aria-hidden="true" /> Web
@@ -2678,95 +1939,23 @@ export default function App() {
                           {isRecording === 'chat' ? <Square size={14} /> : <Mic size={20} />}
                         </button>
                       )}
-                      {loading ? (
-                        <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
-                          <span className="composer-stop-square" aria-hidden="true" />
-                        </button>
-                      ) : (
-                        <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
-                          <ArrowUp size={22} strokeWidth={2.25} />
-                        </button>
-                      )}
                     </div>
                   </div>
                 </form>
 
               </div>
 
-              {/* Right Column: References & Reader */}
-              {showSourcesPanel && (
-                <div className={`reference-panel ${activePage ? 'reader-open' : ''}`}>
-                  {/* Reference list (NotebookLM-style Sources rail) */}
-                  <div className="citation-list-card">
-                    <div className="card-header">
-                      <div className="card-header-left">
-                        <BookOpen size={18} className="header-icon-blue" />
-                        <h2>Nguồn ({activeSources.length})</h2>
-                      </div>
-                    </div>
-                    <div className="citation-items-list">
-                      {activeSources.length === 0 ? (
-                        <div className="citation-list-empty">Chưa có tài liệu trích dẫn nào được chọn.</div>
-                      ) : (
-                        activeSources.map((src, idx) => {
-                          const isSelected = idx === selectedSourceIndex;
-                          let badgeClass = 'citation-badge-1';
-                          if (idx === 1) badgeClass = 'citation-badge-2';
-                          else if (idx === 2) badgeClass = 'citation-badge-3';
-                          else if (idx === 3) badgeClass = 'citation-badge-4';
-
-                          return (
-                            <div
-                              key={idx}
-                              className={`citation-item-row ${isSelected ? 'selected' : ''}`}
-                              onClick={() => openSource(src, idx)}
-                            >
-                              <div className="item-row-left">
-                                <span className={`item-square-badge ${badgeClass}`}>{idx + 1}</span>
-                                <div className="item-details">
-                                  {/* doc_name là ID kỹ thuật ("DTQGVN-2022-Q1"); bác sĩ cần
-                                      tên sách thật để biết mình đang đối chiếu với nguồn nào. */}
-                                  <h3 className="doc-title" title={src.citation || src.doc_name}>
-                                    {src.doc_title || src.doc_name}
-                                  </h3>
-                                  <p className="doc-publisher">
-                                    {sourcePublisher(src)}
-                                  </p>
-                                  {/* Tên thuốc của đoạn này do OCR đọc hỏng. Nội dung
-                                      vẫn là dữ liệu thuốc thật nên trang vẫn được trả
-                                      về, nhưng bác sĩ phải biết cái NHÃN không đáng
-                                      tin trước khi đọc theo nó. Có cả chữ và biểu
-                                      tượng, không chỉ màu, để không phụ thuộc màu sắc. */}
-                                  {src.name_suspect && (
-                                    <p className="doc-ocr-warning">
-                                      <AlertCircle size={12} />
-                                      Tên thuốc ở trang này bị lỗi OCR, đối chiếu bản scan
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="item-row-right">
-                                {isWebSource(src) ? (
-                                  <span className="doc-page-no doc-web-link" title={src.url}>
-                                    {src.domain || 'Web'} <ExternalLink size={12} />
-                                  </span>
-                                ) : (
-                                  <>
-                                    <span className="doc-page-no">Trang {src.page_num}</span>
-                                    {isSelected ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
+              </div>
+              <aside className={`reference-panel fil-qa-references ${activePage ? 'reader-open' : ''}`} aria-labelledby="fil-references-title">
+                <div className="fil-reference-heading">
+                  <Layers size={24} aria-hidden="true" />
+                  <div><h2 id="fil-references-title">Đối chứng tài liệu</h2>
+                    <p>Các đoạn trích liên quan để kiểm chứng và đọc tại nguồn.</p>
                   </div>
-
+                </div>
                   {/* Reader Viewer Card */}
                   {activePage && (
-                    <div className="document-reader-card">
+                    <div className="document-reader-card" ref={readerCardRef} tabIndex={-1}>
                       <div className="card-header">
                         <h3 className="reader-doc-title" title={sourceCitation(activePage)}>
                           {sourceTitle(activePage)} — Trang {activePage.page_num}
@@ -2920,330 +2109,37 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: Thuốc (Drug Lookup & AI Clinical Monograph) */}
-          {(activeTab === 'medicine' || activeTab === 'library') && (
-            <div className="segmented-switch" role="tablist" aria-label="Tra cứu thuốc">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'medicine'}
-                className={activeTab === 'medicine' ? 'active' : ''}
-                onClick={() => setActiveTab('medicine')}
-              >
-                <Pill size={18} aria-hidden="true" /> Tra một thuốc
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'library'}
-                className={activeTab === 'library' ? 'active' : ''}
-                onClick={() => setActiveTab('library')}
-              >
-                <Library size={18} aria-hidden="true" /> Sách &amp; tài liệu gốc
-              </button>
-            </div>
-          )}
-
-          {activeTab === 'medicine' && (
-            <div className="drug-lookup-view">
-              {/* Top Title & Subtitle */}
-              <div className="drug-hero-header">
-                <h1 className="drug-hero-title">Tra cứu thuốc</h1>
-              </div>
-
-              {/* Search Box Form */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleDrugLookup();
-                }}
-                className="drug-search-card"
-              >
-                <div className="drug-search-input-wrap">
-                  <div className="drug-search-icon-left">
-                    <Search size={20} />
-                  </div>
-                  <div className="drug-search-fields">
-                    <input
-                      type="text"
-                      className="drug-search-input"
-                      aria-label="Tên thuốc hoặc nhu cầu tra cứu"
-                      placeholder={isRecording === 'medicine' ? "Đang nghe giọng nói của bác sĩ..." : "Nhập tên thuốc hoặc chức năng của thuốc..."}
-                      value={drugQuery}
-                      onChange={(e) => setDrugQuery(e.target.value)}
-                    />
-                    <div className="drug-search-placeholder-sub">
-                      Ví dụ: Paracetamol, thuốc hạ sốt cho trẻ, kháng sinh viêm phổi cộng đồng...
-                    </div>
-                  </div>
-                  <div className="drug-search-actions-right">
-                    {settings.voiceInputEnabled && (
-                      <button
-                        type="button"
-                        className={`btn-drug-mic ${isRecording === 'medicine' ? 'recording' : ''}`}
-                        onClick={() => handleToggleMic('medicine', setDrugQuery, () => handleDrugLookup())}
-                        title={!micSupported ? "Trình duyệt không hỗ trợ ghi âm" : (isRecording === 'medicine' ? "Dừng ghi âm" : "Ghi âm giọng nói")}
-                      >
-                        {isRecording === 'medicine' ? <Square size={14} /> : <Mic size={18} />}
-                      </button>
-                    )}
-                    {drugQuery && (
-                      <button
-                        type="button"
-                        className="btn-drug-clear"
-                        onClick={() => setDrugQuery('')}
-                        title="Xóa tìm kiếm"
-                      >
-                        <Trash2 size={16} />
-                        <span>Xóa</span>
-                      </button>
-                    )}
-                    <button
-                      type="submit"
-                      className="btn-drug-submit"
-                      disabled={drugLoading || !drugQuery.trim()}
-                    >
-                      {drugLoading ? (
-                        <>
-                          <Loader2 size={17} className="animate-spin" />
-                          <span>Đang truy vấn...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={17} />
-                          <span>Truy vấn</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </form>
-
-              {/* Quick Search Chips */}
-              <div className="drug-suggestions-row">
-                <span className="drug-suggestions-label">Gợi ý tìm kiếm:</span>
-                <div className="drug-suggestions-chips">
-                  {DRUG_QUICK_SUGGESTIONS.map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      className="drug-suggestion-chip"
-                      onClick={() => {
-                        setDrugQuery(item);
-                        handleDrugLookup(item);
-                      }}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Main Content Grid: Left Report & Right Resources/Takeaways */}
-              {!drugReport ? (
-                <div className="drug-empty-state">
-                  <div className="drug-empty-state-icon"><Pill size={26} /></div>
-                  <h4>Chưa có tra cứu nào</h4>
-                  <p>Nhập tên thuốc hoặc chọn một gợi ý ở trên — AI sẽ tổng hợp thông tin từ Dược thư Quốc gia (Quyển 1 &amp; 2) và Thuốc Biệt Dược, kèm trích dẫn để đối chiếu.</p>
-                </div>
-              ) : (
-              <div className="drug-main-grid">
-                {/* LEFT COLUMN: Báo cáo AI */}
-                <div className="drug-report-card">
-                  <div className="drug-report-card-header">
-                    <div className="drug-report-meta-left">
-                      <h2 className="drug-report-title">Báo cáo AI</h2>
-                    </div>
-                    <div className="drug-report-actions-right">
-                      <button
-                        type="button"
-                        className={`btn-drug-copy ${copiedDrugToast ? 'copied' : ''}`}
-                        onClick={handleCopyDrugReport}
-                        title="Sao chép báo cáo vào clipboard"
-                      >
-                        {copiedDrugToast ? <Check size={16} /> : <Copy size={16} />}
-                        <span>{copiedDrugToast ? 'Đã sao chép' : 'Sao chép'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="drug-report-inner-layout">
-                    {/* Inner Left: Mục lục Table of Contents */}
-                    <div className="drug-toc-rail">
-                      <h3 className="drug-toc-heading">Mục lục</h3>
-                      <nav className="drug-toc-list">
-                        {(drugReport.sections || []).map((sec) => {
-                          const isActive = activeDrugTocId === String(sec.id);
-                          return (
-                            <button
-                              key={sec.id}
-                              type="button"
-                              className={`drug-toc-item ${isActive ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveDrugTocId(String(sec.id));
-                                const el = document.getElementById(`drug-sec-${sec.id}`);
-                                if (el) {
-                                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                              }}
-                            >
-                              <span className="drug-toc-item-title">{sec.title}</span>
-                            </button>
-                          );
-                        })}
-                      </nav>
-                    </div>
-
-                    {/* Inner Right: Detailed Sections Stream */}
-                    <div className="drug-sections-stream">
-                      {drugLoading ? (
-                        <div className="drug-report-loading-state">
-                          <Loader2 size={36} className="animate-spin text-primary" />
-                          <h4>Đang tổng hợp thông tin thuốc…</h4>
+                <div className="fil-reference-list">
+                  {!activeSources.length && <div className="fil-reference-empty">
+                    <BookOpen size={24} aria-hidden="true" />
+                    <p>{loading ? 'Đang tìm nguồn trích dẫn…' : 'Nguồn trích dẫn sẽ xuất hiện khi có kết quả tra cứu.'}</p>
+                  </div>}
+                  {activeSources.map((source, index) => {
+                    const web = isWebSource(source);
+                    const excerpt = source.quote || source.snippet || source.text || '';
+                    return (
+                      <article key={index} className="fil-reference-card" data-selected={!!activePage && selectedSourceIndex === index}>
+                        <div className="fil-reference-badges">
+                          <span>Nguồn {index + 1}</span><span>{web ? 'Nguồn web' : 'Trích dẫn tài liệu'}</span>
                         </div>
-                      ) : (
-                        (drugReport.sections || []).map((sec) => (
-                          <div
-                            key={sec.id}
-                            id={`drug-sec-${sec.id}`}
-                            className={`drug-section-block ${activeDrugTocId === String(sec.id) ? 'focused' : ''}`}
-                            onMouseEnter={() => setActiveDrugTocId(String(sec.id))}
-                          >
-                            <div className="drug-section-header">
-                              <h3 className="drug-section-title">{sec.title}</h3>
-                            </div>
-                            <div className="drug-section-content">
-                              {renderDrugSectionContent(sec.content)}
-                            </div>
-                            <div className="drug-section-badge-row">
-                              <span className="drug-confidence-pill">
-                                <CheckCircle2 size={13} />
-                                Mức AI tự đánh giá: {sec.confidence || drugReport.confidence_overall || 'Chưa rõ'}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* RIGHT COLUMN: Resources & Quick Summary */}
-                <div className="drug-sidebar-column">
-                  {/* Card 1: Tài liệu nguồn (Resources) */}
-                  <div className="drug-resources-card">
-                    <div className="drug-resources-header">
-                      <h3 className="drug-resources-title">Tài liệu nguồn</h3>
-                    </div>
-
-                    <div className="drug-resources-list">
-                      {(drugReport.sources || []).slice(0, 5).map((src, idx) => (
-                        <div
-                          key={idx}
-                          className="drug-resource-item"
-                          onClick={() => setSelectedFactCheckDoc(src)}
-                          title="Nhấp để xem trang đối chiếu y văn"
-                        >
-                          <div className="drug-resource-icon-wrap">
-                            <div className="drug-pdf-icon-badge">
-                              <FileText size={16} />
-                              <span className="pdf-label">PDF</span>
-                            </div>
-                          </div>
-                          <div className="drug-resource-info">
-                            <h4 className="drug-resource-doc-name" title={sourceCitation(src)}>
-                              {sourceTitle(src)}
-                            </h4>
-                            <span className="drug-resource-meta">{src.field_name || src.file_size || 'PDF'}</span>
-                          </div>
-                          <div className="drug-resource-page-badge">
-                            {src.page_num || `Trang ${idx + 1}`}
+                        <div className="fil-reference-doc">
+                          <span className="fil-pdf-icon">{web ? <Globe size={19} aria-hidden="true" /> : <FileText size={19} aria-hidden="true" />}</span>
+                          <div><h3>{sourceTitle(source) || source.provider || 'Nguồn tham khảo'}</h3>
+                            <p>{web ? [source.provider, source.published].filter(Boolean).join(' · ') : `Trang ${source.page_num}`}</p>
                           </div>
                         </div>
-                      ))}
-                    </div>
-
-                    <button
-                      type="button"
-                      className="btn-view-all-resources"
-                      onClick={() => setShowAllResourcesDialog(true)}
-                    >
-                      <span>Xem tất cả tài liệu ({(drugReport.sources || []).length})</span>
-                      <ChevronRight size={16} />
-                    </button>
-                  </div>
-
-                  {/* Card 2: Tóm tắt nhanh */}
-                  <div className="drug-quick-summary-card">
-                    <h3 className="drug-quick-summary-title">Tóm tắt nhanh</h3>
-                    <div className="drug-quick-summary-list">
-                      {(drugReport.quick_summary || []).length === 0 && (
-                        <p className="drug-quick-summary-empty">Không có tóm tắt nhanh cho lượt tra cứu này.</p>
-                      )}
-                      {(drugReport.quick_summary || []).map((item, idx) => {
-                        const itemType = item.type || item.status || (item.icon === 'alert' ? 'warning' : item.icon === 'ban' ? 'danger' : 'success');
-                        let IconComp = CheckCircle2;
-                        let colorClass = 'status-success';
-                        if (itemType === 'warning') {
-                          IconComp = AlertCircle;
-                          colorClass = 'status-warning';
-                        } else if (itemType === 'danger' || itemType === 'ban') {
-                          IconComp = Ban;
-                          colorClass = 'status-danger';
-                        }
-
-                        return (
-                          <div key={idx} className={`drug-summary-item ${colorClass}`}>
-                            <IconComp size={17} className="drug-summary-item-icon" />
-                            <span className="drug-summary-item-text">{item.text}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
+                        {source.name_suspect && <p className="doc-ocr-warning"><AlertCircle size={13} /> Tên thuốc ở trang này bị lỗi OCR, đối chiếu bản scan</p>}
+                        {excerpt && <blockquote>{excerpt.length > 480 ? `${excerpt.slice(0, 480).trimEnd()}…` : excerpt}</blockquote>}
+                        <button className="fil-reference-action" type="button" onClick={() => openSource(source, index)}>
+                          {web ? <ExternalLink size={16} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                          {web ? 'Mở nguồn web' : 'Xem trong tài liệu'}
+                        </button>
+                      </article>
+                    );
+                  })}
                 </div>
-              </div>
-              )}
+              </aside>
             </div>
-          )}
-
-          {/* TAB 3: Thư viện + Đối chiếu */}
-          {activeTab === 'library' && (
-            <LibraryView
-              documents={documents}
-              documentsError={documentsError}
-              fetchDocuments={fetchDocuments}
-              librarySearch={librarySearch}
-              setLibrarySearch={setLibrarySearch}
-              librarySortBy={librarySortBy}
-              setLibrarySortBy={setLibrarySortBy}
-              libraryViewMode={libraryViewMode}
-              setLibraryViewMode={setLibraryViewMode}
-              librarySelectMode={librarySelectMode}
-              setLibrarySelectMode={setLibrarySelectMode}
-              librarySelectedDocs={librarySelectedDocs}
-              setLibrarySelectedDocs={setLibrarySelectedDocs}
-              showComparePanel={showComparePanel}
-              setShowComparePanel={setShowComparePanel}
-              compareViewRef={compareViewRef}
-              fileInputRef={fileInputRef}
-              uploadJobs={uploadJobs}
-              uploading={uploading}
-              handleFileUpload={handleFileUpload}
-              dismissUploadJob={dismissUploadJob}
-              highlightCounts={highlightCounts}
-              handleOpenLibraryPreview={handleOpenLibraryPreview}
-              handleDownloadDocument={handleDownloadDocument}
-              setDeleteDocTarget={setDeleteDocTarget}
-              apiKey={apiKey}
-              showStatus={showStatus}
-            />
           )}
 
           {/* TAB 4: Hồ sơ bệnh nhân (Patient Profile) */}
@@ -3262,9 +2158,6 @@ export default function App() {
               handleToggleDiagnosisSelected={handleToggleDiagnosisSelected}
               handleTreeCanvasMouseDown={handleTreeCanvasMouseDown}
               handleSuggestTreatment={handleSuggestTreatment}
-              patientContextSent={patientContextSent}
-              patientContextOpen={patientContextOpen}
-              setPatientContextOpen={setPatientContextOpen}
               isPanningTree={isPanningTree}
               isPreparingHandoff={isPreparingHandoff}
               nodeStatusMap={nodeStatusMap}
@@ -3272,8 +2165,6 @@ export default function App() {
               renderDecisionTreeNode={renderDecisionTreeNode}
               selectedDiagnosisDetail={selectedDiagnosisDetail}
               selectedDiagnosisIds={selectedDiagnosisIds}
-              patientHistory={patientHistory}
-              setPatientHistory={setPatientHistory}
               treatmentResult={treatmentResult}
               allergyCheck={allergyCheck}
               setExamNotes={setExamNotes}
@@ -3293,50 +2184,13 @@ export default function App() {
 
       </div>
 
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        section={settingsSection}
-        onSectionChange={setSettingsSection}
-        settings={settings}
-        profile={currentUser || profiles.activeProfile}
-        profileActions={profiles}
-        actions={{
-          onEditProfile: () => setEditProfileOpen(true),
-          apiKey,
-          backendHasKey,
-          onSaveApiKey: handleSaveApiKey,
-          micSupported,
-          conversationCount: conversations.length,
-          documentCount: documents.length,
-          onDeleteAllConversations: handleDeleteAllConversations,
-          onExportData: handleExportData,
-          onArchiveAll: handleArchiveAllConversations,
-          onResetLocalData: handleResetLocalData,
-          onLogout: handleLogout,
-          onChangePassword: () => setChangePasswordOpen(true),
-          hasPassword: currentUser?.has_password !== false,
-        }}
-      />
-
-      {/* Standalone "Chỉnh sửa hồ sơ" dialog, opened from the account menu */}
-      <EditProfileDialog
-        open={editProfileOpen}
-        onOpenChange={setEditProfileOpen}
-        profile={profiles.activeProfile}
-        profileActions={profiles}
-        onSaved={(updated) => {
-          auth.absorbProfile(updated);
-          showStatus('success', 'Đã cập nhật hồ sơ bác sĩ.');
-        }}
-      />
     </div>
   );
 }
 
 // Read-only viewer for a conversation shared via the "Chia sẻ" action — fetched from
 // GET /api/share/:id, no app chrome, no editing, just the transcript.
-function SharedConversationView({ shareId }) {
+export function SharedConversationView({ shareId }) {
   const [state, setState] = useState({ status: 'loading', data: null, error: '' });
 
   useEffect(() => {
@@ -3355,15 +2209,7 @@ function SharedConversationView({ shareId }) {
   }, [shareId]);
 
   return (
-    <div className="shared-view">
-      <header className="shared-view-header">
-        <div className="shared-view-brand">
-          <div className="brand-logo"><Pill size={17} className="logo-icon" /></div>
-          <strong>Trợ lý Fil</strong>
-        </div>
-        <a className="btn-shared-open-app" href="/">Mở Trợ lý Fil</a>
-      </header>
-
+    <article className="fil-wrap fil-clinical fil-shared">
       <div className="shared-view-body">
         {state.status === 'loading' && (
           <div className="shared-view-status">
@@ -3404,6 +2250,6 @@ function SharedConversationView({ shareId }) {
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 }

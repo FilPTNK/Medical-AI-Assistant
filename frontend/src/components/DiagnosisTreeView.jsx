@@ -4,8 +4,6 @@ import {
   Activity,
   AlertCircle,
   BookOpen,
-  ChevronDown,
-  ChevronRight,
   ClipboardList,
   Info,
   Loader2,
@@ -38,15 +36,10 @@ export default function DiagnosisTreeView({
   isPanningTree,
   isPreparingHandoff,
   nodeStatusMap,
-  patientContextOpen,
-  patientContextSent,
-  setPatientContextOpen,
   patientDesc,
   renderDecisionTreeNode,
   selectedDiagnosisDetail,
   selectedDiagnosisIds,
-  patientHistory,
-  setPatientHistory,
   treatmentResult,
   allergyCheck,
   setExamNotes,
@@ -64,52 +57,19 @@ export default function DiagnosisTreeView({
         <div className="diagnosis-split-layout">
           {/* Column 1: Questionnaire Area (70%) */}
           <div className="column-questionnaire animate-fade-in">
-            <h2>
-              Xây dựng sơ đồ chẩn đoán
-            </h2>
-
             {/* Section 1: Nhập mô tả bệnh nhân */}
             <div className="patient-desc-section">
               <div className="patient-desc-header">
                 <span className="patient-desc-header-badge">1</span>
-                <span>Nhập mô tả bệnh nhân</span>
+                <label htmlFor="diagnosis-patient-description">Nhập mô tả bệnh nhân</label>
               </div>
-              {/* Mỗi ô một hàng, nút bấm ở hàng riêng cuối cùng — không dồn ngang. */}
               <textarea
+                id="diagnosis-patient-description"
                 className="patient-desc-textarea patient-desc-main"
-                aria-label="Mô tả triệu chứng bệnh nhân"
-                placeholder="Ví dụ: Bệnh nhân nam, 28 tuổi. Sốt nhẹ về chiều, đau họng..."
+                placeholder="Nhập triệu chứng, tiền sử, thuốc đang dùng và dị ứng nếu có…"
                 value={patientDesc}
                 onChange={(e) => setPatientDesc(e.target.value)}
               />
-              <div className="patient-history-block">
-                <label className="patient-history-label" htmlFor="patient-history-input">
-                  Tình trạng bệnh nhân trước đó <span className="optional-tag">(không bắt buộc)</span>
-                </label>
-                <textarea
-                  id="patient-history-input"
-                  className="patient-desc-textarea patient-history-textarea"
-                  placeholder="Ví dụ: Tăng huyết áp 5 năm, đang dùng amlodipin 5 mg. Dị ứng penicillin."
-                  value={patientHistory}
-                  onChange={(e) => setPatientHistory(e.target.value)}
-                />
-                {patientContextSent && (
-                  <div className="patient-context-disclosure">
-                    <button
-                      type="button"
-                      className="patient-context-toggle"
-                      onClick={() => setPatientContextOpen(!patientContextOpen)}
-                      aria-expanded={patientContextOpen}
-                    >
-                      {patientContextOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      <span>Xem tình trạng trước đó AI đã đọc</span>
-                    </button>
-                    {patientContextOpen && (
-                      <pre className="patient-context-body">{patientContextSent}</pre>
-                    )}
-                  </div>
-                )}
-              </div>
               <div className="patient-desc-actions">
                 <button
                   type="button"

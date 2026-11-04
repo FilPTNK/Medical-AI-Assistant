@@ -1,4 +1,5 @@
 """Quyền tài liệu ở tầng HTTP: middleware, Thư viện, xoá. Không cần Chroma thật."""
+import json
 import os
 import sys
 import tempfile
@@ -61,6 +62,89 @@ class HttpVisibilityTests(unittest.TestCase):
 
     def delete(self, path, tok):
         return self.client.delete(path, headers={'Authorization': f'Bearer {tok}'})
+
+    def test_catalog_import_requires_admin_and_updates_atomically(self):
+        record = {
+            'id': 'sample', 'name': 'Bản ghi kiểm thử', 'source_title': 'Nguồn kiểm thử',
+            'aliases': ['Tên khác'],
+            'sections': [{'label': 'Chỉ định', 'text': 'Dòng thứ nhất\nDòng thứ hai'}],
+        }
+        url = '/api/admin/drug-import?file_format=json'
+        admin = {'Authorization': 'Bearer tok-admin'}
+        doctor = {'Authorization': 'Bearer tok-a'}
+        payload = json.dumps([record])
+        with patch.object(main.drug_catalog, 'DB_PATH', Path(self.tmp.name) / 'catalog.db'):
+            self.assertEqual(self.client.post(url, content=payload).status_code, 401)
+            self.assertEqual(self.client.post(url, headers=doctor, content=payload).status_code, 403)
+            self.assertEqual(self.client.post(url, headers=admin, content=payload).json()['count'], 1)
+            self.assertEqual(self.get('/api/drug-catalog', 'tok-a').json(), [])
+            self.assertEqual(self.client.post(url + '&publish=true', headers=admin, content=payload).status_code, 200)
+            endpoint = '/api/drug-catalog/import-sample'
+            self.assertEqual(self.get(endpoint, 'tok-a').json()['sections'], record['sections'])
+            changed = {**record, 'name': 'Tên cập nhật'}
+            invalid = json.dumps([changed, record])
+            response = self.client.post(url + '&publish=true', headers=admin, content=invalid)
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(self.get(endpoint, 'tok-a').json()['name'], record['name'])
+            csv = 'id,name,source_title,indications\r\nsample,Tên cập nhật,Nguồn kiểm thử,"Dòng 1, nguyên văn\r\nDòng 2"'
+            response = self.client.post(
+                '/api/admin/drug-import?file_format=csv&publish=true', headers=admin,
+                content=csv.encode('utf-8-sig'),
+            )
+            self.assertEqual(response.status_code, 200)
+            detail = self.get(endpoint, 'tok-a').json()
+            self.assertEqual(detail['name'], 'Tên cập nhật')
+            self.assertEqual(detail['sections'][0]['text'], 'Dòng 1, nguyên văn\r\nDòng 2')
+
+    def test_catalog_uses_shared_formulary_chunks_with_printed_page(self):
+        chunks_dir = Path(self.tmp.name) / 'chunks'
+        chunks_dir.mkdir()
+        verified_dir = Path(self.tmp.name) / 'verified'
+        verified_dir.mkdir()
+        with (
+            patch.object(main.drug_catalog, 'DB_PATH', Path(self.tmp.name) / 'catalog.db'),
+            patch.object(documents, 'CHUNKS_DIR', str(chunks_dir)),
+            patch.object(main.drug_catalog, 'VERIFIED_DIR', verified_dir),
+        ):
+            for name, visibility in [('volume-1', 'shared'), ('volume-2', 'private')]:
+                manifest = documents.new_manifest(
+                    name, name, name, 50, doc_series='DTQGVN-2022', parser='dtqg_parser',
+                )
+                manifest.update(visibility=visibility, owner_id='u-b')
+                documents.save_manifest(manifest)
+                Path(documents.chunks_path(name)).write_text(json.dumps([{
+                    'generic_name': 'PARACETAMOL', 'intl_name': 'Paracetamol, acetaminophen',
+                    'synonyms': ['Acetaminophen'], 'field_name': 'Chỉ định',
+                    'content': 'Trích đoạn nguyên văn.', 'page_in_file': 101, 'pdf_page': 10,
+                }]), encoding='utf-8')
+            summaries = self.get('/api/drug-catalog', 'tok-a').json()
+            self.assertEqual(len(summaries), 1)
+            aliases = [alias.casefold() for alias in summaries[0]['aliases']]
+            self.assertEqual(aliases.count('acetaminophen'), 1)
+            self.assertNotIn('paracetamol', aliases)
+            detail = self.get('/api/drug-catalog/' + summaries[0]['id'], 'tok-a').json()
+            self.assertTrue(detail['ocr'])
+            self.assertEqual(detail['sections'], [
+                {'label': 'Chỉ định', 'page': 101, 'pdf_page': 10, 'text': 'Trích đoạn nguyên văn.'},
+            ])
+            verified = {
+                'name': 'Paracetamol', 'drug_class': '',
+                'sections': [{
+                    'label': 'Chỉ định',
+                    'pages': [{'page': 101, 'pdf_page': 10}, {'page': 102, 'pdf_page': 11}],
+                    'blocks': [{'type': 'paragraph', 'text': 'Bản chép đối chiếu.'}],
+                }],
+            }
+            (verified_dir / 'volume-1.json').write_text(json.dumps([verified]), encoding='utf-8')
+            self.assertEqual([row['id'] for row in self.get('/api/drug-catalog', 'tok-a').json()],
+                             [summaries[0]['id']])
+            endpoint = '/api/drug-catalog/' + summaries[0]['id']
+            detail = self.get(endpoint, 'tok-a').json()
+            self.assertTrue(detail['transcribed'])
+            self.assertFalse(detail['ocr'])
+            self.assertEqual(detail['sections'], verified['sections'])
+            Path(documents.chunks_path('volume-1')).unlink()
+            self.assertEqual(self.get(endpoint, 'tok-a').json()['sections'], verified['sections'])
 
     def test_library_lists_only_visible_docs(self):
         names = {d['doc_name']: d for d in self.get('/api/documents', 'tok-a').json()}

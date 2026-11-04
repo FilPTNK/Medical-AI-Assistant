@@ -107,7 +107,7 @@ const SECTIONS = [
 const SHORTCUTS = [
   { keys: ['Ctrl', 'K'], label: 'Mở tìm kiếm nhanh' },
   { keys: ['Ctrl', 'Shift', 'O'], label: 'Cuộc trò chuyện mới' },
-  { keys: ['Ctrl', 'B'], label: 'Ẩn/hiện thanh điều hướng' },
+  { keys: ['Ctrl', 'B'], label: 'Ẩn/hiện lịch sử trên trang Hỏi đáp' },
   { keys: ['Ctrl', '/'], label: 'Mở bảng phím tắt' },
   { keys: ['Ctrl', ','], label: 'Mở cài đặt' },
   { keys: ['Esc'], label: 'Đóng hộp thoại đang mở' },
@@ -258,17 +258,6 @@ export default function SettingsDialog({
                       { value: 'vi', label: 'Tiếng Việt' },
                       { value: 'en', label: 'English' },
                       { value: 'auto', label: 'Tự động phát hiện' },
-                    ]}
-                  />
-                </Row>
-
-                <Row label="Bố cục thư viện tài liệu" desc="Kiểu hiển thị mặc định cho tab Thư viện.">
-                  <Segmented
-                    value={settings.libraryViewMode}
-                    onChange={settings.setLibraryViewMode}
-                    options={[
-                      { value: 'grid', label: 'Lưới' },
-                      { value: 'list', label: 'Danh sách' },
                     ]}
                   />
                 </Row>
@@ -437,7 +426,7 @@ export default function SettingsDialog({
                 </Row>
                 <Row
                   label="Lưu trữ tất cả cuộc trò chuyện"
-                  desc="Ẩn khỏi thanh bên nhưng vẫn giữ lại nội dung."
+                  desc="Ẩn khỏi lịch sử gần đây nhưng vẫn giữ lại nội dung."
                 >
                   <button
                     type="button"

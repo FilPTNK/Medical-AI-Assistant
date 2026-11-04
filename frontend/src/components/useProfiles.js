@@ -48,7 +48,7 @@ const unwrap = async (res) => {
   throw new Error(detail);
 };
 
-export default function useProfiles() {
+export default function useProfiles(enabled = true) {
   const [profiles, setProfiles] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -66,7 +66,9 @@ export default function useProfiles() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (enabled) refresh();
+  }, [enabled, refresh]);
 
   const activeProfile = useMemo(() => {
     if (!profiles.length) return FALLBACK_PROFILE;

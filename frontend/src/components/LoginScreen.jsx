@@ -480,7 +480,7 @@ export default function LoginScreen({
           </p>
         )}
 
-        {isLogin && (
+        {isLogin && onRegister && (
           <p className="lg-switch">
             Chưa có tài khoản?{' '}
             <button type="button" className="lg-link" onClick={() => goto('register')}>

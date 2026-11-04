@@ -15,7 +15,7 @@ import './PageViewer.css';
  */
 const ZOOMS = [1, 1.35, 1.75, 2.25];
 
-export default function PageViewer({ docName, pageNum, quote, alt }) {
+export default function PageViewer({ docName, pageNum, sourcePdfPage, quote, alt }) {
   const [locate, setLocate] = useState({ status: quote ? 'loading' : 'none', rects: [] });
   const [zoomIdx, setZoomIdx] = useState(0);
   const firstRectRef = useRef(null);
@@ -68,6 +68,8 @@ export default function PageViewer({ docName, pageNum, quote, alt }) {
   }, [locate.status, zoomIdx]);
 
   const zoom = ZOOMS[zoomIdx];
+  const imageParams = new URLSearchParams({ dpi: zoom > 1.4 ? '220' : '150' });
+  if (sourcePdfPage) imageParams.set('source_pdf_page', String(sourcePdfPage));
 
   return (
     <div className="page-viewer">
@@ -114,7 +116,7 @@ export default function PageViewer({ docName, pageNum, quote, alt }) {
         <div className="page-viewer-page" style={{ width: `${zoom * 100}%` }}>
           <AuthedImage
             className="page-viewer-image"
-            url={`/api/documents/${encodeURIComponent(docName)}/pages/${pageNum}/image?dpi=${zoom > 1.4 ? 220 : 150}`}
+            url={`/api/documents/${encodeURIComponent(docName)}/pages/${pageNum}/image?${imageParams}`}
             alt={alt}
           />
           {locate.rects.map((r, i) => (
