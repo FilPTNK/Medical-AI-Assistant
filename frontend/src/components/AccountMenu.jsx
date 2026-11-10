@@ -83,10 +83,13 @@ export default function AccountMenu({
             </DropdownMenu.Item>
 
             {isAdmin && (
-              <DropdownMenu.Item className="st-menu-item" onSelect={onOpenClinicAdmin}>
-                <ShieldCheck size={20} />
-                <span>Quản trị phòng khám</span>
-              </DropdownMenu.Item>
+              <>
+                <DropdownMenu.Item className="st-menu-item" asChild><a href="/quan-tri"><BookOpen size={20} /> Quản trị dữ liệu thuốc</a></DropdownMenu.Item>
+                <DropdownMenu.Item className="st-menu-item" onSelect={onOpenClinicAdmin}>
+                  <ShieldCheck size={20} />
+                  <span>Quản trị phòng khám</span>
+                </DropdownMenu.Item>
+              </>
             )}
 
             <DropdownMenu.Item className="st-menu-item" onSelect={onOpenSettings}>

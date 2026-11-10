@@ -4,6 +4,7 @@ import {
   MailCheck, ArrowLeft, Terminal,
 } from 'lucide-react';
 import './LoginScreen.css';
+import FilLogo from './FilLogo';
 
 /**
  * Cổng vào của phòng khám. Bốn chế độ dùng chung một khung thẻ:
@@ -248,7 +249,7 @@ export default function LoginScreen({
     }
   };
 
-  const brandMark = <img className="lg-fil-logo" src="/fil-logo.svg" alt="Fil" width="144" height="61" />;
+  const brandMark = <FilLogo className="lg-fil-logo" />;
 
   if (isOffline) {
     return (

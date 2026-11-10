@@ -65,7 +65,7 @@ const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.r
 const MAX_PINNED_CONVERSATIONS = 3;
 
 
-export default function App({ user, settings, clinical, activeTab, onOpenChat }) {
+export default function App({ user, settings, clinical, activeTab, onOpenChat, specialty, onClearSpecialty }) {
   const { documents, config, conversations, setConversations, apiKey } = clinical;
   const doctorName = user?.display_name || user?.username || '';
   const greetingName = doctorName.replace(/^(?:BS\.?|Bác sĩ)\s*/iu, '').trim();
@@ -206,6 +206,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
 
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
   const messages = activeConversation ? activeConversation.messages : draftWelcome;
+  const activeSpecialty = activeConversation ? activeConversation.specialty || null : specialty?.name;
 
   useEffect(() => {
     if (!activeConversationId || activeConversation) return;
@@ -544,6 +545,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
       const newConversation = {
         id: convId,
         title: createConversationTitle(q),
+        specialty: activeSpecialty || null,
         messages: [userMsg],
         pinned: false,
         createdAt: Date.now(),
@@ -583,7 +585,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
         method: 'POST',
         headers,
         body: JSON.stringify({
-          query: q,
+          query: activeSpecialty ? `Chuyên khoa: ${activeSpecialty}.\n${q}` : q,
           created_by: doctorName,
           web: webSearchTools.length > 0,
           doc_names: attachment ? [attachment.doc_name] : selectedSourceNames,
@@ -1712,6 +1714,10 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat })
           {activeTab === 'chat' && (
             <div className="chat-dashboard-split">
               <div className="fil-qa-main">
+                {activeSpecialty && <div className="fil-specialty-context">
+                  <BookOpen size={16} aria-hidden="true" /><span>Sổ tay <strong>{activeSpecialty}</strong></span>
+                  <button type="button" aria-label="Về hỏi đáp tổng quát" onClick={() => { handleNewChat(); onClearSpecialty?.(); }}><X size={16} aria-hidden="true" /></button>
+                </div>}
                 <h1 className="sr-only">Hỏi đáp y khoa</h1>
               <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
                 <h2 className="sr-only">{activeConversation?.title || 'Đặt câu hỏi'}</h2>

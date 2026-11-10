@@ -3,8 +3,10 @@ import AccountMenu from './AccountMenu';
 import ClinicAdminDialog, { ChangePasswordDialog } from './ClinicAdmin';
 import EditProfileDialog from './EditProfileDialog';
 import SettingsDialog from './SettingsDialog';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Moon, Settings, Sun } from 'lucide-react';
 
-export default function SiteAccount({ auth, settings, profiles, clinical }) {
+export default function SiteAccount({ auth, settings, profiles, clinical, showHeaderSettings = false }) {
   const [section, setSection] = useState('general');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -63,6 +65,27 @@ export default function SiteAccount({ auth, settings, profiles, clinical }) {
 
   return (
     <>
+      {showHeaderSettings && <DropdownMenu.Root onOpenChange={open => { if (open) clinical.markNotificationsRead(); }}>
+        <DropdownMenu.Trigger className="fil-header-icon" aria-label="Cài đặt" title="Cài đặt">
+          <Settings size={20} aria-hidden="true" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="end" sideOffset={8} className="dropdown-menu-content fil-header-settings">
+            <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => openSettings()}><Settings size={17} /> Cài đặt tài khoản</DropdownMenu.Item>
+            <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => settings.setAppearance(settings.isDarkMode ? 'light' : 'dark')}>
+              {settings.isDarkMode ? <Sun size={17} /> : <Moon size={17} />} {settings.isDarkMode ? 'Chuyển sang nền sáng' : 'Chuyển sang nền tối'}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator className="dropdown-menu-separator" />
+            <DropdownMenu.Label className="fil-notification-label">Thông báo</DropdownMenu.Label>
+            <div className="fil-header-notifications">
+              {clinical.notifications.length === 0 ? <p>Chưa có thông báo mới.</p>
+                : clinical.notifications.map((item, index) => <div className="fil-notification" key={index}>
+                  <span>{item.message}</span><time>{item.time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</time>
+                </div>)}
+            </div>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>}
       <AccountMenu
         currentUser={user}
         onOpenSettings={() => openSettings()}

@@ -124,6 +124,14 @@ Web search runs automatically when the backend advertises available web tools.
 The API still accepts the legacy single-document scope and requests without a
 source selection.
 
+The homepage uses a specialty notebook gallery with twelve specialties, four
+illustrated covers, accent-insensitive search, grid/list views and bookmarks
+stored per account in this browser. Opening a notebook adds its specialty to
+the Q&A context; it does not imply a separate curated document collection.
+The header, settings and account menu are shared across the site. See the
+[Notebook homepage research](docs/notebook-homepage-research.md) for reference
+sources and implementation decisions.
+
 ### Managing the drug directory
 
 Sign in with an administrator account, open `/quan-tri`, and download a CSV or
