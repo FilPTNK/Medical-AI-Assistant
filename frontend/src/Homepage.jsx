@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ArrowUpRight, BookOpen, Bookmark, ChevronLeft, ChevronRight, Clock3, MessageSquare, MoreVertical, Pencil, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Archive, ArrowUpRight, Bookmark, ChevronLeft, ChevronRight, Clock3, MessageSquare, MoreVertical, Pencil, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { matchingSpecialties, specialties, specialtyHref } from './lib/specialties';
@@ -119,8 +119,7 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
           {matching.map((item, index) => <li key={item.id} className="fil-featured-notebook">
             <a href={specialtyHref(item)} onClick={follow} aria-label={`Mở sổ tay ${item.name}`}>
               <img className="fil-featured-image" src={item.cover} alt="" width="1536" height="1024" loading={index < 5 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : 'auto'} decoding="async" />
-              <span className="fil-cover-tab"><BookOpen size={19} aria-hidden="true" /><span>Chuyên khoa</span></span>
-              <span className="fil-cover-publisher"><span><item.Icon size={18} aria-hidden="true" /></span> Fil</span>
+              <span className="fil-cover-specialty-icon"><item.Icon size={21} strokeWidth={1.7} aria-hidden="true" /></span>
               <div className="fil-featured-copy"><h3>{item.name}</h3><span className="fil-cover-meta">{item.english}</span></div>
               <ArrowUpRight className="fil-cover-arrow" size={22} aria-hidden="true" />
             </a>

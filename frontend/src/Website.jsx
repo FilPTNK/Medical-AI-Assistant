@@ -134,7 +134,7 @@ export default function Website() {
   if (shared) page = <SharedConversationView shareId={url.searchParams.get('share')} />;
   else if (clinicalPage) page = (
     <AccountGate auth={auth}>
-      <article className={toolPath === '/hoi-dap' ? 'fil-wrap fil-clinical fil-qa-page' : 'fil-wrap fil-clinical'}>
+      <article className={toolPath === '/hoi-dap' ? 'fil-wrap fil-clinical fil-qa-page' : 'fil-wrap fil-clinical fil-diagnosis-page'}>
         {toolPath === '/chan-doan' && <h1 className="sr-only">Hỗ trợ chẩn đoán</h1>}
         <App user={auth.user} settings={settings} clinical={clinical}
           activeTab={toolPath === '/chan-doan' ? 'diagnosisTree' : 'chat'}

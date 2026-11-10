@@ -1,8 +1,7 @@
 import React from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
-  UserRound, Settings, HelpCircle, LogOut,
-  ChevronRight, BookOpen, FileText, Keyboard, ShieldCheck,
+  UserRound, KeyRound, LogOut, ChevronRight, BookOpen, ShieldCheck,
 } from 'lucide-react';
 import { initialsOf, avatarColorOf } from './useProfiles';
 import AuthedImage from './AuthedImage';
@@ -16,9 +15,7 @@ import './SettingsDialog.css';
  * nếu không thì quy tắc "bác sĩ chỉ xem bệnh nhân của mình" bỏ qua được chỉ bằng
  * một cú bấm. Việc tạo tài khoản mới chuyển vào mục Quản trị phòng khám.
  *
- * "Cá nhân hóa" và "Đổi mật khẩu" đã rời khỏi menu này: cả hai đều có mặt trong
- * hộp thoại Cài đặt (mục Cá nhân hóa và mục Tài khoản), để mỗi thao tác chỉ có
- * đúng một chỗ để tìm.
+ * Hồ sơ và mật khẩu thuộc tài khoản; tùy chọn website mở bằng bánh răng riêng.
  */
 
 /** Avatar that shows the uploaded image when there is one, else initials. */
@@ -39,7 +36,7 @@ export function ProfileAvatar({ profile, className = '' }) {
 }
 
 export default function AccountMenu({
-  currentUser: account, onOpenSettings, onOpenSection, onEditProfile, onLogout, onOpenClinicAdmin,
+  currentUser: account, onOpenAccount, onChangePassword, onLogout, onOpenClinicAdmin,
 }) {
   const isAdmin = account?.role === 'admin';
 
@@ -59,7 +56,7 @@ export default function AccountMenu({
 
         <DropdownMenu.Portal>
           <DropdownMenu.Content
-            className="st-menu st-scope"
+            className="st-menu st-scope fil-account-menu"
             side="bottom"
             align="end"
             sideOffset={8}
@@ -77,9 +74,12 @@ export default function AccountMenu({
 
             <DropdownMenu.Separator className="st-menu-separator" />
 
-            <DropdownMenu.Item className="st-menu-item" onSelect={onEditProfile}>
+            <DropdownMenu.Item className="st-menu-item" onSelect={onOpenAccount}>
               <UserRound size={20} />
-              <span>Hồ sơ</span>
+              <span>Hồ sơ tài khoản</span>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className="st-menu-item" onSelect={onChangePassword}>
+              <KeyRound size={20} /><span>{account?.has_password === false ? 'Đặt mật khẩu' : 'Đổi mật khẩu'}</span>
             </DropdownMenu.Item>
 
             {isAdmin && (
@@ -92,36 +92,7 @@ export default function AccountMenu({
               </>
             )}
 
-            <DropdownMenu.Item className="st-menu-item" onSelect={onOpenSettings}>
-              <Settings size={20} />
-              <span>Cài đặt</span>
-            </DropdownMenu.Item>
-
             <DropdownMenu.Separator className="st-menu-separator" />
-
-            <DropdownMenu.Sub>
-              <DropdownMenu.SubTrigger className="st-menu-item">
-                <HelpCircle size={20} />
-                <span className="st-menu-item-grow">Trợ giúp</span>
-                <ChevronRight size={16} className="st-menu-chevron" />
-              </DropdownMenu.SubTrigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.SubContent className="st-menu st-scope" sideOffset={6}>
-                  <DropdownMenu.Item className="st-menu-item" onSelect={() => onOpenSection('keyboard')}>
-                    <Keyboard size={20} />
-                    <span>Phím tắt</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className="st-menu-item" onSelect={onOpenSettings}>
-                    <BookOpen size={20} />
-                    <span>Hướng dẫn sử dụng</span>
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className="st-menu-item" onSelect={() => onOpenSection('safety')}>
-                    <FileText size={20} />
-                    <span>Điều khoản & an toàn</span>
-                  </DropdownMenu.Item>
-                </DropdownMenu.SubContent>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Sub>
 
             <DropdownMenu.Item className="st-menu-item" onSelect={onLogout}>
               <LogOut size={20} />

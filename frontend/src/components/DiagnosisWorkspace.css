@@ -1,0 +1,93 @@
+/* Fil's clinical workspace: quiet reading surfaces around a distinct graph canvas. */
+.fil-site:has(.fil-diagnosis-page) { --fil-canvas: radial-gradient(ellipse at 90% 9%, color-mix(in srgb, var(--fil-accent) 10%, transparent), transparent 48%), radial-gradient(ellipse at 4% 85%, color-mix(in srgb, var(--fil-accent) 5%, transparent), transparent 45%); }
+.fil-diagnosis-page { --dx-radius: 22px; --dx-canvas: color-mix(in srgb, var(--fil-accent) 4%, var(--fil-white)); --dx-shadow: 0 5px 24px #143a4607; padding-top: 24px; }
+.fil-diagnosis-workspace { min-width: 0; }
+.dx-progress { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0 0 22px; padding: 18px 24px; border: 1px solid var(--fil-border); border-radius: 20px; background: var(--fil-white); box-shadow: var(--dx-shadow); }
+.dx-progress li { display: flex; align-items: center; gap: 12px; position: relative; min-width: 0; padding-right: 20px; }
+.dx-progress li:not(:last-child)::after { content: ''; position: absolute; right: 16px; width: 30px; top: 50%; height: 1px; background: var(--fil-border); }
+.dx-step-symbol { flex: none; display: grid; place-items: center; width: 33px; height: 33px; border: 1px solid var(--fil-border); border-radius: 50%; color: var(--fil-muted); background: var(--fil-bg); font-size: .8rem; font-weight: 600; }
+.dx-step-label { display: block; font-size: .86rem; font-weight: 500; color: var(--fil-muted); }
+.dx-step-hint { display: block; margin-top: 5px; font-size: .7rem; color: var(--fil-muted); }
+.dx-progress .is-current .dx-step-symbol { color: var(--fil-button-ink); border-color: var(--fil-button-bg); background: var(--fil-button-bg); box-shadow: 0 0 0 4px var(--fil-soft); }
+.dx-progress .is-current .dx-step-label { color: var(--fil-ink); font-weight: 600; }
+.dx-progress .is-complete .dx-step-symbol { background: var(--fil-soft); color: var(--fil-accent); border-color: var(--fil-soft); }
+.dx-progress .is-complete .dx-step-label { color: var(--fil-accent); }
+.fil-diagnosis-page .diagnosis-split-layout { gap: 22px; }
+.fil-diagnosis-page .column-questionnaire { gap: 20px; }
+.fil-diagnosis-page .patient-desc-section, .fil-diagnosis-page .symptom-tree-card, .fil-diagnosis-page .results-card { margin: 0; border: 1px solid var(--fil-border); border-radius: var(--dx-radius); padding: 23px; background: var(--fil-white); box-shadow: var(--dx-shadow); }
+.fil-diagnosis-page .dx-description-card { position: relative; overflow: hidden; }
+.fil-diagnosis-page .dx-description-card::before { content: ''; position: absolute; top: 0; left: 24px; width: 66px; height: 3px; border-radius: 0 0 4px 4px; background: var(--fil-accent); }
+.fil-diagnosis-page .patient-desc-header { gap: 12px; margin: 0 0 19px; }
+.fil-diagnosis-page .patient-desc-header label { font-size: 1rem; font-weight: 600; }
+.fil-diagnosis-page .patient-desc-header p { margin: 7px 0 0; font-size: .78rem; line-height: 1.6; color: var(--fil-muted); font-weight: 400; }
+.fil-diagnosis-page .dx-section-icon { display: inline-grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 13px; background: var(--fil-soft); color: var(--fil-accent); -webkit-text-fill-color: currentColor; }
+.fil-diagnosis-page .patient-desc-section .patient-desc-main { min-height: 128px; margin: 0; padding: 16px; border: 1px solid var(--fil-border); border-radius: 14px; background: color-mix(in srgb, var(--fil-bg) 65%, var(--fil-white)); font: inherit; font-size: .9rem; line-height: 1.8; }
+.fil-diagnosis-page .patient-desc-textarea:focus { outline: 2px solid var(--fil-accent); outline-offset: 2px; border-color: var(--fil-accent); }
+.fil-diagnosis-page .patient-desc-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 17px; }
+.dx-input-note { color: var(--fil-muted); font-size: .72rem; line-height: 1.6; max-width: 280px; }
+.fil-diagnosis-page .btn-analyze-desc, .fil-diagnosis-page .btn-diagnose-submit { min-height: 46px; padding: 11px 17px; border-radius: 12px; font-size: .84rem; font-weight: 500; box-shadow: none; }
+.fil-diagnosis-page .btn-analyze-desc:disabled, .fil-diagnosis-page .btn-diagnose-submit:disabled { background: var(--fil-soft); color: var(--fil-muted); opacity: .75; }
+.fil-diagnosis-page .symptom-tree-card { gap: 17px; }
+.fil-diagnosis-page .symptom-tree-title { margin: 0; gap: 11px; font-size: 1rem; font-weight: 600; letter-spacing: -.2px; background: none; -webkit-text-fill-color: currentColor; color: var(--fil-ink); }
+.fil-diagnosis-page .symptom-tree-title > :first-child { -webkit-text-fill-color: currentColor; background: var(--fil-soft); background-clip: initial; }
+.fil-diagnosis-page .symptom-tree-header { gap: 12px; flex-wrap: wrap; }
+.dx-tree-state { display: inline-flex; padding: 7px 11px; border: 1px solid var(--fil-border); border-radius: 20px; color: var(--fil-muted); font-size: .69rem; }
+.fil-diagnosis-page .symptom-tree-legend { flex-wrap: wrap; gap: 10px 20px; font-size: .74rem; margin-top: -1px; }
+.fil-diagnosis-page .legend-dot.unselected { width: 8px; height: 8px; border: 1px solid var(--fil-muted); background: transparent; }
+.fil-diagnosis-page .tree-canvas-wrapper { height: clamp(340px, 48vh, 520px); border: 1px solid var(--fil-border); border-radius: 17px; background-color: var(--dx-canvas); background-image: radial-gradient(color-mix(in srgb, var(--fil-accent) 21%, transparent) .8px, transparent .9px); background-size: 22px 22px; box-shadow: none; }
+.fil-diagnosis-page .tree-canvas-wrapper.is-empty { cursor: default; }
+.dx-canvas-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; box-sizing: border-box; padding: 25px 24px 82px; text-align: center; color: var(--fil-muted); }
+.dx-empty-branches { width: 190px; height: 103px; flex: none; margin-bottom: 21px; color: var(--fil-accent); }
+.dx-empty-branches path { stroke: currentColor; stroke-width: 1.5; opacity: .4; }
+.dx-empty-branches rect { fill: var(--fil-white); stroke: color-mix(in srgb, var(--fil-accent) 36%, var(--fil-border)); stroke-width: 1.3; }
+.dx-empty-branches rect:first-of-type { fill: var(--fil-soft); }
+.dx-canvas-empty h3 { margin: 0 0 9px; color: var(--fil-ink); font-size: .98rem; font-weight: 500; }
+.dx-canvas-empty p { max-width: 350px; margin: 0; font-size: .78rem; line-height: 1.8; }
+.dx-canvas-empty strong { font-weight: 500; color: var(--fil-accent); }
+.dx-loading-symbol { margin-bottom: 23px; color: var(--fil-accent); }
+.dx-canvas-toolbar { position: absolute; z-index: 2; left: 16px; right: 14px; bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 14px; pointer-events: none; }
+.dx-canvas-hint { color: var(--fil-muted); font-size: .68rem; line-height: 1.5; max-width: 260px; }
+.fil-diagnosis-page .zoom-controls { pointer-events: auto; padding: 3px; gap: 0; border-radius: 13px; border-color: var(--fil-border); background: var(--fil-white); box-shadow: 0 3px 12px #153f4910; }
+.fil-diagnosis-page .zoom-btn { width: 40px; height: 40px; border-radius: 10px; }
+.fil-diagnosis-page .zoom-btn:hover:not(:disabled), .fil-diagnosis-page .zoom-indicator:hover:not(:disabled) { background: var(--fil-soft); }
+.fil-diagnosis-page .zoom-indicator { height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--fil-ink); font-size: .75rem; }
+.fil-diagnosis-page .tree-node-root { border-color: var(--fil-border); background: var(--fil-white); box-shadow: 0 4px 16px #183f4712; }
+.fil-diagnosis-page .tree-node-root .root-title { color: var(--fil-accent); }
+.fil-diagnosis-page .decision-node-card { border-radius: 13px; box-shadow: 0 3px 12px #183f470a; }
+.fil-diagnosis-page .card-btn { min-height: 36px; }
+.fil-diagnosis-page .dx-exam-card { background: linear-gradient(120deg, var(--fil-white), color-mix(in srgb, var(--fil-accent) 4%, var(--fil-white))); }
+.dx-exam-hint { margin: -5px 0 0 53px; color: var(--fil-muted); font-size: .8rem; line-height: 1.8; }
+.fil-diagnosis-page .dx-exam-card .diagnose-action-bar { justify-content: flex-end; }
+.dx-findings-label { display: block; margin-bottom: 10px; font-size: .88rem; font-weight: 500; color: var(--fil-ink); }
+.fil-diagnosis-page .column-results { gap: 20px; }
+.fil-diagnosis-page .results-card-title { margin: 0 0 18px; font-size: .92rem; font-weight: 600; }
+.fil-diagnosis-page .results-card-title > span:first-child { display: inline-flex; align-items: center; gap: 9px; }
+.fil-diagnosis-page .results-card-title svg { color: var(--fil-accent); flex: none; }
+.fil-diagnosis-page .results-card-badge { background: var(--fil-soft); color: var(--fil-accent); min-width: 26px; height: 26px; font-size: .78rem; }
+.dx-symptom-totals { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 17px; }
+.dx-symptom-totals > span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 8px; font-size: .72rem; color: var(--fil-muted); background: var(--fil-bg); }
+.dx-symptom-totals > span:first-child { color: var(--fil-accent); background: var(--fil-soft); }
+.dx-rail-hint { margin: 0; color: var(--fil-muted); font-size: .82rem; line-height: 1.85; }
+.fil-diagnosis-page .selected-symptoms-scroller { max-height: 340px; }
+.fil-diagnosis-page .selected-symptom-bullet { font-size: .84rem; line-height: 1.7; }
+.fil-diagnosis-page .dx-results-card { min-height: 290px; border-top: 3px solid color-mix(in srgb, var(--fil-accent) 50%, var(--fil-border)); }
+.dx-results-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 29px 5px 20px; color: var(--fil-muted); text-align: center; }
+.dx-results-empty > svg { margin-bottom: 18px; color: var(--fil-accent); }
+.dx-results-empty h4 { margin: 0 0 9px; color: var(--fil-ink); font-size: .88rem; font-weight: 500; }
+.dx-results-empty p { max-width: 250px; margin: 0; font-size: .8rem; line-height: 1.85; }
+.fil-diagnosis-page .cause-item { border-radius: 13px; padding: 14px; }
+.fil-diagnosis-page .cause-item-name { font-size: .86rem; line-height: 1.6; }
+.fil-diagnosis-page .cause-item-pct { font-size: .95rem; }
+.fil-diagnosis-page .cause-item-top { gap: 8px; flex-wrap: wrap; }
+.fil-diagnosis-page .cause-item .icon-btn-action { width: 36px; height: 36px; }
+.dx-detail-dialog { --bg-card: #fff; --bg-app: #f2f8f8; --text-primary: #173a40; --text-secondary: #526d74; --border: #d4e4e5; --primary: #006875; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 501; width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); border-radius: 24px; }
+.dark .dx-detail-dialog { --bg-card: #192d3d; --bg-app: #101f2c; --text-primary: #edf7fd; --text-secondary: #b8cfdf; --border: #38596d; --primary: #9de5e4; }
+.dx-detail-overlay { position: fixed; inset: 0; z-index: 500; background: #081f2b80; }
+.dx-detail-dialog .diagnosis-modal-header { gap: 16px; }
+.dx-detail-dialog .diagnosis-modal-header button { width: 44px; height: 44px; }
+.dx-detail-dialog :focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+@media (min-width: 980px) { .fil-diagnosis-page .diagnosis-split-layout { grid-template-columns: minmax(0, 1fr) clamp(310px, 28vw, 400px); } .fil-diagnosis-page .column-results { position: sticky; top: 100px; } .fil-diagnosis-page .column-results:has(.causes-list) { position: static; } }
+@media (max-width: 1100px) { .dx-progress { padding: 17px 20px; } .dx-progress li::after { display: none; } .dx-step-hint { font-size: .67rem; } .dx-step-label { font-size: .8rem; } .dx-input-note { display: none; } .fil-diagnosis-page .patient-desc-actions { justify-content: flex-end; } .dx-canvas-hint { display: none; } .dx-canvas-toolbar { justify-content: flex-end; } }
+@media (max-width: 979px) { .fil-diagnosis-page .diagnosis-split-layout { grid-template-columns: minmax(0, 1fr); } .fil-diagnosis-page .column-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+@media (max-width: 600px) { .fil-diagnosis-page { --dx-radius: 18px; padding-block: 18px 35px; } .dx-progress { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 21px 12px; padding: 20px 17px; margin-bottom: 18px; border-radius: 18px; } .dx-progress li { padding: 0; gap: 9px; } .dx-step-label { font-size: .8rem; } .dx-step-hint { display: none; } .fil-diagnosis-page .column-questionnaire, .fil-diagnosis-page .column-results { gap: 17px; } .fil-diagnosis-page .column-results { display: flex; } .fil-diagnosis-page .patient-desc-section, .fil-diagnosis-page .symptom-tree-card, .fil-diagnosis-page .results-card { padding: 18px; } .fil-diagnosis-page .patient-desc-header label, .fil-diagnosis-page .symptom-tree-title { font-size: .93rem; } .fil-diagnosis-page .patient-desc-header p { font-size: .8rem; } .fil-diagnosis-page .dx-section-icon { width: 36px; height: 36px; border-radius: 11px; } .fil-diagnosis-page .patient-desc-section .patient-desc-main { min-height: 155px; padding: 13px; font-size: .875rem; } .fil-diagnosis-page .btn-analyze-desc { width: 100%; } .fil-diagnosis-page .symptom-tree-legend { font-size: .75rem; gap: 9px 13px; } .dx-tree-state { font-size: .72rem; } .fil-diagnosis-page .tree-canvas-wrapper { min-height: 340px; } .dx-canvas-empty { padding-inline: 18px; } .dx-empty-branches { width: 155px; height: 85px; margin-bottom: 18px; } .dx-canvas-empty p { font-size: .8rem; } .dx-canvas-empty h3 { font-size: .9rem; } .dx-exam-hint { margin-left: 0; font-size: .875rem; } .fil-diagnosis-page .column-results { position: static; } .fil-diagnosis-page .dx-results-card { min-height: 260px; } }
+@media (prefers-reduced-motion: reduce) { .fil-diagnosis-workspace .animate-fade-in, .fil-diagnosis-workspace .animate-spin { animation: none; } }

@@ -20,18 +20,23 @@ const ACCEPTED = 'image/png,image/jpeg,image/webp,image/gif';
 export default function EditProfileDialog({ open, onOpenChange, profile, profileActions, onSaved }) {
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
+  const [specialty, setSpecialty] = useState('');
+  const [email, setEmail] = useState('');
   const [preview, setPreview] = useState(null);   // object URL for a not-yet-uploaded pick
   const [pendingFile, setPendingFile] = useState(null);
   const [removeExisting, setRemoveExisting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef(null);
+  const emailRef = useRef(null);
 
   // Reset the form to the stored profile every time the dialog opens.
   useEffect(() => {
     if (!open) return;
     setDisplayName(profile?.display_name || '');
     setUsername(profile?.username || '');
+    setSpecialty(profile?.specialty || '');
+    setEmail(profile?.email || '');
     setPendingFile(null);
     setRemoveExisting(false);
     setError('');
@@ -75,6 +80,7 @@ export default function EditProfileDialog({ open, onOpenChange, profile, profile
       setError('Tên hiển thị và tên đăng nhập không được để trống.');
       return;
     }
+    if (!emailRef.current?.reportValidity()) return;
     setSaving(true);
     setError('');
     try {
@@ -85,6 +91,8 @@ export default function EditProfileDialog({ open, onOpenChange, profile, profile
       const updated = await profileActions.updateProfile(profile.id, {
         display_name: displayName.trim(),
         username: username.trim(),
+        specialty: specialty.trim(),
+        email: email.trim(),
       });
       onSaved?.(updated);
       onOpenChange(false);
@@ -164,7 +172,9 @@ export default function EditProfileDialog({ open, onOpenChange, profile, profile
             />
           </div>
 
-          {error && <div className="st-profile-error">{error}</div>}
+          <div className="st-boxed-field"><label htmlFor="ep-specialty">Chuyên khoa</label><input id="ep-specialty" value={specialty} onChange={event => setSpecialty(event.target.value)} maxLength={120} placeholder="Chuyên khoa của bạn" /></div>
+          <div className="st-boxed-field"><label htmlFor="ep-email">Email liên hệ</label><input ref={emailRef} id="ep-email" type="email" value={email} onChange={event => setEmail(event.target.value)} maxLength={254} autoComplete="email" placeholder="bacsi@phongkham.vn" /></div>
+          {error && <div className="st-profile-error" role="alert">{error}</div>}
 
           <div className="st-subdialog-actions">
             <Dialog.Close asChild>

@@ -4,11 +4,10 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Switch from '@radix-ui/react-switch';
 import {
   Palette, Sparkles, Plug, AudioLines, Database, HardDrive,
-  ShieldCheck, Lock, UserRound, Keyboard, Search, X, ChevronDown, Check,
-  Trash2, Download, AlertTriangle, Archive, KeyRound,
+  ShieldCheck, Lock, Keyboard, Search, X, ChevronDown, Check,
+  Trash2, Download, AlertTriangle, Archive,
 } from 'lucide-react';
 import { ACCENT_COLORS, measureStorage, formatBytes } from './useSettings';
-import { ProfileAvatar } from './AccountMenu';
 import './SettingsDialog.css';
 
 /* ---------------------------------------------------------------------
@@ -99,8 +98,7 @@ const SECTIONS = [
   { value: 'data', label: 'Kiểm soát dữ liệu', icon: Database, keywords: 'dữ liệu xuất lưu trữ xóa hội thoại cải thiện mô hình' },
   { value: 'storage', label: 'Lưu trữ', icon: HardDrive, keywords: 'dung lượng bộ nhớ cache trang pdf' },
   { value: 'safety', label: 'An toàn', icon: ShieldCheck, keywords: 'an toàn miễn trừ trách nhiệm liều cảnh báo kê đơn' },
-  { value: 'security', label: 'Bảo mật', icon: Lock, keywords: 'bảo mật khóa pin đăng xuất phiên đăng nhập' },
-  { value: 'account', label: 'Tài khoản', icon: UserRound, keywords: 'tài khoản hồ sơ bác sĩ tên chuyên khoa email mật khẩu đổi mật khẩu đăng nhập' },
+  { value: 'security', label: 'Bảo mật thiết bị', icon: Lock, keywords: 'bảo mật khóa pin đăng xuất phiên đăng nhập' },
   { value: 'keyboard', label: 'Phím tắt', icon: Keyboard, keywords: 'phím tắt bàn phím shortcut' },
 ];
 
@@ -116,13 +114,11 @@ const SHORTCUTS = [
 ];
 
 export default function SettingsDialog({
-  open, onOpenChange, section, onSectionChange, settings, actions, profile, profileActions,
+  open, onOpenChange, section, onSectionChange, settings, actions,
 }) {
   const [query, setQuery] = useState('');
   const [ciOpen, setCiOpen] = useState(false);
   const [ciDraft, setCiDraft] = useState(settings.customInstructions);
-  const [specialtyDraft, setSpecialtyDraft] = useState(profile?.specialty || '');
-  const [emailDraft, setEmailDraft] = useState(profile?.email || '');
   const [apiKeyDraft, setApiKeyDraft] = useState(actions.apiKey || '');
   const [storage, setStorage] = useState(() => measureStorage());
 
@@ -131,22 +127,9 @@ export default function SettingsDialog({
     if (!open) return;
     setQuery('');
     setCiDraft(settings.customInstructions);
-    setSpecialtyDraft(profile?.specialty || '');
-    setEmailDraft(profile?.email || '');
     setApiKeyDraft(actions.apiKey || '');
     setStorage(measureStorage());
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Follow profile edits made from the standalone "Chỉnh sửa hồ sơ" dialog.
-  useEffect(() => {
-    setSpecialtyDraft(profile?.specialty || '');
-    setEmailDraft(profile?.email || '');
-  }, [profile?.specialty, profile?.email]);
-
-  const saveProfileField = (field) => (value) => {
-    if (!profile?.id || (profile[field] || '') === value.trim()) return;
-    profileActions.updateProfile(profile.id, { [field]: value.trim() }).catch(() => {});
-  };
 
   const visibleSections = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -175,7 +158,7 @@ export default function SettingsDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="st-overlay" />
-        <Dialog.Content className="st-dialog st-scope" aria-describedby={undefined}>
+        <Dialog.Content className="st-dialog st-scope fil-settings-dialog" aria-describedby={undefined}>
           <Dialog.Title className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
             Cài đặt
           </Dialog.Title>
@@ -183,7 +166,7 @@ export default function SettingsDialog({
           <div className="st-body">
             {/* left rail: close button, search, section list */}
             <div className="st-rail">
-              <div className="st-rail-head">
+              <div className="st-rail-head"><span className="fil-settings-label">Cài đặt</span>
                 <Dialog.Close className="st-close" aria-label="Đóng">
                   <X size={18} />
                 </Dialog.Close>
@@ -477,6 +460,7 @@ export default function SettingsDialog({
                     <span className="st-readonly">{formatBytes(entry.size)}</span>
                   </Row>
                 ))}
+                <Row label="Đặt lại dữ liệu trình duyệt" desc="Xóa cài đặt và cuộc trò chuyện trên trình duyệt này."><button type="button" className="st-btn st-btn-danger" onClick={actions.onResetLocalData}>Xóa dữ liệu cục bộ</button></Row>
                 <Row
                   label="Làm mới số liệu"
                   desc="Tính lại dung lượng đang chiếm dụng."
@@ -514,7 +498,7 @@ export default function SettingsDialog({
             ))}
 
             {/* ---------------- Security ---------------- */}
-            {panel('security', 'Bảo mật & đăng nhập', (
+            {panel('security', 'Bảo mật thiết bị', (
               <>
                 <Row
                   label="Khóa ứng dụng bằng mã PIN"
@@ -537,94 +521,12 @@ export default function SettingsDialog({
                     ]}
                   />
                 </Row>
-                <Row
-                  label="Đăng xuất khỏi thiết bị này"
-                  desc="Xóa phiên làm việc khỏi trình duyệt hiện tại."
-                >
-                  <button type="button" className="st-btn" onClick={actions.onLogout}>
-                    Đăng xuất
-                  </button>
-                </Row>
                 <div className="st-note">
                   <Lock size={16} />
                   <span>
-                    Ứng dụng chạy nội bộ cho phòng khám và chưa có hệ thống đăng nhập nhiều người dùng.
-                    Các tùy chọn trên chỉ bảo vệ ở mức thiết bị.
+                    Hồ sơ và mật khẩu được quản lý tại menu tài khoản. Các tùy chọn khóa ở đây áp dụng trên thiết bị này.
                   </span>
                 </div>
-              </>
-            ))}
-
-            {/* ---------------- Account ---------------- */}
-            {panel('account', 'Tài khoản', (
-              <>
-                <div className="st-account-head">
-                  <ProfileAvatar profile={profile} />
-                  <div className="st-account-head-meta">
-                    <strong>{profile?.display_name}</strong>
-                    <span>{profile?.username ? `@${profile.username}` : 'Bác sĩ'}</span>
-                  </div>
-                </div>
-
-                <Row
-                  label="Ảnh và tên hiển thị"
-                  desc="Đổi ảnh đại diện, tên hiển thị và tên đăng nhập."
-                >
-                  <button type="button" className="st-btn" onClick={actions.onEditProfile}>
-                    Chỉnh sửa hồ sơ
-                  </button>
-                </Row>
-
-                {/* Chuyển từ menu tài khoản ở thanh bên vào đây, để mọi thứ
-                    thuộc về tài khoản nằm chung một chỗ. */}
-                <Row
-                  label="Mật khẩu"
-                  desc={actions.hasPassword === false
-                    ? 'Tài khoản đang đăng nhập bằng Google. Đặt mật khẩu để vào được bằng tên đăng nhập.'
-                    : 'Mật khẩu dùng để đăng nhập cùng tên đăng nhập của bạn.'}
-                >
-                  <button type="button" className="st-btn" onClick={actions.onChangePassword}>
-                    <KeyRound size={14} />
-                    {actions.hasPassword === false ? 'Đặt mật khẩu' : 'Đổi mật khẩu'}
-                  </button>
-                </Row>
-
-                <Row label="Chuyên khoa" desc="Dùng làm bối cảnh mặc định cho câu trả lời của trợ lý." stack>
-                  <input
-                    type="text"
-                    className="st-input"
-                    value={specialtyDraft}
-                    onChange={(e) => setSpecialtyDraft(e.target.value)}
-                    onBlur={() => saveProfileField('specialty')(specialtyDraft)}
-                    placeholder="Nội tổng quát"
-                  />
-                </Row>
-
-                <Row
-                  label="Email liên hệ"
-                  desc={profile?.email_verified
-                    ? 'Đã xác nhận khi đăng ký.'
-                    : 'Dùng để đăng nhập và khôi phục tài khoản.'}
-                  stack
-                >
-                  <input
-                    type="email"
-                    className="st-input"
-                    value={emailDraft}
-                    onChange={(e) => setEmailDraft(e.target.value)}
-                    onBlur={() => saveProfileField('email')(emailDraft)}
-                    placeholder="bacsi@phongkham.vn"
-                  />
-                </Row>
-
-                <Row
-                  label="Xóa toàn bộ dữ liệu cục bộ"
-                  desc="Xóa cài đặt và cuộc trò chuyện khỏi trình duyệt này. Tài liệu trên máy chủ không bị ảnh hưởng."
-                >
-                  <button type="button" className="st-btn st-btn-danger" onClick={actions.onResetLocalData}>
-                    Xóa dữ liệu
-                  </button>
-                </Row>
               </>
             ))}
 
