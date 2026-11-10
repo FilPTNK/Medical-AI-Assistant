@@ -65,7 +65,7 @@ const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.r
 const MAX_PINNED_CONVERSATIONS = 3;
 
 
-export default function App({ user, settings, clinical, activeTab, onOpenChat, specialty, onClearSpecialty }) {
+export default function App({ user, settings, clinical, activeTab, onOpenChat, specialty, onClearSpecialty, conversationId, onConversationChange }) {
   const { documents, config, conversations, setConversations, apiKey } = clinical;
   const doctorName = user?.display_name || user?.username || '';
   const greetingName = doctorName.replace(/^(?:BS\.?|Bác sĩ)\s*/iu, '').trim();
@@ -93,6 +93,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   const [deleteDocTarget, setDeleteDocTarget] = useState(null);
   const [deletingDocument, setDeletingDocument] = useState(false);
   const activeConversationRef = useRef(null);
+  const openedConversationRequest = useRef(null);
   const readerCardRef = useRef(null);
   const readerRequest = useRef(0);
   const draftVersion = useRef(0);
@@ -341,10 +342,10 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setActivePage(null);
     setSelectedSourceIndex(0);
     setQuery('');
-    goToChat();
+    if (onConversationChange) onConversationChange(null); else goToChat();
   };
 
-  const handleSelectConversation = (id) => {
+  const handleSelectConversation = (id, updateLocation = true) => {
     if (renamingConvId === id) return; // don't switch away while editing the title
     if (id !== activeConversationRef.current) {
       draftVersion.current += 1;
@@ -355,7 +356,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     readerRequest.current += 1;
     setActiveConversationId(id);
     if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
-    goToChat();
+    if (updateLocation && onConversationChange) onConversationChange(id); else goToChat();
     const conv = conversations.find(c => c.id === id);
     const lastWithSources = conv ? [...conv.messages].reverse().find(m => m.sources && m.sources.length > 0) : null;
     if (lastWithSources) {
@@ -368,6 +369,15 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     }
     setActivePage(null);
   };
+
+  useEffect(() => {
+    if (!conversationId) { openedConversationRequest.current = null; return; }
+    if (openedConversationRequest.current === conversationId) return;
+    const notebook = conversations.find(item => item.id === conversationId && !item.archived && (!item.ownerId || item.ownerId === user?.id));
+    if (!notebook) return;
+    openedConversationRequest.current = conversationId;
+    handleSelectConversation(conversationId, false);
+  }, [conversationId, conversations, user?.id]);
 
   const handleTogglePin = (id) => {
     setConversations(prev => {
@@ -545,6 +555,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
       const newConversation = {
         id: convId,
         title: createConversationTitle(q),
+        ownerId: user?.id,
         specialty: activeSpecialty || null,
         messages: [userMsg],
         pinned: false,
@@ -554,6 +565,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
       setConversations(prev => [newConversation, ...prev]);
       activeConversationRef.current = convId;
       setActiveConversationId(convId);
+      onConversationChange?.(convId);
     } else {
       appendMessageToConversation(convId, userMsg);
     }

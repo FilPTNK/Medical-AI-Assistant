@@ -9,6 +9,7 @@ import useClinicalData from './components/useClinicalData';
 import FilLogo from './components/FilLogo';
 import Homepage from './Homepage';
 import { specialties } from './lib/specialties';
+import { notebookHref } from './lib/notebooks';
 
 const App = lazy(() => import('./App'));
 const SharedConversationView = lazy(() => import('./App').then(module => ({ default: module.SharedConversationView })));
@@ -138,11 +139,14 @@ export default function Website() {
         <App user={auth.user} settings={settings} clinical={clinical}
           activeTab={toolPath === '/chan-doan' ? 'diagnosisTree' : 'chat'}
           onOpenChat={() => navigate('/hoi-dap')} specialty={specialty}
+          conversationId={url.searchParams.get('conversation')}
+          onConversationChange={id => navigate(id ? notebookHref(id) : specialty ? `/hoi-dap?${new URLSearchParams({ 'chuyen-khoa': specialty.id })}` : '/hoi-dap')}
           onClearSpecialty={() => navigate('/hoi-dap')} />
       </article>
     </AccountGate>
   );
-  else if (path === '/') page = <Homepage key={auth.user?.id || 'guest'} user={auth.user} query={notebookQuery} view={notebookView} onNavigate={navigate} onClearSearch={clearNotebookSearch} />;
+  else if (path === '/') page = <Homepage key={auth.user?.id || 'guest'} user={ready ? auth.user : null} query={notebookQuery} view={notebookView}
+    conversations={clinical.conversations} onUpdateConversations={clinical.setConversations} onNavigate={navigate} onClearSearch={clearNotebookSearch} />;
   else if (path === '/thuoc') page = <AccountGate auth={auth}><DrugDirectory initialQuery={url.searchParams.get('q') || ''} /></AccountGate>;
   else if (path === '/quan-tri') page = <AccountGate auth={auth} admin><DrugAdmin /></AccountGate>;
   else if (path === '/dang-nhap') page = <AccountGate auth={auth}><section className="fil-state">
@@ -155,9 +159,8 @@ export default function Website() {
       <a className="fil-skip" href="#fil-content">Đến nội dung chính</a>
       <header className="fil-header">
         <div className="fil-wrap fil-header-inner">
-          <a className="fil-brand" href="/" onClick={followLink} aria-label="Fil, trang chủ"><FilLogo /></a>
+          <a className="fil-brand" href="/" onClick={followLink} aria-label="Fil, trang chủ" aria-current={!shared && path === '/' ? 'page' : undefined}><FilLogo /></a>
           <nav className="fil-nav" aria-label="Điều hướng chính">
-            <a href="/" onClick={followLink} aria-current={!shared && path === '/' ? 'page' : undefined}>Tất cả</a>
             {tools.map(({ path: href, title }) => (
               <a key={href} href={href} onClick={followLink} aria-current={!shared && toolPath === href ? 'page' : undefined}>{title}</a>
             ))}
@@ -168,8 +171,8 @@ export default function Website() {
               navigate(notebookQuery.trim() ? `/?${new URLSearchParams({ q: notebookQuery.trim() })}` : '/');
             }}>
               <Search size={18} aria-hidden="true" />
-              <label className="sr-only" htmlFor="notebook-search">Tìm sổ tay chuyên khoa</label>
-              <input id="notebook-search" type="search" placeholder="Tìm sổ tay chuyên khoa" maxLength={100}
+              <label className="sr-only" htmlFor="notebook-search">Tìm sổ tay</label>
+              <input id="notebook-search" type="search" placeholder="Tìm sổ tay" maxLength={100}
                 value={notebookQuery} onChange={event => setNotebookQuery(event.target.value)} />
               {notebookQuery && <button type="button" aria-label="Xóa tìm kiếm sổ tay" onClick={clearNotebookSearch}><X size={15} aria-hidden="true" /></button>}
             </form>

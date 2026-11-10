@@ -1,6 +1,9 @@
-import React, { useMemo, useState } from 'react';
-import { ArrowUpRight, BookOpen, Bookmark, ChevronRight, MessageSquare, Search, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Archive, ArrowUpRight, BookOpen, Bookmark, ChevronLeft, ChevronRight, Clock3, MessageSquare, MoreVertical, Pencil, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
+import * as Dialog from '@radix-ui/react-dialog';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { matchingSpecialties, specialties, specialtyHref } from './lib/specialties';
+import { citedSourceCount, notebookActivity, notebookHref, recentNotebooks } from './lib/notebooks';
 import './homepage.css';
 
 function readSaved(key) {
@@ -10,16 +13,43 @@ function readSaved(key) {
   } catch { return []; }
 }
 
-export default function Homepage({ user, query, view, onNavigate, onClearSearch }) {
+function NotebookMenu({ notebook, onRename, onArchive }) {
+  return <DropdownMenu.Root>
+    <DropdownMenu.Trigger className="fil-recent-menu" aria-label={`Tùy chọn sổ tay ${notebook.title || 'Chưa đặt tên'}`}><MoreVertical size={20} aria-hidden="true" /></DropdownMenu.Trigger>
+    <DropdownMenu.Portal><DropdownMenu.Content className="dropdown-menu-content" align="end" sideOffset={5}>
+      <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onRename(notebook)}><Pencil size={16} aria-hidden="true" /> Đổi tên</DropdownMenu.Item>
+      <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onArchive(notebook)}><Archive size={16} aria-hidden="true" /> Lưu trữ</DropdownMenu.Item>
+    </DropdownMenu.Content></DropdownMenu.Portal>
+  </DropdownMenu.Root>;
+}
+
+export default function Homepage({ user, query, view, conversations = [], onUpdateConversations, onNavigate, onClearSearch }) {
   const storageKey = `fil_saved_specialties_v1:${user?.id || 'guest'}`;
   const [saved, setSaved] = useState(() => readSaved(storageKey));
-  const [filter, setFilter] = useState('all');
-  const [sort, setSort] = useState('default');
-  const matching = useMemo(() => matchingSpecialties(query), [query]);
-  const results = useMemo(() => {
-    const list = matching.filter(item => filter !== 'saved' || saved.includes(item.id));
-    return sort === 'name' ? [...list].sort((a, b) => a.name.localeCompare(b.name, 'vi')) : list;
-  }, [matching, filter, saved, sort]);
+  const [expanded, setExpanded] = useState(false);
+  const [sort, setSort] = useState('recent');
+  const [dialog, setDialog] = useState(null);
+  const [name, setName] = useState('');
+  const [specialtyId, setSpecialtyId] = useState('');
+  const [archived, setArchived] = useState(null);
+  const [canScroll, setCanScroll] = useState({ back: false, forward: true });
+  const stripRef = useRef(null);
+  const nameInputRef = useRef(null);
+  const matching = useMemo(() => matchingSpecialties(query.trim()), [query]);
+  const recent = useMemo(() => recentNotebooks(conversations, { userId: user?.id, query, sort }), [conversations, user?.id, query, sort]);
+  const allRecent = useMemo(() => recentNotebooks(conversations, { userId: user?.id }), [conversations, user?.id]);
+  const showGrid = expanded || Boolean(query.trim());
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const update = () => setCanScroll({ back: strip.scrollLeft > 2, forward: strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2 });
+    const observer = new ResizeObserver(update);
+    observer.observe(strip);
+    strip.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => { observer.disconnect(); strip.removeEventListener('scroll', update); };
+  }, [showGrid, matching.length]);
 
   function follow(event) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -30,79 +60,120 @@ export default function Homepage({ user, query, view, onNavigate, onClearSearch 
   function toggleSaved(id) {
     setSaved(previous => {
       const next = previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id];
-      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Keep the current selection if storage is unavailable. */ }
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Retain the selection for this session. */ }
       return next;
     });
+  }
+
+  function scrollStrip(direction) {
+    const strip = stripRef.current;
+    strip?.scrollBy({ left: direction * strip.clientWidth, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  }
+
+  function newNotebook() {
+    if (!user) { onNavigate('/dang-nhap'); return; }
+    setName(''); setSpecialtyId(''); setDialog({ type: 'new' });
+  }
+
+  function renameNotebook(notebook) {
+    setName(notebook.title || ''); setDialog({ type: 'rename', id: notebook.id });
+  }
+
+  function saveNotebook(event) {
+    event.preventDefault();
+    const title = name.trim();
+    if (!title || !user || !onUpdateConversations) return;
+    if (dialog.type === 'rename') {
+      onUpdateConversations(previous => previous.map(item => item.id === dialog.id ? { ...item, title } : item));
+      setDialog(null);
+      return;
+    }
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    onUpdateConversations(previous => [{ id, title, ownerId: user.id, specialty: specialties.find(item => item.id === specialtyId)?.name || null, messages: [], pinned: false, createdAt: now, updatedAt: now }, ...previous]);
+    setDialog(null);
+    onNavigate(notebookHref(id));
+  }
+
+  function archiveNotebook(notebook) {
+    onUpdateConversations(previous => previous.map(item => item.id === notebook.id ? { ...item, archived: true } : item));
+    setArchived(notebook);
   }
 
   return (
     <div className="fil-wrap fil-notebook-home">
       <h1 className="sr-only">Sổ tay y khoa Fil</h1>
-      {!query && filter === 'all' && <section className="fil-featured" aria-labelledby="featured-heading">
+      {query.trim() && <div className="fil-notebook-search-summary" role="status"><span>{matching.length + recent.length} kết quả cho “{query.trim()}”</span><button type="button" onClick={onClearSearch}><X size={16} aria-hidden="true" /> Xóa tìm kiếm</button></div>}
+      <section className="fil-featured" aria-labelledby="featured-heading">
         <div className="fil-gallery-heading">
-          <div><h2 id="featured-heading">Khám phá chuyên khoa</h2><p>Không gian tra cứu cho từng lĩnh vực y khoa.</p></div>
-          <a href="#specialty-notebooks">Xem tất cả <ChevronRight size={17} aria-hidden="true" /></a>
-        </div>
-        <div className="fil-featured-grid">
-          {specialties.filter(item => item.cover).map((item, index) => (
-            <a key={item.id} href={specialtyHref(item)} onClick={follow} className={`fil-featured-notebook fil-notebook-${item.color}`}>
-              <div className="fil-notebook-cover">
-                <img src={item.cover} alt="" width="1536" height="1024" fetchPriority={index === 0 ? 'high' : 'auto'} decoding="async" />
-                <span className="fil-cover-open"><ArrowUpRight size={19} aria-hidden="true" /></span>
-              </div>
-              <div className="fil-featured-copy">
-                <span className="fil-notebook-type"><BookOpen size={14} aria-hidden="true" /> Sổ tay chuyên khoa</span>
-                <h3>{item.name}</h3>
-                <p>{item.description}</p>
-              </div>
-            </a>
-          ))}
-        </div>
-      </section>}
-
-      <section id="specialty-notebooks" className="fil-notebook-section" aria-labelledby="notebooks-heading">
-        <div className="fil-gallery-heading fil-notebooks-toolbar">
-          <h2 id="notebooks-heading">{query ? 'Kết quả tìm kiếm' : 'Sổ tay chuyên khoa'}</h2>
-          <a className="fil-notebook-new" href="/hoi-dap" onClick={follow}><MessageSquare size={17} aria-hidden="true" /> Đặt câu hỏi</a>
-        </div>
-        <div className="fil-notebook-controls">
-          <div className="fil-notebook-filters" role="group" aria-label="Lọc sổ tay">
-            <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>Tất cả</button>
-            <button type="button" aria-pressed={filter === 'saved'} onClick={() => setFilter('saved')}><Bookmark size={15} aria-hidden="true" /> Đã lưu{saved.length > 0 && <span>{saved.length}</span>}</button>
+          <h2 id="featured-heading">Khám phá chuyên khoa</h2>
+          <div className="fil-gallery-actions">
+            {!showGrid && <div className="fil-gallery-arrows" role="group" aria-label="Cuộn chuyên khoa">
+              <button type="button" aria-label="Chuyên khoa trước" disabled={!canScroll.back} onClick={() => scrollStrip(-1)}><ChevronLeft size={20} aria-hidden="true" /></button>
+              <button type="button" aria-label="Chuyên khoa tiếp theo" disabled={!canScroll.forward} onClick={() => scrollStrip(1)}><ChevronRight size={20} aria-hidden="true" /></button>
+            </div>}
+            {!query.trim() && <button type="button" className="fil-view-specialties" aria-expanded={expanded} aria-controls="specialty-covers" onClick={() => setExpanded(value => !value)}>{expanded ? 'Thu gọn' : 'Xem tất cả'}<ChevronRight size={18} className={expanded ? 'is-expanded' : ''} aria-hidden="true" /></button>}
           </div>
-          <label className="fil-notebook-sort"><span className="sr-only">Sắp xếp sổ tay</span>
-            <select aria-label="Sắp xếp sổ tay" value={sort} onChange={event => setSort(event.target.value)}>
-              <option value="default">Theo chuyên khoa</option><option value="name">Tên từ A đến Z</option>
-            </select>
-          </label>
         </div>
-        {query && <div className="fil-notebook-search-summary" role="status">
-          <span>{results.length} kết quả cho “{query}”</span>
-          <button type="button" onClick={onClearSearch}><X size={15} aria-hidden="true" /> Xóa tìm kiếm</button>
-        </div>}
-        {results.length > 0 ? <ul className={`fil-notebook-grid ${view === 'list' ? 'is-list' : ''}`}>
-          {results.map(item => (
-            <li key={item.id} className={`fil-notebook-card fil-notebook-${item.color}`}>
-              <a href={specialtyHref(item)} onClick={follow} aria-label={`Mở sổ tay ${item.name}`}>
-                <div className="fil-notebook-card-top"><span className="fil-notebook-symbol"><item.Icon size={28} strokeWidth={1.6} aria-hidden="true" /></span></div>
-                <div className="fil-notebook-card-copy"><h3>{item.name}</h3><p>{item.description}</p>
-                  <span className="fil-notebook-card-footer"><BookOpen size={14} aria-hidden="true" /> Sổ tay chuyên khoa <ArrowUpRight size={15} aria-hidden="true" /></span>
-                </div>
+        {matching.length ? <ul id="specialty-covers" ref={stripRef} className={`fil-featured-strip ${showGrid ? 'is-expanded' : ''}`}>
+          {matching.map((item, index) => <li key={item.id} className="fil-featured-notebook">
+            <a href={specialtyHref(item)} onClick={follow} aria-label={`Mở sổ tay ${item.name}`}>
+              <img className="fil-featured-image" src={item.cover} alt="" width="1536" height="1024" loading={index < 5 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : 'auto'} decoding="async" />
+              <span className="fil-cover-tab"><BookOpen size={19} aria-hidden="true" /><span>Chuyên khoa</span></span>
+              <span className="fil-cover-publisher"><span><item.Icon size={18} aria-hidden="true" /></span> Fil</span>
+              <div className="fil-featured-copy"><h3>{item.name}</h3><span className="fil-cover-meta">{item.english}</span></div>
+              <ArrowUpRight className="fil-cover-arrow" size={22} aria-hidden="true" />
+            </a>
+            <button type="button" className="fil-cover-save" aria-label={`${saved.includes(item.id) ? 'Bỏ lưu' : 'Lưu'} sổ tay ${item.name}`} aria-pressed={saved.includes(item.id)} onClick={() => toggleSaved(item.id)}><Bookmark size={18} fill={saved.includes(item.id) ? 'currentColor' : 'none'} aria-hidden="true" /></button>
+          </li>)}
+        </ul> : <div className="fil-notebook-no-results">Không tìm thấy chuyên khoa phù hợp.</div>}
+      </section>
+
+      <section className="fil-recent-section" aria-labelledby="recent-heading">
+        <div className="fil-gallery-heading fil-recent-heading">
+          <div className="fil-recent-title"><h2 id="recent-heading">Sổ tay gần đây</h2>
+            <DropdownMenu.Root><DropdownMenu.Trigger className="fil-recent-sort" aria-label="Sắp xếp sổ tay gần đây"><SlidersHorizontal size={19} aria-hidden="true" /></DropdownMenu.Trigger>
+              <DropdownMenu.Portal><DropdownMenu.Content className="dropdown-menu-content" align="start" sideOffset={6}><DropdownMenu.RadioGroup value={sort} onValueChange={setSort}>
+                <DropdownMenu.RadioItem className="dropdown-menu-item" value="recent"><DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator> Hoạt động gần nhất</DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem className="dropdown-menu-item" value="name"><DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator> Tên từ A đến Z</DropdownMenu.RadioItem>
+              </DropdownMenu.RadioGroup></DropdownMenu.Content></DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
+          <button className="fil-notebook-new" type="button" onClick={newNotebook}><Plus size={21} aria-hidden="true" /> Sổ tay mới</button>
+        </div>
+        {archived && <div className="fil-notebook-notice" role="status"><span>Đã lưu trữ “{archived.title}”.</span><button type="button" onClick={() => { onUpdateConversations(previous => previous.map(item => item.id === archived.id ? { ...item, archived: false } : item)); setArchived(null); }}>Hoàn tác</button><button type="button" aria-label="Đóng thông báo" onClick={() => setArchived(null)}><X size={16} aria-hidden="true" /></button></div>}
+        {recent.length ? <ul className={`fil-recent-grid ${view === 'list' ? 'is-list' : ''}`}>
+          {recent.map(notebook => {
+            const specialty = specialties.find(item => item.name === notebook.specialty);
+            const Icon = specialty?.Icon || MessageSquare;
+            const time = notebookActivity(notebook);
+            return <li key={notebook.id} className="fil-recent-card">
+              <a href={notebookHref(notebook.id)} onClick={follow} aria-label={`Mở sổ tay ${notebook.title || 'Chưa đặt tên'}`}>
+                <span className={`fil-recent-symbol ${specialty ? `fil-symbol-${specialty.color}` : ''}`}><Icon size={31} strokeWidth={1.6} aria-hidden="true" /></span>
+                <div className="fil-recent-copy"><h3>{notebook.title || 'Chưa đặt tên'}</h3><span className="fil-recent-meta">{time ? <time dateTime={new Date(time).toISOString()}>{new Date(time).toLocaleDateString('vi-VN', { day: 'numeric', month: 'short', year: 'numeric' })}</time> : <span>Chưa có hoạt động</span>}<span aria-hidden="true"> · </span><span>{citedSourceCount(notebook)} nguồn đã trích dẫn</span></span></div>
               </a>
-              <button type="button" className="fil-notebook-save" aria-label={`${saved.includes(item.id) ? 'Bỏ lưu' : 'Lưu'} sổ tay ${item.name}`}
-                aria-pressed={saved.includes(item.id)} onClick={() => toggleSaved(item.id)}>
-                <Bookmark size={18} fill={saved.includes(item.id) ? 'currentColor' : 'none'} aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ul> : <div className="fil-notebook-empty">
-          {query ? <Search size={30} aria-hidden="true" /> : <Bookmark size={30} aria-hidden="true" />}
-          <h3>{query ? 'Chưa tìm thấy chuyên khoa phù hợp' : 'Chưa có sổ tay đã lưu'}</h3>
-          <p>{query ? 'Thử tên chuyên khoa khác hoặc xóa tìm kiếm.' : 'Chọn biểu tượng lưu trên sổ tay để tìm lại tại đây.'}</p>
-          <button type="button" className="fil-button" onClick={() => { setFilter('all'); onClearSearch(); }}>Xem tất cả chuyên khoa</button>
+              <NotebookMenu notebook={notebook} onRename={renameNotebook} onArchive={archiveNotebook} />
+            </li>;
+          })}
+        </ul> : <div className="fil-recent-empty">
+          {query.trim() ? <Search size={28} aria-hidden="true" /> : <Clock3 size={28} aria-hidden="true" />}
+          <h3>{query.trim() && allRecent.length ? 'Không tìm thấy sổ tay phù hợp' : 'Chưa có sổ tay gần đây'}</h3>
+          <p>{query.trim() && allRecent.length ? 'Thử tên khác hoặc xóa tìm kiếm.' : user ? 'Tạo sổ tay mới hoặc mở một chuyên khoa để bắt đầu. Các cuộc trò chuyện của bạn sẽ xuất hiện tại đây.' : 'Đăng nhập để tạo sổ tay và tiếp tục các cuộc trò chuyện của bạn.'}</p>
+          {!user && <a href="/dang-nhap" onClick={follow} className="fil-button">Đăng nhập</a>}
         </div>}
       </section>
-      <footer className="fil-notebook-footer"><span>Fil · Đồng hành cùng thực hành y khoa</span><a href="/thuoc" onClick={follow}>Tra cứu danh mục thuốc <ArrowUpRight size={14} aria-hidden="true" /></a></footer>
+
+      <Dialog.Root open={Boolean(dialog)} onOpenChange={open => { if (!open) setDialog(null); }}>
+        <Dialog.Portal><Dialog.Overlay className="fil-notebook-dialog-overlay" /><Dialog.Content className="fil-notebook-dialog" aria-describedby="notebook-dialog-description" onOpenAutoFocus={event => { event.preventDefault(); nameInputRef.current?.focus(); }}>
+          <Dialog.Title>{dialog?.type === 'rename' ? 'Đổi tên sổ tay' : 'Tạo sổ tay mới'}</Dialog.Title>
+          <Dialog.Description id="notebook-dialog-description">{dialog?.type === 'rename' ? 'Chọn một tên dễ tìm lại.' : 'Lưu câu hỏi và các nguồn trích dẫn trong một cuộc trò chuyện.'}</Dialog.Description>
+          <Dialog.Close className="fil-notebook-dialog-close" aria-label="Đóng"><X size={20} aria-hidden="true" /></Dialog.Close>
+          <form onSubmit={saveNotebook}><label htmlFor="notebook-name">Tên sổ tay</label><input ref={nameInputRef} id="notebook-name" value={name} onChange={event => setName(event.target.value)} maxLength={150} required autoComplete="off" placeholder="Ví dụ: Ca lâm sàng tim mạch" />
+            {dialog?.type === 'new' && <><label htmlFor="notebook-specialty">Chuyên khoa (không bắt buộc)</label><select id="notebook-specialty" value={specialtyId} onChange={event => setSpecialtyId(event.target.value)}><option value="">Y khoa tổng quát</option>{specialties.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></>}
+            <div className="fil-notebook-dialog-actions"><Dialog.Close className="fil-button fil-button-secondary" type="button">Hủy</Dialog.Close><button className="fil-button" type="submit" disabled={!name.trim()}>{dialog?.type === 'rename' ? 'Lưu tên' : 'Tạo sổ tay'}</button></div>
+          </form>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }
