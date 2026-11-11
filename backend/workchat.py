@@ -61,6 +61,13 @@ class TurnRequest(StrictModel):
     near_page: int | None = Field(default=None, ge=1, le=100_000)
 
 
+class GuestTurnRequest(TurnRequest):
+    specialty: Specialty | None = None
+    previous_questions: list[Annotated[str, StringConstraints(min_length=1, max_length=1_000)]] = Field(
+        default_factory=list, max_length=HISTORY_TURNS,
+    )
+
+
 class LookupArgs(StrictModel):
     query: Annotated[str, StringConstraints(min_length=2, max_length=500)]
 
@@ -132,6 +139,8 @@ def eligible_sources(actor):
             continue
         if manifest.get("workchat_enabled") is not True and name not in approved:
             continue
+        if actor["id"] is None and not documents.can_guest_view(manifest):
+            continue
         if (documents.visibility_of(manifest) == documents.VISIBILITY_PRIVATE
                 and manifest.get("owner_id") != actor["id"]):
             continue
@@ -202,9 +211,9 @@ def validate_text(value):
         raise ChatError(422, "Hãy bỏ thông tin định danh và thông tin đăng nhập trước khi gửi.")
 
 
-def _messages(actor, thread, question, history, scope):
+def _messages(actor, thread, request, history, scope):
     role = actor.get("role")
-    role = role if role in {"admin", "doctor", "nurse", "assistant"} else "member"
+    role = role if role in {"admin", "doctor", "nurse", "assistant", "guest"} else "member"
     system = (
         "Bạn là Fil, trợ lý tra cứu y khoa cho nhân viên phòng khám. "
         f"Vai trò xác thực: {role}. Chỉ dùng công cụ được khai báo. "
@@ -229,9 +238,10 @@ def _messages(actor, thread, question, history, scope):
         previous.append((turn["question"], prior_answer))
     for prior_question, prior_answer in reversed(previous):
         messages += [{"role": "user", "content": prior_question}, {"role": "assistant", "content": prior_answer}]
-    messages.append({"role": "user", "content": json.dumps({
-        "question": question, "specialty": thread.get("specialty"),
-    }, ensure_ascii=False)})
+    current = {"question": request.question, "specialty": thread.get("specialty")}
+    if isinstance(request, GuestTurnRequest) and request.previous_questions:
+        current["previous_questions"] = request.previous_questions
+    messages.append({"role": "user", "content": json.dumps(current, ensure_ascii=False)})
     return messages
 
 
@@ -338,7 +348,7 @@ async def reply_events(actor, thread, request, history, scope, search, api_key, 
     declarations = [_declaration(name) for name in TOOL_REGISTRY]
     choice = None
     has_key = bool(api_key)
-    messages = _messages(actor, thread, request.question, history, scope)
+    messages = _messages(actor, thread, request, history, scope)
     if api_key:
         yield "status", {"phase": "preparing", "message": "Đang đọc câu hỏi…"}
         try:

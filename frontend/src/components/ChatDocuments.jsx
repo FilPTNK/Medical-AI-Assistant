@@ -61,9 +61,9 @@ export default function ChatDocuments({
                   <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onPreview(doc)}>
                     <Eye size={15} /> Xem tài liệu
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onDownload(doc.doc_name)}>
+                  {onDownload && <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => onDownload(doc.doc_name)}>
                     <Download size={15} /> Tải xuống PDF
-                  </DropdownMenu.Item>
+                  </DropdownMenu.Item>}
                   {!readOnly && doc.can_delete && <DropdownMenu.Item className="dropdown-menu-item danger" onSelect={() => onDelete(doc)}>
                     <Trash2 size={15} /> Xóa tài liệu
                   </DropdownMenu.Item>}

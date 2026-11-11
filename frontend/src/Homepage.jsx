@@ -24,7 +24,7 @@ function NotebookMenu({ notebook, onRename, onArchive }) {
 }
 
 export default function Homepage({
-  user, query, view, publicCatalog, conversations = [], onCreateConversation, onUpdateConversation,
+  user, query, view, conversations = [], onCreateConversation, onUpdateConversation,
   conversationError, conversationsLoading, onRetryConversations, onNavigate, onClearSearch,
 }) {
   const storageKey = `fil_saved_specialties_v1:${user?.id || 'guest'}`;
@@ -119,11 +119,6 @@ export default function Homepage({
   return (
     <div className="fil-wrap fil-notebook-home">
       <h1 className="sr-only">Sổ tay y khoa Fil</h1>
-      {publicCatalog && <section className="fil-state">
-        <h2>Tra cứu thuốc cùng Fil</h2>
-        <p>Tìm hoạt chất, mã ATC và trang tham chiếu trong danh mục công khai.</p>
-        <a className="fil-button" href="/thuoc" onClick={follow}>Mở danh mục thuốc</a>
-      </section>}
       {query.trim() && <div className="fil-notebook-search-summary" role="status"><span>{matching.length + recent.length} kết quả cho “{query.trim()}”</span><button type="button" onClick={onClearSearch}><X size={16} aria-hidden="true" /> Xóa tìm kiếm</button></div>}
       <section className="fil-featured" aria-labelledby="featured-heading">
         <div className="fil-gallery-heading">
@@ -149,7 +144,7 @@ export default function Homepage({
         </ul> : <div className="fil-notebook-no-results">Không tìm thấy chuyên khoa phù hợp.</div>}
       </section>
 
-      {!publicCatalog && <section className="fil-recent-section" aria-labelledby="recent-heading">
+      <section className="fil-recent-section" aria-labelledby="recent-heading">
         <div className="fil-gallery-heading fil-recent-heading">
           <div className="fil-recent-title"><h2 id="recent-heading">Sổ tay gần đây</h2>
             <DropdownMenu.Root><DropdownMenu.Trigger className="fil-recent-sort" aria-label="Sắp xếp sổ tay gần đây"><SlidersHorizontal size={19} aria-hidden="true" /></DropdownMenu.Trigger>
@@ -182,7 +177,7 @@ export default function Homepage({
           <p>{query.trim() && allRecent.length ? 'Thử tên khác hoặc xóa tìm kiếm.' : user ? 'Tạo sổ tay mới hoặc mở một chuyên khoa để bắt đầu. Các cuộc trò chuyện của bạn sẽ xuất hiện tại đây.' : 'Đăng nhập để tạo sổ tay và tiếp tục các cuộc trò chuyện của bạn.'}</p>
           {!user && <a href="/dang-nhap" onClick={follow} className="fil-button">Đăng nhập</a>}
         </div>}
-      </section>}
+      </section>
 
       <Dialog.Root open={Boolean(dialog)} onOpenChange={open => { if (!open && !saving) setDialog(null); }}>
         <Dialog.Portal><Dialog.Overlay className="fil-notebook-dialog-overlay" /><Dialog.Content className="fil-notebook-dialog" aria-describedby="notebook-dialog-description" onOpenAutoFocus={event => { event.preventDefault(); nameInputRef.current?.focus(); }}>

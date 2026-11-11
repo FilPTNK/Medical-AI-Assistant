@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
-import { sendWorkchatTurn } from './lib/workchat';
+import { sendWorkchatTurn, turnMessages } from './lib/workchat';
 import { findMatches, bestAnchor } from './lib/fold';
 import PageViewer from './components/PageViewer';
 import AttachmentCard from './components/AttachmentCard';
@@ -69,6 +69,8 @@ const MAX_PINNED_CONVERSATIONS = 3;
 
 export default function App({ user, settings, clinical, activeTab, onOpenChat, specialty, onClearSpecialty, conversationId, onConversationChange }) {
   const { documents, config, conversations, setLegacyConversations, apiKey } = clinical;
+  const guest = !user;
+  const [guestMessages, setGuestMessages] = useState([]);
   const doctorName = user?.display_name || user?.username || '';
   const greetingName = doctorName.replace(/^(?:BS\.?|Bác sĩ)\s*/iu, '').trim();
   const [excludedSources, setExcludedSources] = useState(() => new Set());
@@ -129,7 +131,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   // tìm kiếm gõ tiếp không làm nhấp nháy phần tô sáng của kết quả đang đọc.
   const [readerHighlight, setReaderHighlight] = useState('');
 
-  const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
+  const [statusMsg, setStatusMsg] = useState(null);
 
   // Hierarchical multi-layer decision tree data structure
   const [nodeStatusMap, setNodeStatusMap] = useState({});
@@ -208,7 +210,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   const renameInputRef = useRef(null);
 
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
-  const committed = activeConversation?.messages || [];
+  const committed = guest ? guestMessages : activeConversation?.messages || [];
   const messages = pendingTurn && pendingTurn.id === activeConversationId
     ? [...committed, pendingTurn.user, pendingTurn.assistant] : committed;
   const activeSpecialty = activeConversation ? activeConversation.specialty || null : specialty?.name;
@@ -266,9 +268,10 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   }, [renamingConvId]);
 
   const showStatus = (type, text) => {
-    setStatusMsg({ type, text });
+    const notice = { type, text, tab: activeTab };
+    setStatusMsg(notice);
     setTimeout(() => {
-      setStatusMsg({ type: '', text: '' });
+      setStatusMsg(current => current === notice ? null : current);
     }, 5000);
   };
 
@@ -314,6 +317,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     detailRequest.current?.abort();
     setThreadLoading(false);
     setThreadError('');
+    setGuestMessages([]);
     setChatScope(null);
     if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
     activeConversationRef.current = null;
@@ -517,10 +521,22 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
         </motion.div>
   );
 
+  async function ensureAiAvailable(signal) {
+    if (apiKey || config?.has_api_key) return;
+    let status;
+    try {
+      status = await apiJson('/api/config', { signal });
+      if (typeof status?.has_api_key !== 'boolean') throw new Error('Invalid API status');
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new Error('Chưa kết nối được máy chủ Fil. Hãy thử lại sau.');
+    }
+    if (!status.has_api_key) throw new Error('Chưa cấu hình khóa DeepSeek cho tính năng này.');
+  }
+
   const handleSearch = async (searchQuery, mode = 'ask') => {
     const q = (typeof searchQuery === 'string' ? searchQuery : query).trim();
     if (!q || searchAbortRef.current || threadLoading || threadError || archivedConversation) return;
-    if (mode === 'ask' && (clinical.documentsLoading || clinical.documentError)) return;
     if (q.length > 6000) {
       showStatus('error', 'Câu hỏi dài tối đa 6.000 ký tự.');
       return;
@@ -533,7 +549,12 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     let id = activeConversation?.storage === 'workchat' ? activeConversation.id : null;
     setLoading(true);
     try {
-      if (!id) {
+      if (mode === 'ask') {
+        await ensureAiAvailable(controller.signal);
+        if (controller.signal.aborted || version !== draftVersion.current) return;
+        if (clinical.documentError) throw new Error('Chưa tải được nguồn tài liệu. Bấm Tải lại ở cột Nguồn tài liệu rồi gửi lại.');
+      }
+      if (!guest && !id) {
         const created = await clinical.createConversation({
           title: mode === 'case_outline' ? 'Ghi chú ca bệnh' : mode === 'consult_outline' ? 'Chuẩn bị hội chẩn' : 'Cuộc trò chuyện mới',
           specialty: activeSpecialty,
@@ -549,6 +570,11 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
         doc_names: mode !== 'ask' ? [] : attachment ? [attachment.doc_name] : selectedSourceNames,
         near_page: attachment ? attachment.page_num || readerMinPage(attachment.doc_name) || 1 : null,
       };
+      if (guest) {
+        body.specialty = activeSpecialty || null;
+        body.previous_questions = guestMessages.filter(message => message.role === 'user')
+          .slice(-6).map(message => message.text.slice(0, 1000));
+      }
       const signature = id + JSON.stringify(body);
       const requestId = retryTurn.current?.signature === signature ? retryTurn.current.id : uid();
       retryTurn.current = { signature, id: requestId };
@@ -571,7 +597,9 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
         onStatus: data => setPendingTurn(pending => pending?.id === id
           ? { ...pending, assistant: { ...pending.assistant, statusNote: data.message } } : pending),
       });
-      clinical.acceptTurn(thread, turn);
+      if (controller.signal.aborted || version !== draftVersion.current) return;
+      if (guest) setGuestMessages(previous => [...previous, ...turnMessages(turn)]);
+      else clinical.acceptTurn(thread, turn);
       retryTurn.current = null;
       if (activeConversationRef.current === id) {
         setActiveSources(turn.reply.sources || []);
@@ -1016,6 +1044,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setTreatmentResult(null);
     setAllergyCheck(null);
     try {
+      await ensureAiAvailable();
       const res = await fetch('/api/diagnosis-tree/generate', {
         method: 'POST',
         headers: {
@@ -1189,6 +1218,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setFinalDiagnoses([]);
     setSelectedDiagnosisIds(new Set());
     try {
+      await ensureAiAvailable();
       const res = await fetch('/api/diagnosis-tree/endoscopy', {
         method: 'POST',
         headers: {
@@ -1222,6 +1252,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
 
     setFinalLoading(true);
     try {
+      await ensureAiAvailable();
       const res = await fetch('/api/diagnosis-tree/final', {
         method: 'POST',
         headers: {
@@ -1265,6 +1296,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setIsPreparingHandoff(true);
     setTreatmentResult(null);
     try {
+      await ensureAiAvailable();
       const res = await fetch('/api/diagnosis-tree/treatment', {
         method: 'POST',
         headers: {
@@ -1435,9 +1467,9 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
             </button>
           </div>
           <div id="fil-chat-sidebar">
-          <ChatDocuments clinical={clinical} readOnly={user?.read_only} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen}
+          <ChatDocuments clinical={clinical} readOnly={guest || user?.read_only} pickerOpen={pickerOpen} setPickerOpen={setPickerOpen}
             onPreview={doc => handleOpenDocumentPreview(doc.doc_name, readerMinPage(doc.doc_name))}
-            onUpload={handleUploadPdf} onDownload={handleDownloadDocument}
+            onUpload={handleUploadPdf} onDownload={guest ? undefined : handleDownloadDocument}
             onDelete={setDeleteDocTarget} selectedNames={selectedSourceNames}
             onToggleSource={toggleSource} onToggleAll={toggleAllSources} />
           <div className="fil-source-history-heading">Cuộc trò chuyện</div>
@@ -1445,10 +1477,11 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
               <SquarePen size={17} aria-hidden="true" /> Cuộc trò chuyện mới
             </button>
           <div id="fil-chat-history" className="fil-history-panel">
+            {guest && <p className="sidebar-history-empty">Đăng nhập để lưu lịch sử trò chuyện.</p>}
             {clinical.conversationError && <div className="fil-doc-status" role="alert">
               {clinical.conversationError} <button type="button" onClick={clinical.refreshConversations}>Tải lại</button>
             </div>}
-            {(() => {
+            {!guest && (() => {
               const visible = conversations
                 .filter(c => !c.archived)
                 .sort((x, y) => y.updatedAt - x.updatedAt);
@@ -1595,9 +1628,9 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                       <MessageSquare size={18} aria-hidden="true" />
                       Hỏi về tài liệu này
                     </button>
-                    <button className="icon-btn-action" onClick={() => handleDownloadDocument(documentPreview.doc_name)} title="Tải xuống">
+                    {!guest && <button className="icon-btn-action" onClick={() => handleDownloadDocument(documentPreview.doc_name)} title="Tải xuống">
                       <Download size={16} />
-                    </button>
+                    </button>}
                     <Dialog.Close asChild>
                       <button className="icon-btn-action" title="Đóng"><X size={16} /></button>
                     </Dialog.Close>
@@ -1626,14 +1659,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
       </Dialog.Root>
 
       <div className="fil-clinical-content">
-        {activeTab !== 'chat' && config && !config.has_api_key && !apiKey && (
-          <div className="alert-banner warning-banner">
-            <AlertCircle size={16} aria-hidden="true" />
-            <span>Chưa cấu hình khóa AI: câu trả lời AI sẽ không hiển thị, chỉ hiện trang sách.</span>
-          </div>
-        )}
-
-        {statusMsg.text && (
+        {statusMsg?.tab === activeTab && statusMsg.text && (
           <div className={`alert-banner status-${statusMsg.type}`}
             role={statusMsg.type === 'error' ? 'alert' : 'status'}>
             {statusMsg.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
@@ -1655,7 +1681,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
               <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
                 <h2 className="sr-only">{activeConversation?.title || 'Đặt câu hỏi'}</h2>
                 {!messages.length && !threadLoading && !threadError && <div className="fil-qa-empty">
-                  <h2>Xin chào, bác sĩ{greetingName ? ` ${greetingName}` : ''}</h2>
+                  <h2>{guest ? 'Xin chào' : `Xin chào, bác sĩ${greetingName ? ` ${greetingName}` : ''}`}</h2>
                 </div>}
 
                 {/* Conversation Scroller */}
@@ -1894,7 +1920,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                     </button>
                   ) : (
                     <button key="send" type="submit" className="composer-send" aria-label="Gửi câu hỏi"
-                      disabled={!query.trim() || threadLoading || !!threadError || archivedConversation || clinical.documentsLoading || !!clinical.documentError}>
+                      disabled={!query.trim() || threadLoading || !!threadError || archivedConversation || clinical.documentsLoading}>
                       <ArrowUp size={23} strokeWidth={2.25} aria-hidden="true" />
                     </button>
                   )}

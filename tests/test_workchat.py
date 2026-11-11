@@ -63,8 +63,15 @@ class WorkchatTests(unittest.TestCase):
         def respond(*args):
             return workchat.reply_events(*args, complete=self.complete)
 
+        def resolve_reader(request: Request):
+            if request.headers.get("authorization"):
+                return resolve_actor(request)
+            return {"id": None, "role": "guest"}
+
         app = FastAPI()
-        app.include_router(create_router(resolve_actor, self.search, store=self.store, respond=respond))
+        app.include_router(create_router(
+            resolve_actor, self.search, resolve_reader=resolve_reader, store=self.store, respond=respond,
+        ))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         self.base = "/api/workchat/threads"
@@ -111,6 +118,41 @@ class WorkchatTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/workchat/sources", headers=self.headers()).json()[0]["doc_name"], "approved")
         self.search.assert_not_called()
         self.complete.assert_not_called()
+
+    def test_guest_reply_uses_visible_sources_without_writing_a_thread(self):
+        self.manifests.append({
+            "doc_name": "public", "visibility": "shared", "guest_visible": True,
+            "workchat_enabled": True, "ingested_at": "version-1", "chunk_count": 1,
+        })
+        self.search.return_value = [{"doc_name": "public", "page_num": 1, "text": "Đoạn trích thử nghiệm."}]
+        self.complete.side_effect = [
+            tool_message("search_medical_sources", {"query": "đoạn trích"}),
+            SimpleNamespace(content=json.dumps({
+                "status": "answered", "paragraphs": [{"text": "Đoạn trích thử nghiệm.", "references": [1]}],
+            })),
+        ]
+        path = "/api/workchat/guest/turns"
+        sources = self.client.get("/api/workchat/sources").json()
+        self.assertEqual([source["doc_name"] for source in sources], ["public"])
+        unavailable = self.client.post(path, json=self.payload(doc_names=["public"]))
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertIn("DeepSeek", unavailable.json()["detail"])
+        self.complete.assert_not_called()
+        with patch.object(self.store, "create") as create, patch.object(self.store, "reserve") as reserve:
+            with patch.object(workchat.config, "DEEPSEEK_API_KEY", "test-provider"):
+                response = self.client.post(path, json=self.payload(
+                    doc_names=["public"], previous_questions=["Bối cảnh hỏi trước"],
+                ))
+            reply = self.reply(response)
+            self.assertEqual(reply["kind"], "answer")
+            self.assertEqual([source["doc_name"] for source in reply["sources"]], ["public"])
+            self.assertIn("Bối cảnh hỏi trước", self.complete.await_args.args[1][1]["content"])
+            create.assert_not_called()
+            reserve.assert_not_called()
+        self.assertEqual(self.client.get(self.base).status_code, 401)
+        forbidden = self.client.post(path, headers={"X-DeepSeek-Key": "test-provider"},
+                                     json=self.payload(doc_names=["approved"]))
+        self.assertEqual(forbidden.status_code, 404)
 
     def test_empty_corpus_and_outline_work_without_provider(self):
         self.manifests = [manifest for manifest in self.manifests if manifest["doc_name"] != "approved"]

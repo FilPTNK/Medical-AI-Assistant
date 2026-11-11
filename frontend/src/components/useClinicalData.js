@@ -3,16 +3,18 @@ import { apiJson } from '../lib/apiClient';
 import { readSseStream } from '../lib/sse';
 import useWorkchat from './useWorkchat';
 
-export default function useClinicalData(ownerId) {
+export default function useClinicalData(ownerId, loadForGuest = false) {
   const workchat = useWorkchat(ownerId);
-  const [apiKey, setApiKey] = useState(() => {
+  const [accountApiKey, setApiKey] = useState(() => {
     try { return localStorage.getItem('deepseek_api_key') || ''; } catch { return ''; }
   });
+  const apiKey = ownerId ? accountApiKey : '';
+  const enabled = Boolean(ownerId || loadForGuest);
   const [config, setConfig] = useState(null);
   const [sourceState, setSourceState] = useState({ ownerId: null, documents: [], error: '', loading: false });
   const documents = sourceState.ownerId === ownerId ? sourceState.documents : [];
   const documentError = sourceState.ownerId === ownerId ? sourceState.error : '';
-  const documentsLoading = !!ownerId && (sourceState.ownerId !== ownerId || sourceState.loading);
+  const documentsLoading = enabled && (sourceState.ownerId !== ownerId || sourceState.loading);
   const [upload, setUpload] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const uploadRequest = useRef(null);
@@ -82,7 +84,7 @@ export default function useClinicalData(ownerId) {
   }
 
   useEffect(() => {
-    if (!ownerId) {
+    if (!enabled) {
       setConfig(null);
       setSourceState({ ownerId: null, documents: [], error: '', loading: false });
       setUpload(null);
@@ -90,19 +92,23 @@ export default function useClinicalData(ownerId) {
       return;
     }
     const controller = new AbortController();
-    const options = { signal: controller.signal };
-    const load = (path, save) => apiJson(path, options)
-      .then(data => { if (!controller.signal.aborted) save(data); })
-      .catch(error => { if (!controller.signal.aborted) console.error(error); });
-    load('/api/config', setConfig);
-    refreshDocuments();
+    setConfig(null);
+    setSourceState(previous => previous.ownerId === ownerId
+      ? previous : { ownerId, documents: [], error: '', loading: false });
+    apiJson('/api/config', { signal: controller.signal }).then(data => {
+      if (controller.signal.aborted) return;
+      setConfig(data);
+      return refreshDocuments();
+    }).catch(() => {
+      if (!controller.signal.aborted) setConfig(null);
+    });
     return () => {
       controller.abort();
       documentRequest.current?.abort();
       uploadRequest.current?.abort();
       uploadRequest.current = null;
     };
-  }, [ownerId]);
+  }, [ownerId, enabled]);
 
   return {
     ...workchat, documents, apiKey, config,

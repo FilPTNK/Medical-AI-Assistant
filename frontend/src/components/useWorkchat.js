@@ -22,6 +22,7 @@ export default function useWorkchat(ownerId) {
   ownerRef.current = ownerId;
 
   useEffect(() => {
+    if (!ownerRef.current) return;
     try { localStorage.setItem('med_conversations', JSON.stringify(legacy)); } catch { /* Keep history for this tab. */ }
   }, [legacy]);
 

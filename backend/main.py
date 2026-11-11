@@ -303,6 +303,14 @@ PUBLIC_PATHS = {
     "/api/auth/register/resend", "/api/auth/google",
 }
 PUBLIC_PREFIXES = ("/api/share/",)
+GUEST_POST_PATHS = {
+    "/api/workchat/guest/turns",
+    "/api/diagnosis-tree/generate", "/api/diagnosis-tree/endoscopy",
+    "/api/diagnosis-tree/final", "/api/diagnosis-tree/treatment",
+}
+GUEST_GET_PATHS = {"/api/workchat/sources", "/api/drug-catalog"}
+GUEST_DRUG_PATH = re.compile(r"^/api/drug-catalog/[^/]+$")
+GUEST_DOCUMENT_PATH = re.compile(r"^/api/documents/([^/]+)/(search|pages/\d+(?:/image|/locate)?)$")
 
 # PDF sách gốc nặng tới ~835 MB. Giao diện không thể fetch về blob rồi
 # createObjectURL như với ảnh và tệp đính kèm nhỏ: cả tệp sẽ nằm trong RAM của tab.
@@ -351,6 +359,21 @@ def _is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
 
 
+def _guest_route(method: str, path: str) -> bool:
+    if method == "GET" and (path in GUEST_GET_PATHS or GUEST_DRUG_PATH.fullmatch(path)):
+        return True
+    if method == "POST" and path in GUEST_POST_PATHS:
+        return True
+    document = GUEST_DOCUMENT_PATH.fullmatch(path)
+    if not document:
+        return False
+    name, action = document.groups()
+    expected_method = "POST" if action.endswith("/locate") else "GET"
+    return method == expected_method and documents.can_guest_view(
+        documents.load_manifest(get_safe_filename(name)),
+    )
+
+
 @app.middleware("http")
 async def authenticate(request: Request, call_next):
     """Gắn tài khoản đang đăng nhập vào request.state.user.
@@ -377,7 +400,7 @@ async def authenticate(request: Request, call_next):
         if not documents.can_view(request.state.user, get_safe_filename(doc_match.group(1))):
             return JSONResponse(status_code=404, content={"detail": "Không tìm thấy tài liệu."})
 
-    if not _is_public(path) and request.state.user is None:
+    if request.state.user is None and not (_is_public(path) or _guest_route(request.method, path)):
         # Tải PDF sách bằng vé một lần thay cho header — chính route sẽ đối chiếu vé,
         # ở đây chỉ ngừng trả 401 sớm để request đến được đó.
         has_ticket = bool(
@@ -401,6 +424,10 @@ def current_user(request: Request) -> Dict[str, Any]:
     return user
 
 
+def current_reader(request: Request) -> Dict[str, Any]:
+    return request.state.user or {"id": None, "role": "guest"}
+
+
 def require_admin(request: Request) -> Dict[str, Any]:
     user = current_user(request)
     if not auth_db.is_admin(user):
@@ -419,6 +446,7 @@ def require_write(request: Request) -> Dict[str, Any]:
 app.include_router(workchat_routes.create_router(
     current_user,
     lambda query, allowed: db.search(query, top_k=10, doc_names=list(allowed)),
+    resolve_reader=current_reader,
 ))
 
 
@@ -2088,14 +2116,23 @@ class GenerateTreeRequest(BaseModel):
     # Ô "Tình trạng bệnh nhân trước đó" (không bắt buộc) — xem patient_context.
     patient_history: Optional[str] = None
 
+
+def _diagnosis_key(custom_key: Optional[str]) -> str:
+    key = (custom_key or "").strip() or config.DEEPSEEK_API_KEY
+    if not key:
+        raise HTTPException(status_code=503, detail="Chưa cấu hình khóa DeepSeek để sử dụng Hỗ trợ chẩn đoán.")
+    return key
+
+
 @app.post("/api/diagnosis-tree/generate")
 def api_generate_diagnosis_tree(request: GenerateTreeRequest, x_deepseek_key: Optional[str] = Header(None)):
     description = request.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="Mô tả bệnh nhân không được để trống.")
+    api_key = _diagnosis_key(x_deepseek_key)
     patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
-        tree = generate_diagnosis_tree(description, x_deepseek_key or "", patient_block=patient_block)
+        tree = generate_diagnosis_tree(description, api_key, patient_block=patient_block)
         tree["patient_context"] = patient_ctx
         return tree
     except ValueError as e:
@@ -2114,10 +2151,11 @@ def api_suggest_endoscopy(request: EndoscopyRequest, x_deepseek_key: Optional[st
     confirmed = [s.strip() for s in request.confirmed_symptoms if s.strip()]
     if not confirmed:
         raise HTTPException(status_code=400, detail="Cần ít nhất một triệu chứng đã xác nhận 'Có'.")
+    api_key = _diagnosis_key(x_deepseek_key)
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
     patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
-        result = suggest_endoscopy_exam(confirmed, excluded, x_deepseek_key or "", patient_block=patient_block)
+        result = suggest_endoscopy_exam(confirmed, excluded, api_key, patient_block=patient_block)
         result["patient_context"] = patient_ctx
         return result
     except ValueError as e:
@@ -2137,11 +2175,12 @@ def api_final_diagnosis(request: FinalDiagnosisRequest, x_deepseek_key: Optional
     exam_notes = request.exam_notes.strip()
     if not exam_notes:
         raise HTTPException(status_code=400, detail="Cần nhập kết quả khám lâm sàng & nội soi.")
+    api_key = _diagnosis_key(x_deepseek_key)
     confirmed = [s.strip() for s in request.confirmed_symptoms if s.strip()]
     excluded = [s.strip() for s in request.excluded_symptoms if s.strip()]
     patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
-        diagnoses = generate_final_diagnosis(confirmed, excluded, exam_notes, x_deepseek_key or "",
+        diagnoses = generate_final_diagnosis(confirmed, excluded, exam_notes, api_key,
                                              patient_block=patient_block)
         return {"diagnoses": diagnoses, "patient_context": patient_ctx}
     except ValueError as e:
@@ -2159,6 +2198,7 @@ class TreatmentSuggestionRequest(BaseModel):
 def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key: Optional[str] = Header(None)):
     if not request.diagnoses:
         raise HTTPException(status_code=400, detail="Cần ít nhất một chẩn đoán đã chọn.")
+    api_key = _diagnosis_key(x_deepseek_key)
     # Bước này là bước trả về medications[] rồi chảy thẳng vào bệnh án, nên đây
     # đúng là chỗ dị ứng thuốc bị bỏ sót gây hại nhất. Trước đợt này nó nhận
     # đúng hai thứ — chẩn đoán và ghi chú khám — và không có đường nào để biết
@@ -2166,7 +2206,7 @@ def api_treatment_suggestion(request: TreatmentSuggestionRequest, x_deepseek_key
     patient_ctx, patient_block = patient_context.build_prompt_block(request.patient_history)
     try:
         result = generate_treatment_suggestion(request.diagnoses, request.exam_notes or "",
-                                               x_deepseek_key or "", patient_block=patient_block)
+                                               api_key, patient_block=patient_block)
         result["patient_context"] = patient_ctx
         # Đối chiếu dị ứng chạy SAU mô hình và ĐỘC LẬP với nó: mô hình đã được
         # nhắc tránh thuốc chống chỉ định, nhưng lời nhắc là lời khuyên chứ
@@ -2286,9 +2326,13 @@ async def locate_quote_on_page(doc_name: str, page_num: int, payload: LocateRequ
     page_num là số trang IN, cùng đơn vị với trích dẫn và endpoint ảnh. Lần đầu
     mở một trang scan phải OCR lại trang đó (vài giây), nên chạy ở thread riêng.
     """
-    user = current_user(request)
     safe_name = get_safe_filename(doc_name)
-    if not documents.can_view(user, safe_name):
+    reader = current_reader(request)
+    if reader["id"] is None:
+        allowed = documents.can_guest_view(documents.load_manifest(safe_name))
+    else:
+        allowed = documents.can_view(reader, safe_name)
+    if not allowed:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
     quote = (payload.quote or "").strip()
     if not quote:

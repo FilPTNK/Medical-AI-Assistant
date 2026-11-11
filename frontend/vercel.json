@@ -25,6 +25,5 @@
       "source": "/dieu-khoan",
       "destination": "/index.html"
     }
-  ],
-  "buildCommand": "npm run build -- --mode public-catalog"
+  ]
 }

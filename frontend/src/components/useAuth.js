@@ -11,7 +11,7 @@ import { apiJson, apiSend, getToken, setToken, clearToken } from '../lib/apiClie
  *   offline — không gọi được máy chủ
  */
 export default function useAuth(enabled = true) {
-  const [status, setStatus] = useState(enabled ? 'loading' : 'offline');
+  const [status, setStatus] = useState(enabled ? 'loading' : 'login');
   const [user, setUser] = useState(null);
   const [roles, setRoles] = useState([]);
   // Cấu hình máy chủ quyết định màn hình đăng nhập dựng được những gì: có
@@ -41,6 +41,7 @@ export default function useAuth(enabled = true) {
         setUser(data.user);
         setStatus('ready');
       } else {
+        clearToken();
         setUser(null);
         setStatus('login');
       }
@@ -52,7 +53,10 @@ export default function useAuth(enabled = true) {
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setStatus('login');
+      return;
+    }
     check();
     return () => {
       const current = checkRequest.current;

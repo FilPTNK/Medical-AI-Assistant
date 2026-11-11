@@ -98,6 +98,25 @@ class HttpVisibilityTests(unittest.TestCase):
             main._retrieve(request.query, request, {'rieng-b.pdf'})
             search.assert_called_once_with(request.query, top_k=5, exclude_doc_names={'rieng-b.pdf'})
 
+    def test_guest_diagnosis_and_auth_status_have_independent_dependencies(self):
+        with patch.object(main.auth_db, 'needs_setup', return_value=False), \
+                patch.object(main.config, 'DEEPSEEK_API_KEY', ''), \
+                patch.object(main, 'generate_diagnosis_tree', return_value={'root': 'fixture'}) as generate:
+            status = self.client.get('/api/auth/status')
+            self.assertEqual(status.status_code, 200)
+            self.assertFalse(status.json()['authenticated'])
+            endpoint = '/api/diagnosis-tree/generate'
+            payload = {'description': 'Mô tả thử nghiệm'}
+            unavailable = self.client.post(endpoint, json=payload)
+            self.assertEqual(unavailable.status_code, 503)
+            self.assertIn('DeepSeek', unavailable.json()['detail'])
+            generate.assert_not_called()
+            with patch.object(main.config, 'DEEPSEEK_API_KEY', 'test-provider'):
+                generated = self.client.post(endpoint, json=payload)
+            self.assertEqual(generated.status_code, 200)
+            self.assertEqual(generated.json()['root'], 'fixture')
+            self.assertEqual(generate.call_args.args[:2], ('Mô tả thử nghiệm', 'test-provider'))
+
     def test_catalog_import_requires_admin_and_updates_atomically(self):
         record = {
             'id': 'sample', 'name': 'Bản ghi kiểm thử', 'source_title': 'Nguồn kiểm thử',
@@ -112,10 +131,11 @@ class HttpVisibilityTests(unittest.TestCase):
             self.assertEqual(self.client.post(url, content=payload).status_code, 401)
             self.assertEqual(self.client.post(url, headers=doctor, content=payload).status_code, 403)
             self.assertEqual(self.client.post(url, headers=admin, content=payload).json()['count'], 1)
-            self.assertEqual(self.get('/api/drug-catalog', 'tok-a').json(), [])
+            self.assertEqual(self.client.get('/api/drug-catalog').json(), [])
             self.assertEqual(self.client.post(url + '&publish=true', headers=admin, content=payload).status_code, 200)
             endpoint = '/api/drug-catalog/import-sample'
             self.assertEqual(self.get(endpoint, 'tok-a').json()['sections'], record['sections'])
+            self.assertEqual(self.client.get(endpoint).json()['sections'], record['sections'])
             changed = {**record, 'name': 'Tên cập nhật'}
             invalid = json.dumps([changed, record])
             response = self.client.post(url + '&publish=true', headers=admin, content=invalid)

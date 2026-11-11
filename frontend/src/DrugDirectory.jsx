@@ -8,6 +8,7 @@ const groups = ['A–D', 'E–H', 'I–L', 'M–P', 'Q–T', 'U–Z', 'Khác'];
 const pageSize = 24;
 const fold = value => foldWithMap(value).folded;
 const collator = new Intl.Collator('vi', { numeric: true });
+let snapshotRequest;
 
 function searchRank(name, aliases, query) {
   if (!query || name === query) return 0;
@@ -18,22 +19,26 @@ function searchRank(name, aliases, query) {
   return -1;
 }
 
-const publicCatalog = import.meta.env.MODE === 'public-catalog';
-let snapshotRequest;
-
-function loadCatalog(url, signal) {
-  if (!publicCatalog) return apiJson(url, { signal });
-  snapshotRequest ??= apiJson('/drug-catalog-public.json').catch(error => {
-    snapshotRequest = null;
-    throw error;
-  });
-  const id = url.split('/')[3];
-  return snapshotRequest.then(records => {
+async function loadCatalog(url, signal) {
+  try {
+    return await apiJson(url, { signal });
+  } catch (error) {
+    // A frontend-only deployment can still serve the published reference index.
+    if (!import.meta.env.PROD || signal.aborted ||
+        (error.status && ![404, 502, 503, 504].includes(error.status))) throw error;
+    snapshotRequest ??= apiJson('/drug-catalog-public.json').then(records =>
+      records.map(record => ({ ...record, referenceOnly: true }))
+    ).catch(failure => {
+      snapshotRequest = null;
+      throw failure;
+    });
+    const records = await snapshotRequest;
+    const id = url.split('/')[3];
     if (!id) return records;
     const record = records.find(item => item.id === decodeURIComponent(id));
-    if (!record) throw new Error('Không tìm thấy thuốc trong danh mục công khai.');
+    if (!record) throw error;
     return record;
-  });
+  }
 }
 
 function useCatalogData(url) {
@@ -193,8 +198,7 @@ function DrugDetails({ drugId, query }) {
               {drug.source_url && <p><a href={drug.source_url} target="_blank" rel="noreferrer">Mở tài liệu nguồn</a></p>}
             </div>
           </aside>
-          {publicCatalog && <p className="fil-state">Bản công khai hiển thị thông tin nhận diện và trang tham chiếu. Đọc chuyên luận trong ấn bản ghi trên trước khi sử dụng thông tin lâm sàng.</p>}
-          {!publicCatalog && <div className="fil-monograph">
+          {drug.referenceOnly ? <p className="fil-state">Bản online có thông tin nhận diện và trang tham chiếu. Bạn có thể đọc chuyên luận trong ấn bản ghi trên.</p> : <div className="fil-monograph">
             <nav aria-label="Mục lục chuyên luận" className="fil-section-links">
               <h2>Mục lục</h2>
               {sections.map((section, index) => {
@@ -262,7 +266,7 @@ function DrugList({ initialQuery }) {
   const index = useMemo(() => (data || []).map(drug => ({
     drug,
     name: fold(drug.name),
-    aliases: [...drug.aliases, ...(drug.intl_name ? [drug.intl_name] : []), ...(drug.atc_code ? drug.atc_code.split(/[,; ]+/) : [])].map(fold),
+    aliases: [...drug.aliases, drug.intl_name, ...(drug.atc_code || '').split(/[,; ]+/)].filter(Boolean).map(fold),
   })).sort((a, b) => collator.compare(a.drug.name, b.drug.name) || a.drug.id.localeCompare(b.drug.id)), [data]);
 
   const results = useMemo(() => {
@@ -294,12 +298,12 @@ function DrugList({ initialQuery }) {
         <div className="fil-wrap">
           <span className="fil-kicker"><Pill size={17} aria-hidden="true" /> Danh mục dược phẩm</span>
           <h1>Tra cứu thuốc</h1>
-          <p>{publicCatalog ? 'Tìm theo tên hoạt chất, tên khác hoặc mã ATC để xem thông tin nhận diện và trang tham chiếu.' : 'Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.'}</p>
+          <p>{data?.[0]?.referenceOnly ? 'Tìm theo tên hoạt chất, tên khác hoặc mã ATC để xem trang tham chiếu.' : 'Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.'}</p>
           <div className="fil-search fil-directory-search" role="search">
             <label className="sr-only" htmlFor="drug-query">Tìm tên thuốc hoặc hoạt chất</label>
             <Search size={22} aria-hidden="true" />
             <input id="drug-query" ref={searchRef} type="search" value={query} maxLength={200}
-              placeholder={publicCatalog ? 'Tìm thuốc, ví dụ: Abacavir…' : 'Tìm thuốc, ví dụ: Paracetamol…'} onChange={event => updateQuery(event.target.value)} />
+              placeholder={data?.[0]?.referenceOnly ? 'Tìm thuốc, ví dụ: Abacavir…' : 'Tìm thuốc, ví dụ: Paracetamol…'} onChange={event => updateQuery(event.target.value)} />
             {query && <button type="button" className="fil-clear" aria-label="Xóa từ khóa"
               onClick={() => { updateQuery(''); searchRef.current.focus(); }}><X size={19} aria-hidden="true" /></button>}
           </div>

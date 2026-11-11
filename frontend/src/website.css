@@ -92,6 +92,7 @@
 .fil-header-icon { display: grid; place-items: center; flex: none; width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 50%; color: var(--fil-header-ink); background: transparent; }
 .fil-header-icon:hover, .fil-header-icon[data-state="open"] { background: var(--fil-soft); }
 .fil-site .fil-header-login { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; width: 44px; padding: 0; flex: none; border: 1px solid var(--fil-border); border-radius: 50%; font-size: .8rem; font-weight: 500; white-space: nowrap; color: var(--fil-header-ink); text-decoration: none; }
+.fil-site button.fil-header-login { background: transparent; }
 .fil-header-settings { min-width: 270px; max-width: min(350px, calc(100vw - 30px)); }
 .fil-notification-label { display: block; padding: 8px 10px 4px; font-size: .75rem; color: var(--text-secondary); font-weight: 600; }
 .fil-header-notifications { max-height: 220px; overflow: auto; padding: 4px 10px 9px; font-size: .78rem; color: var(--text-secondary); }

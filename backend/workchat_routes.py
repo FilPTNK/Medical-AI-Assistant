@@ -1,4 +1,4 @@
-"""Authenticated Workchat API. A turn is stored only after its result is validated."""
+"""Workchat API for saved threads and guest turns."""
 
 import asyncio
 import hashlib
@@ -6,13 +6,14 @@ import json
 import logging
 import os
 import sqlite3
+import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import config
 from workchat import (
-    HISTORY_TURNS, MAX_TURN_SECONDS, ThreadCreate, ThreadUpdate, TurnRequest,
+    GuestTurnRequest, HISTORY_TURNS, MAX_TURN_SECONDS, ThreadCreate, ThreadUpdate, TurnRequest,
     attachment_for, eligible_sources, reply_events, scoped_turn, select_sources, source_list, validate_text,
 )
 from workchat_store import ChatError, WorkchatStore
@@ -34,13 +35,60 @@ def _http(error):
     return HTTPException(status_code=error.status, detail=str(error), headers=PRIVATE)
 
 
-def create_router(resolve_actor, search, *, store=None, respond=reply_events):
+def create_router(resolve_actor, search, *, resolve_reader=None, store=None, respond=reply_events):
     router = APIRouter(prefix="/api/workchat", default_response_class=PrivateJSON)
     store = store or WorkchatStore(os.path.join(config.DATA_DIR, "workchat.db"))
+    resolve_reader = resolve_reader or resolve_actor
 
     @router.get("/sources")
-    def sources(actor: dict = Depends(resolve_actor)):
+    def sources(actor: dict = Depends(resolve_reader)):
         return source_list(actor)
+
+    @router.post("/guest/turns")
+    async def guest_turn(
+        payload: GuestTurnRequest, request: Request,
+        actor: dict = Depends(resolve_reader), x_deepseek_key: str | None = Header(default=None, max_length=512),
+    ):
+        api_key = (x_deepseek_key or "").strip() or config.DEEPSEEK_API_KEY
+        try:
+            for value in [payload.question, payload.specialty or "", *payload.previous_questions]:
+                validate_text(value)
+            if payload.mode == "ask" and not api_key:
+                raise ChatError(503, "Chưa cấu hình khóa DeepSeek để sử dụng Hỏi đáp y khoa.")
+            scope = select_sources(actor, payload.doc_names) if payload.mode == "ask" else {}
+            if payload.near_page is not None and len(scope) != 1:
+                raise ChatError(422, "Chọn một tài liệu để tra theo trang.")
+        except ChatError as error:
+            raise _http(error) from None
+
+        async def events():
+            try:
+                async with asyncio.timeout(MAX_TURN_SECONDS):
+                    async for kind, data in respond(actor, {"specialty": payload.specialty}, payload, [], scope, search, api_key):
+                        if kind == "status":
+                            yield _sse("status", data)
+                            continue
+                        if await request.is_disconnected():
+                            return
+                        turn = {
+                            "id": payload.request_id, "question": payload.question,
+                            "createdAt": int(time.time() * 1000), "reply": data,
+                            "attachment": attachment_for(payload, scope),
+                        }
+                        yield _sse("turn", {"turn": scoped_turn(turn, eligible_sources(actor), public=True)})
+                        return
+            except asyncio.CancelledError:
+                raise
+            except ChatError as error:
+                yield _sse("error", {"message": str(error), "status": error.status})
+            except TimeoutError:
+                yield _sse("error", {"message": "Lượt hỏi mất nhiều thời gian hơn dự kiến. Bạn có thể gửi lại."})
+            except Exception as error:
+                log.warning("Guest Workchat turn failed (%s)", type(error).__name__)
+                yield _sse("error", {"message": "Chưa hoàn tất lượt hỏi. Hãy thử lại."})
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={**PRIVATE, "X-Accel-Buffering": "no"})
 
     @router.get("/threads")
     def threads(actor: dict = Depends(resolve_actor)):

@@ -175,6 +175,17 @@ def visibility_of(manifest: Optional[Dict[str, Any]]) -> str:
     return VISIBILITY_SHARED
 
 
+def is_drug_reference(manifest: Dict[str, Any]) -> bool:
+    return (manifest.get("parser") == "dtqg_parser"
+            and manifest.get("doc_series") == "DTQGVN-2022"
+            and visibility_of(manifest) == VISIBILITY_SHARED)
+
+
+def can_guest_view(manifest: Optional[Dict[str, Any]]) -> bool:
+    return bool(manifest and visibility_of(manifest) == VISIBILITY_SHARED
+                and (is_drug_reference(manifest) or manifest.get("guest_visible") is True))
+
+
 def _user_id(user: Optional[Dict[str, Any]]) -> Optional[str]:
     return (user or {}).get("id")
 

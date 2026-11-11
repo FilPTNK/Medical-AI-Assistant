@@ -247,9 +247,7 @@ def _book_records(doc_name, source_title, revision):
 
 def _books():
     for manifest in documents.list_manifests():
-        if (manifest.get("parser") != "dtqg_parser"
-                or manifest.get("doc_series") != "DTQGVN-2022"
-                or documents.visibility_of(manifest) != documents.VISIBILITY_SHARED):
+        if not documents.is_drug_reference(manifest):
             continue
         doc_name = manifest["doc_name"]
         title = manifest.get("doc_title") or doc_name
