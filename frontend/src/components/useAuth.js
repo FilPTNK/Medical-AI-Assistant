@@ -10,8 +10,8 @@ import { apiJson, apiSend, getToken, setToken, clearToken } from '../lib/apiClie
  *   ready   — đã đăng nhập, App hiển thị bình thường
  *   offline — không gọi được máy chủ
  */
-export default function useAuth() {
-  const [status, setStatus] = useState('loading');
+export default function useAuth(enabled = true) {
+  const [status, setStatus] = useState(enabled ? 'loading' : 'offline');
   const [user, setUser] = useState(null);
   const [roles, setRoles] = useState([]);
   // Cấu hình máy chủ quyết định màn hình đăng nhập dựng được những gì: có
@@ -52,13 +52,14 @@ export default function useAuth() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     check();
     return () => {
       const current = checkRequest.current;
       checkRequest.current = null;
       current?.abort();
     };
-  }, [check]);
+  }, [check, enabled]);
 
   // apiClient phát sự kiện này khi máy chủ trả 401 — phiên hết hạn giữa chừng.
   useEffect(() => {

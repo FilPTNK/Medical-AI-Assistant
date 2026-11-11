@@ -8,6 +8,9 @@ import useProfiles from './components/useProfiles';
 import useClinicalData from './components/useClinicalData';
 import FilLogo from './components/FilLogo';
 import Homepage from './Homepage';
+import Terms from './Terms';
+
+const publicCatalog = import.meta.env.MODE === 'public-catalog';
 import { specialties } from './lib/specialties';
 import { notebookHref } from './lib/notebooks';
 
@@ -60,7 +63,7 @@ function AccountGate({ auth, children, admin = false }) {
 }
 
 export default function Website() {
-  const auth = useAuth();
+  const auth = useAuth(!publicCatalog);
   const ready = auth.status === 'ready';
   const settings = useSettings();
   const profiles = useProfiles(ready);
@@ -141,7 +144,9 @@ export default function Website() {
   }, [path, shared, tool, specialty, toolPath]);
 
   let page;
-  if (shared) page = <SharedConversationView shareId={url.searchParams.get('share')} />;
+  if (path === '/dieu-khoan') page = <Terms />;
+  else if (publicCatalog && (shared || clinicalPage || path === '/quan-tri' || path === '/dang-nhap')) page = <section className="fil-state"><h1>Tính năng chưa mở trên bản online</h1><p>Bạn có thể tra cứu danh mục thuốc mà không cần đăng nhập.</p><a className="fil-button" href="/thuoc">Tra cứu thuốc</a></section>;
+  else if (shared) page = <SharedConversationView shareId={url.searchParams.get('share')} />;
   else if (clinicalPage) page = (
     <AccountGate auth={auth}>
       <article className={toolPath === '/hoi-dap' ? 'fil-wrap fil-clinical fil-qa-page' : 'fil-wrap fil-clinical fil-diagnosis-page'}>
@@ -155,10 +160,11 @@ export default function Website() {
       </article>
     </AccountGate>
   );
-  else if (path === '/') page = <Homepage key={auth.user?.id || 'guest'} user={ready ? auth.user : null} query={notebookQuery} view={notebookView}
+  else if (path === '/') page = <Homepage publicCatalog={publicCatalog} key={auth.user?.id || 'guest'} user={ready ? auth.user : null} query={notebookQuery} view={notebookView}
     conversations={clinical.conversations} onCreateConversation={clinical.createConversation} onUpdateConversation={clinical.updateConversation}
     conversationError={clinical.conversationError} conversationsLoading={clinical.conversationsLoading}
     onRetryConversations={clinical.refreshConversations} onNavigate={navigate} onClearSearch={clearNotebookSearch} />;
+  else if (path === '/thuoc' && publicCatalog) page = <DrugDirectory key={location} initialQuery={url.searchParams.get('q') || ''} />;
   else if (path === '/thuoc') page = <AccountGate auth={auth}><DrugDirectory initialQuery={url.searchParams.get('q') || ''} /></AccountGate>;
   else if (path === '/quan-tri') page = <AccountGate auth={auth} admin><DrugAdmin /></AccountGate>;
   else if (path === '/dang-nhap') page = <AccountGate auth={auth}><section className="fil-state">
@@ -202,7 +208,7 @@ export default function Website() {
                     </DropdownMenu.Item>
                   </DropdownMenu.Content></DropdownMenu.Portal>
                 </DropdownMenu.Root>
-                <a className="fil-header-login" href="/dang-nhap" onClick={followLink} aria-label="Đăng nhập" title="Đăng nhập"><UserRound size={20} aria-hidden="true" /></a>
+                {!publicCatalog && <a className="fil-header-login" href="/dang-nhap" onClick={followLink} aria-label="Đăng nhập" title="Đăng nhập"><UserRound size={20} aria-hidden="true" /></a>}
               </>}
           </div>
         </div>
@@ -213,6 +219,7 @@ export default function Website() {
           <FinishStartup waitingForSession={auth.status === 'loading'} />
         </Suspense>
       </main>
+      {!clinicalPage && <footer className="fil-wrap" style={{ paddingBlock: 18 }}><a href="/dieu-khoan" onClick={followLink}>Điều khoản sử dụng</a></footer>}
     </div>
   );
 }

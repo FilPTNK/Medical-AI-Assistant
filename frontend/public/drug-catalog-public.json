@@ -1,0 +1,423 @@
+[
+  {
+    "id": "book-0b241175090e8b06d40094a9",
+    "name": "ABACAVIR",
+    "intl_name": "Abacavir",
+    "aliases": [],
+    "atc_code": "J05AF06",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "119, 120, 121",
+    "sections": []
+  },
+  {
+    "id": "book-45cba04b62a18ce5abc3f905",
+    "name": "ACARBOSE",
+    "intl_name": "Acarbose",
+    "aliases": [],
+    "atc_code": "A10BF01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "121, 122",
+    "sections": []
+  },
+  {
+    "id": "book-0b5ffc66937a1be82a7be47c",
+    "name": "ACEBUTOLOL",
+    "intl_name": "Acebutolol",
+    "aliases": [],
+    "atc_code": "C07AB04",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "122, 123, 124, 125",
+    "sections": []
+  },
+  {
+    "id": "book-66b246cfb40902aab8ccb136",
+    "name": "ACENOCOUMAROL",
+    "intl_name": "Acenocoumarol",
+    "aliases": [],
+    "atc_code": "B01AA07",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "125, 126",
+    "sections": []
+  },
+  {
+    "id": "book-0d743790a342f5a8d09c8405",
+    "name": "ACETAZOLAMID",
+    "intl_name": "Acetazolamide",
+    "aliases": [],
+    "atc_code": "S01EC01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "127, 128",
+    "sections": []
+  },
+  {
+    "id": "book-a3f2c6b4979ef5ba1b4bc4b9",
+    "name": "ACETYLCYSTEIN",
+    "intl_name": "Acetylcysteine",
+    "aliases": [],
+    "atc_code": "R05CB01, S01XA08, V03AB23",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "128, 129, 130, 131",
+    "sections": []
+  },
+  {
+    "id": "book-5950789978c09b24ef38ea84",
+    "name": "ACICLOVIR",
+    "intl_name": "Aciclovir (Acyclovir)",
+    "aliases": [
+      "Acyclovir"
+    ],
+    "atc_code": "D06BB03, J05AB01, S01AD03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "131, 132, 133, 134",
+    "sections": []
+  },
+  {
+    "id": "book-38a32e557102102eb6ea4936",
+    "name": "ACID AMINOBENZOIC",
+    "intl_name": "Aminobenzoic acid",
+    "aliases": [
+      "Acid p-aminobenzoic",
+      "acid 4-aminobenzoic"
+    ],
+    "atc_code": "D02BA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "134",
+    "sections": []
+  },
+  {
+    "id": "book-8c2fb704ce058099864f6761",
+    "name": "ACID AMINOCAPROIC",
+    "intl_name": "Aminocaproic acid",
+    "aliases": [],
+    "atc_code": "B02AA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "134, 135, 136",
+    "sections": []
+  },
+  {
+    "id": "book-dd95ad4028fbf887f39476fa",
+    "name": "ACID AMINOSALICYLIC",
+    "intl_name": "4-aminosalicylic acid",
+    "aliases": [
+      "Acid p-aminosalicylic",
+      "acid 4-aminosalicylic",
+      "PAS"
+    ],
+    "atc_code": "J04AA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "136, 137",
+    "sections": []
+  },
+  {
+    "id": "book-b146f5748b3f2cf531122d7b",
+    "name": "ACID ASCORBIC",
+    "intl_name": "Ascorbic acid",
+    "aliases": [
+      "Vitamin C"
+    ],
+    "atc_code": "A11GA01, G01AD03, S01XA15",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "137, 138, 139",
+    "sections": []
+  },
+  {
+    "id": "book-78fb6b84148b435b7825af54",
+    "name": "ACID BORIC",
+    "intl_name": "Boric acid",
+    "aliases": [],
+    "atc_code": "S02AA03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "140",
+    "sections": []
+  },
+  {
+    "id": "book-f447e465fa984fe2b6901282",
+    "name": "ACID CHENODEOXYCHOLIC",
+    "intl_name": "Chenodeoxycholic acid",
+    "aliases": [
+      "Chenodiol"
+    ],
+    "atc_code": "A05AA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "140, 141, 142",
+    "sections": []
+  },
+  {
+    "id": "book-3d5e6816f123a144be42c282",
+    "name": "ACID ETHACRYNIC",
+    "intl_name": "Ethacrynic acid",
+    "aliases": [],
+    "atc_code": "C03CC01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "142, 143, 144",
+    "sections": []
+  },
+  {
+    "id": "book-f0d3d420400e4299d73beb92",
+    "name": "ACID FOLIC",
+    "intl_name": "Folic acid",
+    "aliases": [],
+    "atc_code": "B03BB01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "144, 145, 146",
+    "sections": []
+  },
+  {
+    "id": "book-18a8f4d1eff2127830c9e6c5",
+    "name": "ACID FUSIDIC",
+    "intl_name": "Fusidic acid",
+    "aliases": [],
+    "atc_code": "D06AX01, D09AA02, J01XC01, S01AA13",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "146, 147, 148",
+    "sections": []
+  },
+  {
+    "id": "book-44c0b50ed04751c2eab8d08c",
+    "name": "ACID IOXAGLIC",
+    "intl_name": "Ioxaglic acid",
+    "aliases": [],
+    "atc_code": "V08AB03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "148, 149, 150",
+    "sections": []
+  },
+  {
+    "id": "book-1d8d1eaa115c77293e712d75",
+    "name": "ACID NALIDIXIC",
+    "intl_name": "Nalidixic acid",
+    "aliases": [],
+    "atc_code": "J01MB02",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "150, 151",
+    "sections": []
+  },
+  {
+    "id": "book-c9bea993ebaf3aca7a23814e",
+    "name": "ACID SALICYLIC",
+    "intl_name": "Salicylic acid",
+    "aliases": [],
+    "atc_code": "D01AE12, S01BC08",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "153, 154",
+    "sections": []
+  },
+  {
+    "id": "book-5613f099866a4ed9a1b72b67",
+    "name": "ACID TRANEXAMIC",
+    "intl_name": "Tranexamic acid",
+    "aliases": [],
+    "atc_code": "B02AA02",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "154, 155",
+    "sections": []
+  },
+  {
+    "id": "book-03ab4da5c6ec266eaa5f72b2",
+    "name": "ACID URSODEOXYCHOLIC",
+    "intl_name": "Ursodeoxycholic acid",
+    "aliases": [],
+    "atc_code": "A05AA02",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "155, 156",
+    "sections": []
+  },
+  {
+    "id": "book-c8f92f9752e6f468daa7e930",
+    "name": "ACID VALPROIC",
+    "intl_name": "Valproic acid",
+    "aliases": [
+      "Natri valproat",
+      "Natri divalproex"
+    ],
+    "atc_code": "N03AG01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "156, 157, 158, 159",
+    "sections": []
+  },
+  {
+    "id": "book-d963d5d1ea26dcbf61a808d0",
+    "name": "ACID ZOLEDRONIC",
+    "intl_name": "Zoledronic acid",
+    "aliases": [],
+    "atc_code": "M05BA08",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "159, 160, 161",
+    "sections": []
+  },
+  {
+    "id": "book-548d84d76895f6c91549458d",
+    "name": "ACITRETIN",
+    "intl_name": "Acitretin",
+    "aliases": [],
+    "atc_code": "D05BB02",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "161, 162, 163",
+    "sections": []
+  },
+  {
+    "id": "book-3fc0614529a7d7a73c4ee1d1",
+    "name": "ADAPALEN",
+    "intl_name": "Adapalene",
+    "aliases": [],
+    "atc_code": "D10AD03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "163, 164",
+    "sections": []
+  },
+  {
+    "id": "book-ae1fa5eafe12329fefd49122",
+    "name": "ADEFOVIR DIPIVOXIL",
+    "intl_name": "Adefovir dipivoxil",
+    "aliases": [],
+    "atc_code": "J05AF08",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "164, 165, 166",
+    "sections": []
+  },
+  {
+    "id": "book-e27c75a74d05e3dfe63d7d65",
+    "name": "ADENOSIN",
+    "intl_name": "Adenosine",
+    "aliases": [],
+    "atc_code": "C01EB10",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "166, 167, 168",
+    "sections": []
+  },
+  {
+    "id": "book-6c913b8bfd17e7502186c393",
+    "name": "ALBENDAZOL",
+    "intl_name": "Albendazole",
+    "aliases": [],
+    "atc_code": "P02CA03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "169, 170",
+    "sections": []
+  },
+  {
+    "id": "book-e18905376bc16315f0ac9e32",
+    "name": "ALBUMIN",
+    "intl_name": "Albumin",
+    "aliases": [],
+    "atc_code": "B05AA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "170, 171",
+    "sections": []
+  },
+  {
+    "id": "book-77da1ff172b3cdb692c35d79",
+    "name": "ALDESLEUKIN",
+    "intl_name": "Aldesleukin",
+    "aliases": [],
+    "atc_code": "L03AC01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "171, 172, 173, 174",
+    "sections": []
+  },
+  {
+    "id": "book-63dae7b04a09f545e50065e2",
+    "name": "ALENDRONAT NATRI",
+    "intl_name": "Alendronate sodium",
+    "aliases": [],
+    "atc_code": "M05BA04",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "174, 175, 176",
+    "sections": []
+  },
+  {
+    "id": "book-06e1c4a8bca5e7dc49aec27f",
+    "name": "ALFUZOSIN HYDROCLORID",
+    "intl_name": "Alfuzosin hydrochloride",
+    "aliases": [],
+    "atc_code": "G04CA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "176, 177",
+    "sections": []
+  },
+  {
+    "id": "book-153b2a022f562436d19a82cf",
+    "name": "ALIMEMAZIN",
+    "intl_name": "Alimemazine",
+    "aliases": [
+      "Trimeprazin",
+      "methylpromazin"
+    ],
+    "atc_code": "R06AD01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "178, 179, 180",
+    "sections": []
+  },
+  {
+    "id": "book-eebcd141fd7c446abd0745d7",
+    "name": "ALOPURINOL",
+    "intl_name": "Allopurinol",
+    "aliases": [],
+    "atc_code": "M04AA01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "180, 181, 182",
+    "sections": []
+  },
+  {
+    "id": "book-09cb1985eef95622809fe4fd",
+    "name": "ALPHA TOCOPHEROL",
+    "intl_name": "Alpha tocopherol",
+    "aliases": [
+      "Vitamin E"
+    ],
+    "atc_code": "A11HA03",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "183, 184",
+    "sections": []
+  },
+  {
+    "id": "book-b66deadea81c40adeba930c9",
+    "name": "ALPRAZOLAM",
+    "intl_name": "Alprazolam",
+    "aliases": [],
+    "atc_code": "N05BA12",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "184, 185, 186",
+    "sections": []
+  },
+  {
+    "id": "book-7be110bcc6601a7a253cc6c7",
+    "name": "ALTEPLASE",
+    "intl_name": "Alteplase",
+    "aliases": [],
+    "atc_code": "B01AD02, S01XA13",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "186, 187, 188, 189",
+    "sections": []
+  },
+  {
+    "id": "book-5e3ed13b404348cfbb827359",
+    "name": "ALVERIN CITRAT",
+    "intl_name": "Alverine citrate",
+    "aliases": [],
+    "atc_code": "A03AX08",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "189",
+    "sections": []
+  },
+  {
+    "id": "book-8407630e61dfef2c163fe933",
+    "name": "AMANTADIN",
+    "intl_name": "Amantadine",
+    "aliases": [],
+    "atc_code": "N04BB01",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "189, 190, 191",
+    "sections": []
+  },
+  {
+    "id": "book-19d5f96688cf69cd4890f4d7",
+    "name": "AMBROXOL",
+    "intl_name": "Ambroxol",
+    "aliases": [],
+    "atc_code": "R05CB06",
+    "source_title": "Dược thư Quốc gia Việt Nam 2022 — Quyển 1",
+    "source_page": "191, 192",
+    "sections": []
+  }
+]

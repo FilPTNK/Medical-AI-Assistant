@@ -18,14 +18,32 @@ function searchRank(name, aliases, query) {
   return -1;
 }
 
+const publicCatalog = import.meta.env.MODE === 'public-catalog';
+let snapshotRequest;
+
+function loadCatalog(url, signal) {
+  if (!publicCatalog) return apiJson(url, { signal });
+  snapshotRequest ??= apiJson('/drug-catalog-public.json').catch(error => {
+    snapshotRequest = null;
+    throw error;
+  });
+  const id = url.split('/')[3];
+  return snapshotRequest.then(records => {
+    if (!id) return records;
+    const record = records.find(item => item.id === decodeURIComponent(id));
+    if (!record) throw new Error('Không tìm thấy thuốc trong danh mục công khai.');
+    return record;
+  });
+}
+
 function useCatalogData(url) {
   const [state, setState] = useState({ data: null, error: '' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setState({ data: null, error: '' });
-    apiJson(url, { signal: controller.signal })
-      .then(data => setState({ data, error: '' }))
+    loadCatalog(url, controller.signal)
+      .then(data => { if (!controller.signal.aborted) setState({ data, error: '' }); })
       .catch(error => {
         if (!controller.signal.aborted) setState({ data: null, error: error.message });
       });
@@ -175,7 +193,8 @@ function DrugDetails({ drugId, query }) {
               {drug.source_url && <p><a href={drug.source_url} target="_blank" rel="noreferrer">Mở tài liệu nguồn</a></p>}
             </div>
           </aside>
-          <div className="fil-monograph">
+          {publicCatalog && <p className="fil-state">Bản công khai hiển thị thông tin nhận diện và trang tham chiếu. Đọc chuyên luận trong ấn bản ghi trên trước khi sử dụng thông tin lâm sàng.</p>}
+          {!publicCatalog && <div className="fil-monograph">
             <nav aria-label="Mục lục chuyên luận" className="fil-section-links">
               <h2>Mục lục</h2>
               {sections.map((section, index) => {
@@ -226,7 +245,7 @@ function DrugDetails({ drugId, query }) {
               })}
               {drug.source_updated && <p className="fil-source-date">Cập nhật lần cuối: {drug.source_updated}.</p>}
             </div>
-          </div>
+          </div>}
         </>
       ) : <CatalogStatus error={error} retry={retry} />}
     </div>
@@ -243,7 +262,7 @@ function DrugList({ initialQuery }) {
   const index = useMemo(() => (data || []).map(drug => ({
     drug,
     name: fold(drug.name),
-    aliases: [...drug.aliases, ...(drug.intl_name ? [drug.intl_name] : [])].map(fold),
+    aliases: [...drug.aliases, ...(drug.intl_name ? [drug.intl_name] : []), ...(drug.atc_code ? drug.atc_code.split(/[,; ]+/) : [])].map(fold),
   })).sort((a, b) => collator.compare(a.drug.name, b.drug.name) || a.drug.id.localeCompare(b.drug.id)), [data]);
 
   const results = useMemo(() => {
@@ -275,12 +294,12 @@ function DrugList({ initialQuery }) {
         <div className="fil-wrap">
           <span className="fil-kicker"><Pill size={17} aria-hidden="true" /> Danh mục dược phẩm</span>
           <h1>Tra cứu thuốc</h1>
-          <p>Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.</p>
+          <p>{publicCatalog ? 'Tìm theo tên hoạt chất, tên khác hoặc mã ATC để xem thông tin nhận diện và trang tham chiếu.' : 'Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.'}</p>
           <div className="fil-search fil-directory-search" role="search">
             <label className="sr-only" htmlFor="drug-query">Tìm tên thuốc hoặc hoạt chất</label>
             <Search size={22} aria-hidden="true" />
             <input id="drug-query" ref={searchRef} type="search" value={query} maxLength={200}
-              placeholder="Tìm thuốc, ví dụ: Paracetamol…" onChange={event => updateQuery(event.target.value)} />
+              placeholder={publicCatalog ? 'Tìm thuốc, ví dụ: Abacavir…' : 'Tìm thuốc, ví dụ: Paracetamol…'} onChange={event => updateQuery(event.target.value)} />
             {query && <button type="button" className="fil-clear" aria-label="Xóa từ khóa"
               onClick={() => { updateQuery(''); searchRef.current.focus(); }}><X size={19} aria-hidden="true" /></button>}
           </div>

@@ -1,10 +1,30 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/thuoc", "destination": "/index.html" },
-    { "source": "/hoi-dap", "destination": "/index.html" },
-    { "source": "/chan-doan", "destination": "/index.html" },
-    { "source": "/quan-tri", "destination": "/index.html" },
-    { "source": "/dang-nhap", "destination": "/index.html" }
-  ]
+    {
+      "source": "/thuoc",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/hoi-dap",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/chan-doan",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/quan-tri",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dang-nhap",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dieu-khoan",
+      "destination": "/index.html"
+    }
+  ],
+  "buildCommand": "npm run build -- --mode public-catalog"
 }
