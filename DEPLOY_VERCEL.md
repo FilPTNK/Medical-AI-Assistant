@@ -1,15 +1,15 @@
 # Kế hoạch đưa Trợ lý Fil lên Internet — frontend trên Vercel
 
-Soạn: 2026-10-07. Trạng thái: **kế hoạch, chưa làm bước nào**. Các con số về
-Vercel lấy từ tài liệu Vercel ngày soạn; giá máy chủ là ước lượng, phải xem lại
-lúc mua.
+Soạn ngày 2026-10-07. Frontend đã chạy trên Vercel. Các bước dành cho máy chủ
+backend bên dưới là kế hoạch. Số liệu Vercel và giá máy chủ cần đối chiếu trước
+khi chọn gói.
 
 ---
 
 ## 0. Kết luận trước
 
-**Chỉ frontend lên được Vercel. Backend không chạy được trên Vercel** và phải
-nằm trên một máy chủ có ổ đĩa bền:
+Frontend chạy trên Vercel. Backend Fil cần ổ đĩa bền để giữ tài khoản, chỉ
+mục và tài liệu:
 
 | Backend cần | Vercel Functions có |
 |---|---|
@@ -25,7 +25,7 @@ Trình duyệt bác sĩ
       ▼
 ┌──────────────────────────┐
 │ Vercel                   │  /            → dist/ của Vite (tĩnh)
-│  vercel.json routes      │  /api/*       → proxy sang backend, gắn x-origin-secret
+│  vercel.ts               │  /api/*       → proxy sang backend
 └──────────┬───────────────┘
            │  https://api.fil.<ten-mien>/api/*
            ▼
@@ -158,33 +158,14 @@ CMD ["python", "start_server.py"]
 
 ### A6. Frontend
 
-`frontend/vercel.json`:
+Khi FastAPI đã chạy trên HTTPS, đặt biến môi trường `FIL_BACKEND_ORIGIN`
+trong project Vercel thành origin của máy chủ, ví dụ `https://api.example.com`,
+rồi triển khai lại frontend. `frontend/vercel.ts` chuyển tiếp `/api/*` sang
+FastAPI và tắt cache cho các phản hồi API. Kiểm tra `GET /api/auth/status`
+qua tên miền Fil sau khi triển khai.
 
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "https://api.fil.<ten-mien>/api/$1",
-      "transforms": [
-        {
-          "type": "request.headers",
-          "op": "set",
-          "target": { "key": "x-origin-secret" },
-          "args": "$ORIGIN_SECRET",
-          "env": ["ORIGIN_SECRET"]
-        }
-      ]
-    },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
-  ]
-}
-```
-
-- Không sửa `vite.config.js`: proxy ở đó chỉ dùng khi `npm run dev`.
-- Link chia sẻ dùng `/?share=<id>` (App.jsx:316) nên hosting tĩnh chạy đúng.
+Proxy trong `vite.config.js` phục vụ môi trường local. Biến
+`FIL_BACKEND_ORIGIN` chỉ dùng khi tạo cấu hình triển khai Vercel.
 
 ### A6b. SQLite cho nhiều người dùng cùng lúc
 
@@ -327,7 +308,7 @@ docker compose up --build        # chạy thử với một BẢN SAO data
 
 Nếu bác sĩ không muốn hồ sơ rời máy phòng khám: **giữ backend trên máy hiện
 tại**, mở đường ra Internet bằng **Cloudflare Tunnel** (không phải mở cổng
-router), frontend vẫn trên Vercel với cùng `vercel.json` trỏ tới tên miền của
+router), frontend vẫn trên Vercel với `FIL_BACKEND_ORIGIN` trỏ tới tên miền của
 tunnel.
 
 - Được: dữ liệu không rời phòng khám, không tốn tiền VPS, bỏ qua giai đoạn C.

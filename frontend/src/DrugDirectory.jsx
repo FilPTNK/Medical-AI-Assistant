@@ -298,12 +298,12 @@ function DrugList({ initialQuery }) {
         <div className="fil-wrap">
           <span className="fil-kicker"><Pill size={17} aria-hidden="true" /> Danh mục dược phẩm</span>
           <h1>Tra cứu thuốc</h1>
-          <p>{data?.[0]?.referenceOnly ? 'Tìm theo tên hoạt chất, tên khác hoặc mã ATC để xem trang tham chiếu.' : 'Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.'}</p>
+          <p>Tìm theo tên hoạt chất hoặc tên khác để đọc chuyên luận và đối chiếu nguồn.</p>
           <div className="fil-search fil-directory-search" role="search">
             <label className="sr-only" htmlFor="drug-query">Tìm tên thuốc hoặc hoạt chất</label>
             <Search size={22} aria-hidden="true" />
             <input id="drug-query" ref={searchRef} type="search" value={query} maxLength={200}
-              placeholder={data?.[0]?.referenceOnly ? 'Tìm thuốc, ví dụ: Abacavir…' : 'Tìm thuốc, ví dụ: Paracetamol…'} onChange={event => updateQuery(event.target.value)} />
+              placeholder="Tìm thuốc, ví dụ: Paracetamol…" onChange={event => updateQuery(event.target.value)} />
             {query && <button type="button" className="fil-clear" aria-label="Xóa từ khóa"
               onClick={() => { updateQuery(''); searchRef.current.focus(); }}><X size={19} aria-hidden="true" /></button>}
           </div>
