@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiJson, apiSend, getToken, setToken, clearToken } from '../lib/apiClient';
 
 /**
@@ -18,10 +18,17 @@ export default function useAuth() {
   // GOOGLE_CLIENT_ID thì mới hiện nút Google, có RESEND_API_KEY thì mã xác nhận
   // mới thật sự bay tới hộp thư (nếu không, nó nằm trong console máy chủ).
   const [serverAuth, setServerAuth] = useState({ googleClientId: '', emailDelivery: false });
+  const checkRequest = useRef(null);
 
   const check = useCallback(async () => {
+    checkRequest.current?.abort();
+    const controller = new AbortController();
+    checkRequest.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 14000);
+    setStatus('loading');
     try {
-      const data = await apiJson('/api/auth/status');
+      const data = await apiJson('/api/auth/status', { signal: controller.signal });
+      if (checkRequest.current !== controller) return;
       setRoles(data.roles || []);
       setServerAuth({
         googleClientId: data.google_client_id || '',
@@ -38,11 +45,20 @@ export default function useAuth() {
         setStatus('login');
       }
     } catch {
-      setStatus('offline');
+      if (checkRequest.current === controller) setStatus('offline');
+    } finally {
+      clearTimeout(timeout);
     }
   }, []);
 
-  useEffect(() => { check(); }, [check]);
+  useEffect(() => {
+    check();
+    return () => {
+      const current = checkRequest.current;
+      checkRequest.current = null;
+      current?.abort();
+    };
+  }, [check]);
 
   // apiClient phát sự kiện này khi máy chủ trả 401 — phiên hết hạn giữa chừng.
   useEffect(() => {

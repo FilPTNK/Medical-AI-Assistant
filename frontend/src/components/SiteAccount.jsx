@@ -16,7 +16,7 @@ export default function SiteAccount({ auth, settings, profiles, clinical, showHe
   const [adminOpen, setAdminOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const { user } = auth;
-  const { conversations, setConversations, documents, apiKey, config, saveApiKey } = clinical;
+  const { conversations, documents, apiKey, config, saveApiKey, changeAll, exportConversations } = clinical;
 
   function openSettings(next = 'general') {
     setSection(next);
@@ -45,7 +45,10 @@ export default function SiteAccount({ auth, settings, profiles, clinical, showHe
     await auth.logout();
   }
 
-  function exportData() {
+  async function exportData() {
+    let exported;
+    try { exported = await exportConversations(); }
+    catch (error) { setNotice(error.message); return; }
     const payload = {
       exported_at: new Date().toISOString(),
       doctor: {
@@ -53,7 +56,7 @@ export default function SiteAccount({ auth, settings, profiles, clinical, showHe
         specialty: user.specialty, email: user.email,
       },
       custom_instructions: settings.customInstructions,
-      conversations,
+      conversations: exported,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a');
@@ -109,15 +112,15 @@ export default function SiteAccount({ auth, settings, profiles, clinical, showHe
           micSupported: 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window,
           conversationCount: conversations.length,
           documentCount: documents.length,
-          onDeleteAllConversations: () => {
+          onDeleteAllConversations: async () => {
             if (!window.confirm('Xóa toàn bộ lịch sử trò chuyện? Hành động này không thể hoàn tác.')) return;
-            setConversations([]);
-            setNotice('Đã xóa toàn bộ cuộc trò chuyện.');
+            try { await changeAll('delete'); setNotice('Đã xóa toàn bộ cuộc trò chuyện.'); }
+            catch (error) { setNotice(error.message); }
           },
           onExportData: exportData,
-          onArchiveAll: () => {
-            setConversations(prev => prev.map(item => ({ ...item, archived: true })));
-            setNotice('Đã lưu trữ toàn bộ cuộc trò chuyện.');
+          onArchiveAll: async () => {
+            try { await changeAll('archive'); setNotice('Đã lưu trữ toàn bộ cuộc trò chuyện.'); }
+            catch (error) { setNotice(error.message); }
           },
           onResetLocalData: () => {
             if (!window.confirm('Xóa toàn bộ cài đặt và cuộc trò chuyện trên trình duyệt này?')) return;

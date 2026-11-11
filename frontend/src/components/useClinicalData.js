@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiJson } from '../lib/apiClient';
 import { readSseStream } from '../lib/sse';
+import useWorkchat from './useWorkchat';
 
-export default function useClinicalData(enabled) {
-  const [conversations, setConversations] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('med_conversations'));
-      return Array.isArray(saved) ? saved : [];
-    } catch {
-      return [];
-    }
+export default function useClinicalData(ownerId) {
+  const workchat = useWorkchat(ownerId);
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem('deepseek_api_key') || ''; } catch { return ''; }
   });
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('deepseek_api_key') || '');
   const [config, setConfig] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [documentError, setDocumentError] = useState('');
+  const [sourceState, setSourceState] = useState({ ownerId: null, documents: [], error: '', loading: false });
+  const documents = sourceState.ownerId === ownerId ? sourceState.documents : [];
+  const documentError = sourceState.ownerId === ownerId ? sourceState.error : '';
+  const documentsLoading = !!ownerId && (sourceState.ownerId !== ownerId || sourceState.loading);
   const [upload, setUpload] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const uploadRequest = useRef(null);
@@ -24,12 +22,12 @@ export default function useClinicalData(enabled) {
     documentRequest.current?.abort();
     const controller = new AbortController();
     documentRequest.current = controller;
-    setDocumentError('');
+    setSourceState(previous => ({ ownerId, documents: previous.ownerId === ownerId ? previous.documents : [], error: '', loading: true }));
     try {
-      const list = await apiJson('/api/documents', { signal: controller.signal });
-      if (!controller.signal.aborted) setDocuments(list);
+      const list = await apiJson('/api/workchat/sources', { signal: controller.signal });
+      if (!controller.signal.aborted) setSourceState({ ownerId, documents: list, error: '', loading: false });
     } catch (error) {
-      if (!controller.signal.aborted) setDocumentError(error.message);
+      if (!controller.signal.aborted) setSourceState(previous => ({ ...previous, error: error.message, loading: false }));
     }
   }
 
@@ -49,7 +47,7 @@ export default function useClinicalData(enabled) {
     try {
       const body = new FormData();
       body.append('file', file);
-      const { job_id, doc_name } = await apiJson('/api/documents/ingest', {
+      const { job_id, doc_name } = await apiJson('/api/documents/ingest?workchat=true', {
         method: 'POST', body, signal: controller.signal,
       });
       const response = await fetch(`/api/documents/ingest/${encodeURIComponent(job_id)}/events`, {
@@ -84,13 +82,9 @@ export default function useClinicalData(enabled) {
   }
 
   useEffect(() => {
-    localStorage.setItem('med_conversations', JSON.stringify(conversations));
-  }, [conversations]);
-
-  useEffect(() => {
-    if (!enabled) {
+    if (!ownerId) {
       setConfig(null);
-      setDocuments([]);
+      setSourceState({ ownerId: null, documents: [], error: '', loading: false });
       setUpload(null);
       setNotifications([]);
       return;
@@ -108,11 +102,11 @@ export default function useClinicalData(enabled) {
       uploadRequest.current?.abort();
       uploadRequest.current = null;
     };
-  }, [enabled]);
+  }, [ownerId]);
 
   return {
-    conversations, setConversations, documents, apiKey, config,
-    documentError, refreshDocuments, upload, uploadDocument, notifications, addNotification,
+    ...workchat, documents, apiKey, config,
+    documentError, documentsLoading, refreshDocuments, upload, uploadDocument, notifications, addNotification,
     markNotificationsRead() {
       setNotifications(previous => previous.map(item => ({ ...item, unread: false })));
     },

@@ -37,6 +37,7 @@ import ingest_jobs
 import web_tools
 import answer_verify
 import feedback_db
+import workchat_routes
 from vector_store import VectorStore, IndexUnavailable, SearchHits
 from writer_lock import writer_lock
 from llm_client import coverage_notes, generate_answer, stream_answer, generate_diagnosis_tree, suggest_endoscopy_exam, generate_final_diagnosis, generate_treatment_suggestion, generate_drug_report, stream_drug_report, generate_document_comparison
@@ -413,6 +414,12 @@ def require_write(request: Request) -> Dict[str, Any]:
     if auth_db.is_read_only(user):
         raise HTTPException(status_code=403, detail="Tài khoản của bạn chỉ có quyền xem hồ sơ bệnh nhân.")
     return user
+
+
+app.include_router(workchat_routes.create_router(
+    current_user,
+    lambda query, allowed: db.search(query, top_k=10, doc_names=list(allowed)),
+))
 
 
 class LoginRequest(BaseModel):
@@ -848,7 +855,7 @@ def get_safe_filename(filename: str) -> str:
     return os.path.basename(filename).replace("..", "")
 
 @app.post("/api/documents/ingest")
-async def ingest_document(request: Request, file: UploadFile = File(...)):
+async def ingest_document(request: Request, file: UploadFile = File(...), workchat: bool = False):
     """
     Bác sĩ tự tải PDF lên — không cần ai viết parser riêng cho tài liệu này.
 
@@ -860,6 +867,7 @@ async def ingest_document(request: Request, file: UploadFile = File(...)):
     (tải xuống, xoá, tô sáng, Đối chiếu, trình đọc trang) mà không cần đụng gì
     tới các endpoint đó.
     """
+    user = require_write(request)
     if not (file.filename or "").lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ tệp PDF.")
     try:
@@ -868,7 +876,6 @@ async def ingest_document(request: Request, file: UploadFile = File(...)):
     except ValueError as e:
         raise HTTPException(status_code=429, detail=str(e))
     job_id, doc_name = job["job_id"], job["doc_name"]
-    user = current_user(request)
     # Quản trị tải lên = tài liệu chung cho cả phòng khám; bác sĩ tải lên = kho
     # riêng của chính tài khoản đó.
     visibility = (documents.VISIBILITY_SHARED if auth_db.is_admin(user)
@@ -923,6 +930,8 @@ async def ingest_document(request: Request, file: UploadFile = File(...)):
                 owner_id=user["id"],
                 visibility=visibility,
             )
+            if workchat:
+                documents.update_manifest(doc_name, workchat_enabled=True)
             _invalidate_book_metadata()
             ingest_jobs.update(job_id, status="done", stage="Hoàn tất")
         except Exception as e:

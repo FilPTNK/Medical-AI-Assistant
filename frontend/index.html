@@ -20,127 +20,49 @@
       })();
     </script>
 
-    <style>
-      :root {
-        --boot-bg: #f4f7f9;
-        --boot-card: #ffffff;
-        --boot-ink: #1f2a33;
-        --boot-muted: #4c6272;
-        --boot-track: #dbe3ec;
-        --boot-grad: linear-gradient(100deg, #003d78 0%, #005eb8 100%);
-      }
-      html.dark {
-        --boot-bg: #0e1620;
-        --boot-card: #16212d;
-        --boot-ink: #e8eef4;
-        --boot-muted: #93a5b6;
-        --boot-track: #2a3a4b;
-        --boot-grad: linear-gradient(100deg, #a9d1f7 0%, #6cb4f5 100%);
-      }
-      html, body { margin: 0; height: 100%; background: var(--boot-bg); }
-
-      #boot {
-        position: fixed;
-        inset: 0;
-        z-index: 9999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 20px;
-        padding: 24px;
-        background: var(--boot-bg);
-        color: var(--boot-ink);
-        font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-        text-align: center;
-      }
-      #boot[hidden] { display: none; }
-
-      .boot-mark {
-        width: 52px;
-        height: 52px;
-        border-radius: 15px;
-        background: var(--boot-grad);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 26px;
-        line-height: 1;
-      }
-
-      .boot-name {
-        font-size: 22px;
-        font-weight: 700;
-        letter-spacing: -0.3px;
-        background: var(--boot-grad);
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-      }
-
-      /* Thanh tiến trình KHÔNG giả vờ biết còn bao nhiêu phần trăm. Nó là một
-         vệt chạy qua lại, chỉ nói đúng một điều: hệ thống còn sống. Một thanh
-         phần trăm bịa ra sẽ đứng ở 90% rồi treo, tệ hơn là không có gì. */
-      .boot-track {
-        width: min(260px, 70vw);
-        height: 4px;
-        border-radius: 99px;
-        background: var(--boot-track);
-        overflow: hidden;
-      }
-      .boot-bar {
-        width: 40%;
-        height: 100%;
-        border-radius: 99px;
-        background: var(--boot-grad);
-        animation: boot-slide 1.5s ease-in-out infinite;
-      }
-      @keyframes boot-slide {
-        0%   { transform: translateX(-110%); }
-        100% { transform: translateX(260%); }
-      }
-
-      .boot-status { font-size: 14px; color: var(--boot-muted); max-width: 42ch; }
-      .boot-hint { font-size: 12.5px; color: var(--boot-muted); opacity: .85; }
-
-      @media (prefers-reduced-motion: reduce) {
-        .boot-bar { animation: none; width: 100%; }
-      }
-    </style>
+    <link rel="stylesheet" href="/fil-boot.css" />
+    <noscript><style>.boot-track, .boot-status { display: none; }</style></noscript>
   </head>
   <body>
-    <div id="root"></div>
-
-    <div id="boot" role="status" aria-live="polite">
-      <div class="boot-mark" aria-hidden="true">🩺</div>
-      <div class="boot-name">Trợ lý Fil</div>
-      <div class="boot-track" aria-hidden="true"><div class="boot-bar"></div></div>
-      <p class="boot-status" id="boot-status">Đang nạp giao diện…</p>
-      <p class="boot-hint" id="boot-hint"></p>
+    <div id="root" inert></div>
+    <div id="boot">
+      <div class="boot-field" aria-hidden="true">
+        <i class="boot-star"></i><i class="boot-star"></i><i class="boot-star"></i>
+        <i class="boot-star"></i><i class="boot-star"></i><i class="boot-star"></i>
+      </div>
+      <div class="boot-main">
+        <div class="boot-orbit" aria-hidden="true">
+          <span class="boot-ring"></span>
+          <img class="boot-assistant" src="/fil-assistant.svg" width="360" height="360" alt="" />
+        </div>
+        <p class="boot-brand">Trợ lý Fil</p>
+        <p class="boot-subtitle">Không gian làm việc y khoa</p>
+        <div class="boot-track" aria-hidden="true"><div class="boot-bar"></div></div>
+        <p class="boot-status" id="boot-status" role="status">Đang tải giao diện…</p>
+        <button class="boot-retry" id="boot-retry" type="button" hidden>Tải lại trang</button>
+        <noscript><p>Hãy bật JavaScript trong trình duyệt để mở Fil.</p></noscript>
+      </div>
+      <footer class="boot-footer">Tra cứu thuốc · Hỏi đáp y khoa · Hỗ trợ chẩn đoán</footer>
     </div>
 
     <script>
-      // Nói thật bác sĩ đang chờ cái gì, thay vì một vòng xoay câm. Backend phải
-      // nạp mô hình nhúng trước khi phục vụ được, và đó là phần lâu nhất.
       (function () {
         var status = document.getElementById('boot-status');
-        var hint = document.getElementById('boot-hint');
-        var t0 = Date.now();
-        var timer = setInterval(function () {
-          var s = Math.round((Date.now() - t0) / 1000);
-          if (s >= 6) {
-            status.textContent = 'Đang nạp mô hình tra cứu y văn…';
-            hint.textContent = 'Lần mở đầu tiên trong ngày thường mất 30 tới 45 giây.';
-          }
-          if (s >= 75) {
-            status.textContent = 'Máy chủ lâu hơn bình thường.';
-            hint.textContent = 'Nếu quá hai phút, hãy đóng ứng dụng và chạy lại python run.py.';
-          }
-        }, 1000);
+        var retry = document.getElementById('boot-retry');
+        var timer = setTimeout(function () {
+          status.textContent = 'Fil đang mất nhiều thời gian hơn bình thường để mở.';
+          retry.hidden = false;
+        }, 10000);
+        retry.addEventListener('click', function () { window.location.reload(); });
+        window.__bootPhase = function (message) {
+          if (retry.hidden) status.textContent = message;
+        };
         window.__bootDone = function () {
-          clearInterval(timer);
-          var el = document.getElementById('boot');
-          if (el) el.parentNode.removeChild(el);
+          clearTimeout(timer);
+          document.getElementById('boot')?.remove();
+          document.getElementById('root')?.removeAttribute('inert');
+          delete window.__bootPhase;
+          delete window.__bootDone;
         };
       })();
     </script>

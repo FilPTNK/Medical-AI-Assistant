@@ -23,6 +23,12 @@ const tools = [
   { path: '/chan-doan', title: 'Hỗ trợ chẩn đoán' },
 ];
 
+function FinishStartup({ waitingForSession }) {
+  useEffect(() => {
+    if (!waitingForSession) window.__bootDone?.();
+  }, [waitingForSession]);
+  return null;
+}
 
 function AccountGate({ auth, children, admin = false }) {
   if (auth.status === 'loading') return <p className="fil-state" role="status">Đang kiểm tra phiên đăng nhập…</p>;
@@ -58,7 +64,7 @@ export default function Website() {
   const ready = auth.status === 'ready';
   const settings = useSettings();
   const profiles = useProfiles(ready);
-  const clinical = useClinicalData(ready);
+  const clinical = useClinicalData(ready ? auth.user.id : null);
   const [location, setLocation] = useState(() => window.location.href);
   const siteRef = useRef(null);
   const contentRef = useRef(null);
@@ -124,7 +130,11 @@ export default function Website() {
   }, [location]);
 
   useEffect(() => {
-    window.__bootDone?.();
+    if (auth.status === 'loading') window.__bootPhase?.('Đang kiểm tra phiên đăng nhập…');
+    else window.__bootPhase?.('Đang mở trang…');
+  }, [auth.status]);
+
+  useEffect(() => {
     const title = shared ? 'Cuộc trò chuyện' : specialty && toolPath === '/hoi-dap' ? specialty.name : tool?.title;
     document.title = title ? `${title} | Fil`
       : path === '/quan-tri' ? 'Quản trị dữ liệu thuốc | Fil' : 'Fil | Tra cứu y khoa';
@@ -136,7 +146,7 @@ export default function Website() {
     <AccountGate auth={auth}>
       <article className={toolPath === '/hoi-dap' ? 'fil-wrap fil-clinical fil-qa-page' : 'fil-wrap fil-clinical fil-diagnosis-page'}>
         {toolPath === '/chan-doan' && <h1 className="sr-only">Hỗ trợ chẩn đoán</h1>}
-        <App user={auth.user} settings={settings} clinical={clinical}
+        <App key={auth.user?.id} user={auth.user} settings={settings} clinical={clinical}
           activeTab={toolPath === '/chan-doan' ? 'diagnosisTree' : 'chat'}
           onOpenChat={() => navigate('/hoi-dap')} specialty={specialty}
           conversationId={url.searchParams.get('conversation')}
@@ -146,7 +156,9 @@ export default function Website() {
     </AccountGate>
   );
   else if (path === '/') page = <Homepage key={auth.user?.id || 'guest'} user={ready ? auth.user : null} query={notebookQuery} view={notebookView}
-    conversations={clinical.conversations} onUpdateConversations={clinical.setConversations} onNavigate={navigate} onClearSearch={clearNotebookSearch} />;
+    conversations={clinical.conversations} onCreateConversation={clinical.createConversation} onUpdateConversation={clinical.updateConversation}
+    conversationError={clinical.conversationError} conversationsLoading={clinical.conversationsLoading}
+    onRetryConversations={clinical.refreshConversations} onNavigate={navigate} onClearSearch={clearNotebookSearch} />;
   else if (path === '/thuoc') page = <AccountGate auth={auth}><DrugDirectory initialQuery={url.searchParams.get('q') || ''} /></AccountGate>;
   else if (path === '/quan-tri') page = <AccountGate auth={auth} admin><DrugAdmin /></AccountGate>;
   else if (path === '/dang-nhap') page = <AccountGate auth={auth}><section className="fil-state">
@@ -196,7 +208,10 @@ export default function Website() {
         </div>
       </header>
       <main id="fil-content" ref={contentRef} className="fil-content" tabIndex={-1}>
-        <Suspense fallback={<p className="fil-state" role="status">Đang tải trang…</p>}>{page}</Suspense>
+        <Suspense fallback={<p className="fil-state" role="status">Đang tải trang…</p>}>
+          {page}
+          <FinishStartup waitingForSession={auth.status === 'loading'} />
+        </Suspense>
       </main>
     </div>
   );

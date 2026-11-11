@@ -23,7 +23,10 @@ function NotebookMenu({ notebook, onRename, onArchive }) {
   </DropdownMenu.Root>;
 }
 
-export default function Homepage({ user, query, view, conversations = [], onUpdateConversations, onNavigate, onClearSearch }) {
+export default function Homepage({
+  user, query, view, conversations = [], onCreateConversation, onUpdateConversation,
+  conversationError, conversationsLoading, onRetryConversations, onNavigate, onClearSearch,
+}) {
   const storageKey = `fil_saved_specialties_v1:${user?.id || 'guest'}`;
   const [saved, setSaved] = useState(() => readSaved(storageKey));
   const [expanded, setExpanded] = useState(false);
@@ -32,6 +35,9 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
   const [name, setName] = useState('');
   const [specialtyId, setSpecialtyId] = useState('');
   const [archived, setArchived] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [dialogError, setDialogError] = useState('');
+  const [notebookError, setNotebookError] = useState('');
   const [canScroll, setCanScroll] = useState({ back: false, forward: true });
   const stripRef = useRef(null);
   const nameInputRef = useRef(null);
@@ -72,32 +78,42 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
 
   function newNotebook() {
     if (!user) { onNavigate('/dang-nhap'); return; }
-    setName(''); setSpecialtyId(''); setDialog({ type: 'new' });
+    setName(''); setSpecialtyId(''); setDialogError(''); setDialog({ type: 'new' });
   }
 
   function renameNotebook(notebook) {
-    setName(notebook.title || ''); setDialog({ type: 'rename', id: notebook.id });
+    setName(notebook.title || ''); setDialogError(''); setDialog({ type: 'rename', id: notebook.id });
   }
 
-  function saveNotebook(event) {
+  async function saveNotebook(event) {
     event.preventDefault();
     const title = name.trim();
-    if (!title || !user || !onUpdateConversations) return;
-    if (dialog.type === 'rename') {
-      onUpdateConversations(previous => previous.map(item => item.id === dialog.id ? { ...item, title } : item));
+    if (!title || !user || !dialog || saving) return;
+    setSaving(true);
+    setDialogError('');
+    try {
+      if (dialog.type === 'rename') {
+        await onUpdateConversation(dialog.id, { title });
+      } else {
+        const notebook = await onCreateConversation({ title, specialty: specialties.find(item => item.id === specialtyId)?.name });
+        onNavigate(notebookHref(notebook.id));
+      }
       setDialog(null);
-      return;
+    } catch (error) {
+      setDialogError(error.message);
+    } finally {
+      setSaving(false);
     }
-    const id = crypto.randomUUID();
-    const now = Date.now();
-    onUpdateConversations(previous => [{ id, title, ownerId: user.id, specialty: specialties.find(item => item.id === specialtyId)?.name || null, messages: [], pinned: false, createdAt: now, updatedAt: now }, ...previous]);
-    setDialog(null);
-    onNavigate(notebookHref(id));
   }
 
-  function archiveNotebook(notebook) {
-    onUpdateConversations(previous => previous.map(item => item.id === notebook.id ? { ...item, archived: true } : item));
-    setArchived(notebook);
+  async function archiveNotebook(notebook, archive = true) {
+    setNotebookError('');
+    try {
+      await onUpdateConversation(notebook.id, { archived: archive });
+      setArchived(archive ? notebook : null);
+    } catch (error) {
+      setNotebookError(error.message);
+    }
   }
 
   return (
@@ -140,7 +156,8 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
           </div>
           <button className="fil-notebook-new" type="button" onClick={newNotebook}><Plus size={21} aria-hidden="true" /> Sổ tay mới</button>
         </div>
-        {archived && <div className="fil-notebook-notice" role="status"><span>Đã lưu trữ “{archived.title}”.</span><button type="button" onClick={() => { onUpdateConversations(previous => previous.map(item => item.id === archived.id ? { ...item, archived: false } : item)); setArchived(null); }}>Hoàn tác</button><button type="button" aria-label="Đóng thông báo" onClick={() => setArchived(null)}><X size={16} aria-hidden="true" /></button></div>}
+        {archived && <div className="fil-notebook-notice" role="status"><span>Đã lưu trữ “{archived.title}”.</span><button type="button" onClick={() => archiveNotebook(archived, false)}>Hoàn tác</button><button type="button" aria-label="Đóng thông báo" onClick={() => setArchived(null)}><X size={16} aria-hidden="true" /></button></div>}
+        {(notebookError || conversationError) && <p className="fil-doc-status" role="alert">{notebookError || conversationError} {conversationError && <button type="button" onClick={onRetryConversations}>Tải lại</button>}</p>}
         {recent.length ? <ul className={`fil-recent-grid ${view === 'list' ? 'is-list' : ''}`}>
           {recent.map(notebook => {
             const specialty = specialties.find(item => item.name === notebook.specialty);
@@ -149,12 +166,12 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
             return <li key={notebook.id} className="fil-recent-card">
               <a href={notebookHref(notebook.id)} onClick={follow} aria-label={`Mở sổ tay ${notebook.title || 'Chưa đặt tên'}`}>
                 <span className={`fil-recent-symbol ${specialty ? `fil-symbol-${specialty.color}` : ''}`}><Icon size={31} strokeWidth={1.6} aria-hidden="true" /></span>
-                <div className="fil-recent-copy"><h3>{notebook.title || 'Chưa đặt tên'}</h3><span className="fil-recent-meta">{time ? <time dateTime={new Date(time).toISOString()}>{new Date(time).toLocaleDateString('vi-VN', { day: 'numeric', month: 'short', year: 'numeric' })}</time> : <span>Chưa có hoạt động</span>}<span aria-hidden="true"> · </span><span>{citedSourceCount(notebook)} nguồn đã trích dẫn</span></span></div>
+                <div className="fil-recent-copy"><h3>{notebook.title || 'Chưa đặt tên'}</h3><span className="fil-recent-meta">{time ? <time dateTime={new Date(time).toISOString()}>{new Date(time).toLocaleDateString('vi-VN', { day: 'numeric', month: 'short', year: 'numeric' })}</time> : <span>Chưa có hoạt động</span>}{notebook.messages && <><span aria-hidden="true"> · </span><span>{citedSourceCount(notebook)} nguồn đã trích dẫn</span></>}</span></div>
               </a>
               <NotebookMenu notebook={notebook} onRename={renameNotebook} onArchive={archiveNotebook} />
             </li>;
           })}
-        </ul> : <div className="fil-recent-empty">
+        </ul> : conversationsLoading ? <div className="fil-recent-empty" role="status">Đang tải sổ tay…</div> : <div className="fil-recent-empty">
           {query.trim() ? <Search size={28} aria-hidden="true" /> : <Clock3 size={28} aria-hidden="true" />}
           <h3>{query.trim() && allRecent.length ? 'Không tìm thấy sổ tay phù hợp' : 'Chưa có sổ tay gần đây'}</h3>
           <p>{query.trim() && allRecent.length ? 'Thử tên khác hoặc xóa tìm kiếm.' : user ? 'Tạo sổ tay mới hoặc mở một chuyên khoa để bắt đầu. Các cuộc trò chuyện của bạn sẽ xuất hiện tại đây.' : 'Đăng nhập để tạo sổ tay và tiếp tục các cuộc trò chuyện của bạn.'}</p>
@@ -162,14 +179,15 @@ export default function Homepage({ user, query, view, conversations = [], onUpda
         </div>}
       </section>
 
-      <Dialog.Root open={Boolean(dialog)} onOpenChange={open => { if (!open) setDialog(null); }}>
+      <Dialog.Root open={Boolean(dialog)} onOpenChange={open => { if (!open && !saving) setDialog(null); }}>
         <Dialog.Portal><Dialog.Overlay className="fil-notebook-dialog-overlay" /><Dialog.Content className="fil-notebook-dialog" aria-describedby="notebook-dialog-description" onOpenAutoFocus={event => { event.preventDefault(); nameInputRef.current?.focus(); }}>
           <Dialog.Title>{dialog?.type === 'rename' ? 'Đổi tên sổ tay' : 'Tạo sổ tay mới'}</Dialog.Title>
           <Dialog.Description id="notebook-dialog-description">{dialog?.type === 'rename' ? 'Chọn một tên dễ tìm lại.' : 'Lưu câu hỏi và các nguồn trích dẫn trong một cuộc trò chuyện.'}</Dialog.Description>
           <Dialog.Close className="fil-notebook-dialog-close" aria-label="Đóng"><X size={20} aria-hidden="true" /></Dialog.Close>
-          <form onSubmit={saveNotebook}><label htmlFor="notebook-name">Tên sổ tay</label><input ref={nameInputRef} id="notebook-name" value={name} onChange={event => setName(event.target.value)} maxLength={150} required autoComplete="off" placeholder="Ví dụ: Ca lâm sàng tim mạch" />
+          <form onSubmit={saveNotebook}><label htmlFor="notebook-name">Tên sổ tay</label><input ref={nameInputRef} id="notebook-name" value={name} onChange={event => setName(event.target.value)} maxLength={100} required autoComplete="off" placeholder="Ví dụ: Ca lâm sàng tim mạch" />
             {dialog?.type === 'new' && <><label htmlFor="notebook-specialty">Chuyên khoa (không bắt buộc)</label><select id="notebook-specialty" value={specialtyId} onChange={event => setSpecialtyId(event.target.value)}><option value="">Y khoa tổng quát</option>{specialties.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></>}
-            <div className="fil-notebook-dialog-actions"><Dialog.Close className="fil-button fil-button-secondary" type="button">Hủy</Dialog.Close><button className="fil-button" type="submit" disabled={!name.trim()}>{dialog?.type === 'rename' ? 'Lưu tên' : 'Tạo sổ tay'}</button></div>
+            {dialogError && <p role="alert" className="fil-doc-status">{dialogError}</p>}
+            <div className="fil-notebook-dialog-actions"><Dialog.Close className="fil-button fil-button-secondary" type="button" disabled={saving}>Hủy</Dialog.Close><button className="fil-button" type="submit" disabled={!name.trim() || saving}>{saving ? 'Đang lưu…' : dialog?.type === 'rename' ? 'Lưu tên' : 'Tạo sổ tay'}</button></div>
           </form>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>

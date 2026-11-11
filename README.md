@@ -105,7 +105,7 @@ feedback. No external database is needed.
 
 ## Running it
 
-Requirements for the website: Python 3 and Node.js. Configure a DeepSeek API key in
+Requirements for the website: Python 3.11+ and Node.js. Configure a DeepSeek API key in
 `.env` (`DEEPSEEK_API_KEY=...`) for AI answers and diagnosis. OCR workflows also
 use Tesseract with the Vietnamese language pack.
 
@@ -117,12 +117,19 @@ Then open http://127.0.0.1:3000. Operational details are in `RUNBOOK.md`;
 deployment notes (frontend on Vercel, backend on a server with a persistent
 disk) are in `DEPLOY_VERCEL.md`.
 
-The medical Q&A page (`/hoi-dap`) greets the signed-in doctor and uses a compact
-chat composer. Its source panel supports PDF upload and selecting one or more
-documents for retrieval; clearing the selection searches no local documents.
-Web search runs automatically when the backend advertises available web tools.
-The API still accepts the legacy single-document scope and requests without a
-source selection.
+The medical Q&A page (`/hoi-dap`) uses Workchat. Conversations are saved per
+account in `backend/data/workchat.db`. The plus menu can create case-note and
+consultation outlines even when no PDF or model key is configured. Medical
+answers require selected, approved PDF sources; when only excerpts are
+available, the page shows them with their original page links.
+
+PDFs added from the Q&A source panel become available after ingestion. Existing
+books remain outside the Workchat source list unless their manifest names are
+explicitly added to `WORKCHAT_SOURCE_NAMES` (a comma-separated list in the server
+environment). Document permissions still apply. Workchat's model receives the
+question, bounded conversation context and authorized excerpts when selected
+sources are present. Use de-identified text and appropriate reference PDFs.
+See the [Workchat research and implementation notes](docs/clinical-workchat-architecture-research.md).
 
 The homepage uses a specialty notebook gallery with twelve specialties, four
 illustrated covers, accent-insensitive search, grid/list views and bookmarks

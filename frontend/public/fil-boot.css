@@ -1,0 +1,153 @@
+:root {
+  --boot-base: #eaf6f4;
+  --boot-edge: #f5faf9;
+  --boot-ink: #12383f;
+  --boot-muted: #40646a;
+  --boot-accent: #087783;
+  --boot-signal: #009885;
+  --boot-halo: #8ddcd4;
+  --boot-line: #147d8435;
+  --boot-track: #8cbdbe62;
+  --boot-surface: #f8fffd99;
+}
+
+html.dark {
+  --boot-base: #081f2b;
+  --boot-edge: #05141f;
+  --boot-ink: #edfaf9;
+  --boot-muted: #a9c9ce;
+  --boot-accent: #84e7e0;
+  --boot-signal: #54e4c5;
+  --boot-halo: #126072;
+  --boot-line: #7ce6e14a;
+  --boot-track: #6ba4a857;
+  --boot-surface: #142f3bd9;
+}
+
+html, body { margin: 0; min-height: 100%; background: var(--boot-base); }
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  overflow: auto;
+  isolation: isolate;
+  box-sizing: border-box;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(19px, env(safe-area-inset-bottom));
+  color: var(--boot-ink);
+  background:
+    radial-gradient(ellipse 32rem 29rem at 50% 37%, var(--boot-halo), transparent 96%),
+    radial-gradient(ellipse 78% 80% at 50% 38%, var(--boot-base) 30%, var(--boot-edge) 100%);
+  text-align: center;
+  font-family: "Be Vietnam Pro", system-ui, "Segoe UI", sans-serif;
+}
+#boot[hidden], #boot [hidden] { display: none; }
+.boot-field { position: absolute; inset: 0; pointer-events: none; z-index: -1; overflow: hidden; }
+.boot-field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--boot-line) 1px, transparent 1px);
+  background-size: 23px 23px;
+  mask-image: radial-gradient(ellipse at 50% 37%, #000 5%, transparent 74%);
+  opacity: .62;
+}
+.boot-star {
+  position: absolute;
+  width: var(--size, 15px);
+  aspect-ratio: 1;
+  background: var(--boot-accent);
+  opacity: var(--opacity, .56);
+  clip-path: polygon(50% 0, 64% 36%, 100% 50%, 64% 64%, 50% 100%, 36% 64%, 0 50%, 36% 36%);
+}
+.boot-star:nth-child(1) { left: 14%; top: 27%; --size: 19px; }
+.boot-star:nth-child(2) { left: 23%; top: 56%; --size: 9px; --opacity: .37; }
+.boot-star:nth-child(3) { right: 17%; top: 21%; --size: 22px; }
+.boot-star:nth-child(4) { right: 11%; top: 57%; --size: 11px; --opacity: .36; }
+.boot-star:nth-child(5) { right: 28%; bottom: 14%; --size: 7px; }
+.boot-star:nth-child(6) { left: 31%; top: 16%; --size: 9px; --opacity: .32; }
+.boot-main { align-self: center; display: grid; justify-items: center; padding-block: 5px 19px; }
+.boot-orbit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: clamp(186px, min(52vh, 64vw), 430px);
+  aspect-ratio: 1;
+  margin-bottom: clamp(5px, 2.2vh, 22px);
+}
+.boot-orbit::before, .boot-orbit::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid var(--boot-line);
+  pointer-events: none;
+}
+.boot-orbit::before { inset: 7%; box-shadow: inset 0 0 32px var(--boot-line); }
+.boot-orbit::after { inset: 17%; box-shadow: 0 0 0 12px var(--boot-line); }
+.boot-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px dashed var(--boot-line);
+  animation: fil-boot-orbit 14s linear infinite;
+}
+.boot-ring::before, .boot-ring::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 4px);
+  width: 8px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--boot-signal);
+  box-shadow: 0 0 17px var(--boot-signal);
+}
+.boot-ring::before { top: -4px; }
+.boot-ring::after { bottom: -4px; opacity: .55; }
+.boot-assistant { position: relative; width: 83%; height: auto; z-index: 1; }
+.boot-brand { margin: 0; font-size: clamp(2.3rem, 5.5vw, 4.25rem); font-weight: 750; line-height: 1.06; letter-spacing: -.058em; }
+.boot-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 13px 0 0;
+  border: 1px solid var(--boot-line);
+  border-radius: 99px;
+  padding: 7px 15px;
+  background: var(--boot-surface);
+  color: var(--boot-accent);
+  font-size: .84rem;
+  font-weight: 650;
+}
+.boot-subtitle::before {
+  content: "";
+  width: 7px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--boot-signal);
+  box-shadow: 0 0 0 4px var(--boot-line);
+}
+.boot-track {
+  width: min(238px, 64vw);
+  height: 4px;
+  margin-top: clamp(20px, 4vh, 34px);
+  border-radius: 10px;
+  background: var(--boot-track);
+  overflow: hidden;
+}
+.boot-bar { width: 40%; height: 100%; border-radius: inherit; background: var(--boot-accent); animation: fil-boot-slide 1.65s ease-in-out infinite; }
+.boot-status { min-height: 1.5em; margin: 12px 0 0; color: var(--boot-muted); font-size: .87rem; line-height: 1.5; }
+.boot-retry { margin-top: 9px; min-height: 44px; padding: 0 16px; border: 1px solid var(--boot-line); border-radius: 20px; color: var(--boot-ink); background: var(--boot-surface); font: inherit; cursor: pointer; }
+.boot-retry:focus-visible { outline: 2px solid var(--boot-accent); outline-offset: 4px; }
+.boot-footer { align-self: end; color: var(--boot-muted); font-size: .76rem; line-height: 1.4; }
+@keyframes fil-boot-orbit { to { transform: rotate(360deg); } }
+@keyframes fil-boot-slide { from { transform: translateX(-108%); } to { transform: translateX(260%); } }
+@media (max-height: 520px) {
+  .boot-orbit { width: clamp(145px, 44vh, 225px); }
+  .boot-track { margin-top: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot-ring, .boot-bar { animation: none; }
+  .boot-bar { margin-inline: auto; }
+}

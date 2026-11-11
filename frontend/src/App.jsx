@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
-import { readSseStream } from './lib/sse';
+import { sendWorkchatTurn } from './lib/workchat';
 import { findMatches, bestAnchor } from './lib/fold';
 import PageViewer from './components/PageViewer';
 import AttachmentCard from './components/AttachmentCard';
@@ -19,6 +19,7 @@ import QueryUnderstood from './components/QueryUnderstood';
 import CoverageChecklist from './components/CoverageChecklist';
 import Pagination from './components/Pagination';
 import DiagnosisTreeView from './components/DiagnosisTreeView';
+import { WorkchatActivity, WorkchatReply } from './components/WorkchatReply';
 import { apiJson, apiSend } from './lib/apiClient';
 import {
   AlertCircle,
@@ -34,6 +35,7 @@ import {
   Eye,
   Globe,
   FileText,
+  ClipboardList,
   History,
   Layers,
   Loader2,
@@ -66,7 +68,7 @@ const MAX_PINNED_CONVERSATIONS = 3;
 
 
 export default function App({ user, settings, clinical, activeTab, onOpenChat, specialty, onClearSpecialty, conversationId, onConversationChange }) {
-  const { documents, config, conversations, setConversations, apiKey } = clinical;
+  const { documents, config, conversations, setLegacyConversations, apiKey } = clinical;
   const doctorName = user?.display_name || user?.username || '';
   const greetingName = doctorName.replace(/^(?:BS\.?|Bác sĩ)\s*/iu, '').trim();
   const [excludedSources, setExcludedSources] = useState(() => new Set());
@@ -83,7 +85,6 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setChatScope(null);
     setExcludedSources(selected ? new Set() : new Set(documents.map(doc => doc.doc_name)));
   }
-  const webSearchTools = config?.web_search_tools || [];
   const goToChat = () => {
     if (activeTab !== 'chat') onOpenChat();
   };
@@ -93,7 +94,8 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   const [deleteDocTarget, setDeleteDocTarget] = useState(null);
   const [deletingDocument, setDeletingDocument] = useState(false);
   const activeConversationRef = useRef(null);
-  const openedConversationRequest = useRef(null);
+  const detailRequest = useRef(null);
+  const retryTurn = useRef(null);
   const readerCardRef = useRef(null);
   const readerRequest = useRef(0);
   const draftVersion = useRef(0);
@@ -102,6 +104,9 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   // Core Data State
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingTurn, setPendingTurn] = useState(null);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState('');
   const [documentPreview, setDocumentPreview] = useState(null);
   // Reader: mặc định xem TRANG GỐC có tô sáng đoạn trích dẫn (PageViewer);
   // bật cái này để đọc bản chữ OCR thay vì ảnh.
@@ -202,23 +207,26 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   const [sharing, setSharing] = useState(false);
   const renameInputRef = useRef(null);
 
-  // Cuộc trò chuyện mới bắt đầu trống — không còn tin nhắn chào mẫu.
-  const [draftWelcome, setDraftWelcome] = useState(() => []);
-
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
-  const messages = activeConversation ? activeConversation.messages : draftWelcome;
+  const committed = activeConversation?.messages || [];
+  const messages = pendingTurn && pendingTurn.id === activeConversationId
+    ? [...committed, pendingTurn.user, pendingTurn.assistant] : committed;
   const activeSpecialty = activeConversation ? activeConversation.specialty || null : specialty?.name;
+  const archivedConversation = !!activeConversation?.archived;
 
   useEffect(() => {
-    if (!activeConversationId || activeConversation) return;
+    if (activeConversationId && !activeConversation && !threadLoading && !threadError) handleNewChat();
+  }, [activeConversationId, activeConversation, threadLoading, threadError]);
+
+  useEffect(() => () => {
+    searchAbortRef.current?.abort();
+    detailRequest.current?.abort();
     activeConversationRef.current = null;
-    readerRequest.current += 1;
-    setActiveConversationId(null);
-    setActiveSources([]);
-    setActiveLogId(null);
-    setActivePage(null);
-    setSelectedSourceIndex(0);
-  }, [activeConversationId, activeConversation]);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'chat') searchAbortRef.current?.abort();
+  }, [activeTab]);
 
   const chatEndRef = useRef(null);
 
@@ -266,35 +274,6 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
 
   // --- Conversation management (ChatGPT-style: New chat + sidebar list are one and the same) ---
 
-  const createConversationTitle = (text) => {
-    const trimmed = text.trim().replace(/\s+/g, ' ');
-    return trimmed.length > 42 ? `${trimmed.slice(0, 42)}…` : trimmed;
-  };
-
-  // Appends a message to a specific conversation immutably; used for both the user turn and the assistant reply
-  const appendMessageToConversation = (convId, message) => {
-    setConversations(prev => prev.map(c => (
-      c.id === convId ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() } : c
-    )));
-  };
-
-  /**
-   * Sửa tin nhắn CUỐI của một cuộc trò chuyện.
-   *
-   * Câu trả lời tra cứu y văn về theo luồng, nên bong bóng trả lời được tạo
-   * rỗng trước rồi lớn dần. `patch` nhận tin nhắn hiện tại và trả về tin nhắn
-   * mới, chứ không phải một object trộn vào — nối chữ cần đọc giá trị cũ, và
-   * đọc nó từ state bên ngoài sẽ lấy phải bản cũ giữa lúc các mẩu chữ về dồn.
-   */
-  const patchLastMessage = (convId, patch) => {
-    setConversations(prev => prev.map(c => {
-      if (c.id !== convId || c.messages.length === 0) return c;
-      const messages = c.messages.slice();
-      messages[messages.length - 1] = patch(messages[messages.length - 1]);
-      return { ...c, messages, updatedAt: Date.now() };
-    }));
-  };
-
   /** Gửi một nhãn phản hồi; lỗi mạng thì bỏ qua — đây là đo lường, không chặn bác sĩ. */
   const sendFeedback = (logId, kind, sourceIndex = null) => {
     if (!logId) return Promise.resolve(false);
@@ -310,8 +289,8 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     const msg = conv?.messages[index];
     if (!msg?.logId) return;
     const next = msg.rating === rating ? null : rating;
-    setConversations(prev => prev.map(c => {
-      if (c.id !== convId) return c;
+    setLegacyConversations(prev => prev.map(c => {
+      if (c.id !== convId || c.ownerId !== user?.id) return c;
       const messages = c.messages.slice();
       messages[index] = { ...messages[index], rating: next };
       return { ...c, messages };
@@ -329,69 +308,77 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     });
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = (updateLocation = true) => {
     draftVersion.current += 1;
+    searchAbortRef.current?.abort();
+    detailRequest.current?.abort();
+    setThreadLoading(false);
+    setThreadError('');
     setChatScope(null);
     if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
     activeConversationRef.current = null;
     readerRequest.current += 1;
     setActiveConversationId(null);
-    setDraftWelcome([]);
     setActiveSources([]);
     setActiveLogId(null);
     setActivePage(null);
     setSelectedSourceIndex(0);
     setQuery('');
-    if (onConversationChange) onConversationChange(null); else goToChat();
+    if (updateLocation && onConversationChange) onConversationChange(null);
   };
 
-  const handleSelectConversation = (id, updateLocation = true) => {
+  const handleSelectConversation = async (id, updateLocation = true) => {
     if (renamingConvId === id) return; // don't switch away while editing the title
+    if (searchAbortRef.current && id === activeConversationRef.current) return;
     if (id !== activeConversationRef.current) {
       draftVersion.current += 1;
+      searchAbortRef.current?.abort();
       setChatScope(null);
       setQuery('');
     }
+    detailRequest.current?.abort();
+    const controller = new AbortController();
+    detailRequest.current = controller;
     activeConversationRef.current = id;
     readerRequest.current += 1;
     setActiveConversationId(id);
+    setThreadLoading(true);
+    setThreadError('');
     if (!window.matchMedia('(min-width: 1100px)').matches) setHistoryOpen(false);
-    if (updateLocation && onConversationChange) onConversationChange(id); else goToChat();
-    const conv = conversations.find(c => c.id === id);
-    const lastWithSources = conv ? [...conv.messages].reverse().find(m => m.sources && m.sources.length > 0) : null;
-    if (lastWithSources) {
-      setActiveSources(lastWithSources.sources);
-      setActiveLogId(lastWithSources.logId || null);
-      setSelectedSourceIndex(0);
-    } else {
-      setActiveSources([]);
-      setActiveLogId(null);
-    }
+    if (updateLocation) onConversationChange?.(id);
+    setActiveSources([]);
+    setActiveLogId(null);
     setActivePage(null);
+    try {
+      const conv = await clinical.readConversation(id, { signal: controller.signal });
+      if (!conv) throw new Error('Không tìm thấy cuộc trò chuyện.');
+      if (controller.signal.aborted) return;
+      const lastAssistant = [...(conv.messages || [])].reverse().find(m => m.role === 'assistant');
+      setActiveSources(lastAssistant?.sources || []);
+      setActiveLogId(lastAssistant?.logId || null);
+      setSelectedSourceIndex(0);
+    } catch (error) {
+      if (!controller.signal.aborted) setThreadError(error.message);
+    } finally {
+      if (!controller.signal.aborted) setThreadLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (!conversationId) { openedConversationRequest.current = null; return; }
-    if (openedConversationRequest.current === conversationId) return;
-    const notebook = conversations.find(item => item.id === conversationId && !item.archived && (!item.ownerId || item.ownerId === user?.id));
-    if (!notebook) return;
-    openedConversationRequest.current = conversationId;
-    handleSelectConversation(conversationId, false);
-  }, [conversationId, conversations, user?.id]);
+    if (activeTab !== 'chat' || (conversationId || null) === activeConversationRef.current) return;
+    if (conversationId) handleSelectConversation(conversationId, false);
+    else handleNewChat(false);
+  }, [conversationId, activeTab]);
 
-  const handleTogglePin = (id) => {
-    setConversations(prev => {
-      const conv = prev.find(c => c.id === id);
-      if (!conv) return prev;
-      if (!conv.pinned) {
-        const pinnedCount = prev.filter(c => c.pinned).length;
-        if (pinnedCount >= MAX_PINNED_CONVERSATIONS) {
-          showStatus('info', `Chỉ có thể ghim tối đa ${MAX_PINNED_CONVERSATIONS} cuộc trò chuyện.`);
-          return prev;
-        }
-      }
-      return prev.map(c => (c.id === id ? { ...c, pinned: !c.pinned } : c));
-    });
+  const handleTogglePin = async (id) => {
+    const conv = conversations.find(c => c.id === id);
+    if (!conv) return;
+    if (!conv.pinned && conversations.filter(c => c.pinned && !c.archived).length >= MAX_PINNED_CONVERSATIONS) {
+      showStatus('info', `Chỉ có thể ghim tối đa ${MAX_PINNED_CONVERSATIONS} cuộc trò chuyện.`);
+      return;
+    }
+    try { await clinical.updateConversation(id, { pinned: !conv.pinned }); }
+    catch (error) { showStatus('error', error.message); }
   };
 
   const startRenameConversation = (conv) => {
@@ -399,15 +386,14 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setRenameDraft(conv.title);
   };
 
-  const commitRenameConversation = () => {
-    if (renamingConvId) {
-      const trimmed = renameDraft.trim();
-      if (trimmed) {
-        setConversations(prev => prev.map(c => (c.id === renamingConvId ? { ...c, title: trimmed } : c)));
-      }
-    }
+  const commitRenameConversation = async () => {
+    const id = renamingConvId;
+    const title = renameDraft.trim();
     setRenamingConvId(null);
     setRenameDraft('');
+    if (!id || !title) return;
+    try { await clinical.updateConversation(id, { title }); }
+    catch (error) { showStatus('error', error.message); }
   };
 
   const cancelRenameConversation = () => {
@@ -415,14 +401,16 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
     setRenameDraft('');
   };
 
-  const confirmDeleteConversation = () => {
+  const confirmDeleteConversation = async () => {
     if (!deleteTargetId) return;
-    setConversations(prev => prev.filter(c => c.id !== deleteTargetId));
-    if (activeConversationId === deleteTargetId) {
-      handleNewChat();
+    try {
+      await clinical.removeConversation(deleteTargetId);
+      if (activeConversationId === deleteTargetId) handleNewChat();
+      setDeleteTargetId(null);
+      showStatus('success', 'Đã xóa cuộc trò chuyện.');
+    } catch (error) {
+      showStatus('error', error.message);
     }
-    setDeleteTargetId(null);
-    showStatus('success', 'Đã xóa cuộc trò chuyện.');
   };
 
   const handleShareConversation = async (conv) => {
@@ -465,6 +453,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
               ref={renameInputRef}
               className="conv-item-rename-input"
               value={renameDraft}
+              maxLength={100}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setRenameDraft(e.target.value)}
               onBlur={commitRenameConversation}
@@ -509,10 +498,10 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                     <PencilLine size={14} />
                     Đổi tên
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleShareConversation(conv)}>
+                  {conv.storage !== 'workchat' && <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => handleShareConversation(conv)}>
                     <Share2 size={14} />
                     Chia sẻ
-                  </DropdownMenu.Item>
+                  </DropdownMenu.Item>}
                   <DropdownMenu.Separator className="dropdown-menu-separator" />
                   <DropdownMenu.Item
                     className="dropdown-menu-item danger"
@@ -528,161 +517,88 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
         </motion.div>
   );
 
-  // Chat search (uses LLM) — creates a new conversation on the first message of a draft chat
-  const handleSearch = async (searchQuery) => {
-    const q = searchQuery || query;
-    if (!q.trim() || searchAbortRef.current) return;
-
-    goToChat();
-
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    // Tài liệu đính kèm thuộc về CÂU HỎI NÀY (như ChatGPT): gửi xong thì thẻ
-    // trong ô nhập biến mất, còn tin nhắn đã gửi giữ thẻ để biết câu nào hỏi
-    // riêng trong sách nào.
-    const attachment = chatScope;
-    draftVersion.current += 1;
-    readerRequest.current += 1;
-    setActiveSources([]);
-    setActivePage(null);
-    setActiveLogId(null);
-    const userMsg = { role: 'user', text: q, time: timeStr, ...(attachment ? { attachment } : {}) };
-    setChatScope(null);
-
-    let convId = activeConversationId;
-    if (!convId) {
-      convId = uid();
-      const newConversation = {
-        id: convId,
-        title: createConversationTitle(q),
-        ownerId: user?.id,
-        specialty: activeSpecialty || null,
-        messages: [userMsg],
-        pinned: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      setConversations(prev => [newConversation, ...prev]);
-      activeConversationRef.current = convId;
-      setActiveConversationId(convId);
-      onConversationChange?.(convId);
-    } else {
-      appendMessageToConversation(convId, userMsg);
+  const handleSearch = async (searchQuery, mode = 'ask') => {
+    const q = (typeof searchQuery === 'string' ? searchQuery : query).trim();
+    if (!q || searchAbortRef.current || threadLoading || threadError || archivedConversation) return;
+    if (mode === 'ask' && (clinical.documentsLoading || clinical.documentError)) return;
+    if (q.length > 6000) {
+      showStatus('error', 'Câu hỏi dài tối đa 6.000 ký tự.');
+      return;
     }
-
-    setQuery('');
-    setLoading(true);
-
-    // Bong bóng trả lời được tạo NGAY, còn rỗng, rồi lớn dần theo luồng. Nhờ
-    // vậy khối trích dẫn hiện lên trước khi mô hình nói được chữ nào — đo được
-    // nguồn về sau ~80ms còn chữ đầu tiên sau ~890ms.
-    appendMessageToConversation(convId, {
-      role: 'assistant',
-      text: '',
-      sources: [],
-      time: timeStr,
-      streaming: true
-    });
-
+    goToChat();
     const controller = new AbortController();
     searchAbortRef.current = controller;
-
+    const version = draftVersion.current;
+    const attachment = mode === 'ask' ? chatScope : null;
+    let id = activeConversation?.storage === 'workchat' ? activeConversation.id : null;
+    setLoading(true);
     try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (apiKey) {
-        headers['X-DeepSeek-Key'] = apiKey;
+      if (!id) {
+        const created = await clinical.createConversation({
+          title: mode === 'case_outline' ? 'Ghi chú ca bệnh' : mode === 'consult_outline' ? 'Chuẩn bị hội chẩn' : 'Cuộc trò chuyện mới',
+          specialty: activeSpecialty,
+        }, { signal: controller.signal });
+        if (controller.signal.aborted || version !== draftVersion.current) return;
+        id = created.id;
+        activeConversationRef.current = id;
+        setActiveConversationId(id);
+        onConversationChange?.(id);
       }
-
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          query: activeSpecialty ? `Chuyên khoa: ${activeSpecialty}.\n${q}` : q,
-          created_by: doctorName,
-          web: webSearchTools.length > 0,
-          doc_names: attachment ? [attachment.doc_name] : selectedSourceNames,
-          doc_name: attachment?.doc_name || null,
-          near_page: attachment?.page_num || null,
-        }),
-        signal: controller.signal
+      const body = {
+        question: q, mode,
+        doc_names: mode !== 'ask' ? [] : attachment ? [attachment.doc_name] : selectedSourceNames,
+        near_page: attachment ? attachment.page_num || readerMinPage(attachment.doc_name) || 1 : null,
+      };
+      const signature = id + JSON.stringify(body);
+      const requestId = retryTurn.current?.signature === signature ? retryTurn.current.id : uid();
+      retryTurn.current = { signature, id: requestId };
+      if (mode === 'ask') {
+        setQuery('');
+        setChatScope(null);
+      }
+      readerRequest.current += 1;
+      setActiveSources([]);
+      setActivePage(null);
+      setActiveLogId(null);
+      const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      setPendingTurn({
+        id,
+        user: { role: 'user', text: q, time, attachment, turnId: requestId },
+        assistant: { role: 'assistant', pending: true, time, turnId: requestId, statusNote: 'Đang chuẩn bị lượt hỏi…' },
       });
-
-      if (!res.ok) {
-        // Lỗi trước khi luồng bắt đầu (401, 400) vẫn là JSON như cũ.
-        let detail = 'Yêu cầu tìm kiếm thất bại.';
-        try {
-          const errorData = await res.json();
-          detail = errorData.detail || detail;
-        } catch { /* thân không phải JSON: giữ câu mặc định */ }
-        throw new Error(detail);
-      }
-
-      await readSseStream(res, (event, data) => {
-        if (event === 'status') {
-          patchLastMessage(convId, m => ({ ...m, statusNote: data.message }));
-        } else if (event === 'sources') {
-          const sources = data.sources || [];
-          patchLastMessage(convId, m => ({ ...m, sources, statusNote: null }));
-          if (activeConversationRef.current === convId) {
-            setActiveLogId(null);
-            setActiveSources(sources);
-            setSelectedSourceIndex(0);
-            setActivePage(null);
-          }
-        } else if (event === 'query_normalized') {
-          patchLastMessage(convId, m => ({ ...m, normalized: data }));
-        } else if (event === 'query_understood') {
-          patchLastMessage(convId, m => ({ ...m, understood: data }));
-        } else if (event === 'coverage') {
-          patchLastMessage(convId, m => ({ ...m, coverage: data.items || [] }));
-        } else if (event === 'verify') {
-          patchLastMessage(convId, m => ({ ...m, verify: data }));
-        } else if (event === 'done') {
-          if (settings.notifyEnabled && document.visibilityState !== 'visible') {
-            clinical.addNotification('Tra cứu y khoa đã hoàn tất.');
-          }
-          if (data.log_id) {
-            patchLastMessage(convId, m => ({ ...m, logId: data.log_id }));
-            if (activeConversationRef.current === convId) setActiveLogId(data.log_id);
-          }
-        } else if (event === 'delta') {
-          patchLastMessage(convId, m => ({ ...m, text: m.text + data.text }));
-        } else if (event === 'error') {
-          // KHÔNG xoá trích dẫn đã nhận. `degraded` nghĩa là các trang sách vẫn
-          // dùng được, chỉ phần diễn giải của mô hình là không có — bác sĩ vẫn
-          // đọc được sách, đó là điểm quan trọng nhất của cả đợt này.
-          patchLastMessage(convId, m => ({
-            ...m,
-            errorMessage: data.message,
-            errorDetail: data.detail || null,
-            degraded: !!data.degraded,
-            statusNote: null
-          }));
-        }
+      const { thread, turn } = await sendWorkchatTurn(id, { ...body, request_id: requestId }, {
+        apiKey, signal: controller.signal,
+        onStatus: data => setPendingTurn(pending => pending?.id === id
+          ? { ...pending, assistant: { ...pending.assistant, statusNote: data.message } } : pending),
       });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        // Bác sĩ tự bấm dừng. Giữ lại chữ và trích dẫn đã về được.
-        patchLastMessage(convId, m => ({ ...m, cancelled: true }));
-      } else {
-        console.error(err);
-        patchLastMessage(convId, m => ({
-          ...m,
-          errorMessage: err.message,
-          degraded: (m.sources || []).length > 0
-        }));
+      clinical.acceptTurn(thread, turn);
+      retryTurn.current = null;
+      if (activeConversationRef.current === id) {
+        setActiveSources(turn.reply.sources || []);
+        setSelectedSourceIndex(0);
       }
+      if (settings.notifyEnabled && document.visibilityState !== 'visible') {
+        clinical.addNotification('Lượt hỏi y khoa đã hoàn tất.');
+      }
+    } catch (error) {
+      if (version !== draftVersion.current) return;
+      const cancelled = controller.signal.aborted || error.name === 'AbortError';
+      if (mode === 'ask') {
+        setQuery(previous => previous.trim() ? previous : q);
+        if (attachment) setChatScope(previous => previous || attachment);
+      }
+      showStatus(cancelled ? 'info' : 'error',
+        cancelled ? 'Đã dừng. Bạn có thể sửa câu hỏi rồi gửi lại.' : error.message);
     } finally {
-      searchAbortRef.current = null;
-      patchLastMessage(convId, m => ({ ...m, streaming: false }));
-      setLoading(false);
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setPendingTurn(null);
+        setLoading(false);
+      }
     }
   };
 
-  /** Bác sĩ bấm dừng. Đóng kết nối là server dừng gọi mô hình thật. */
-  const handleCancelSearch = () => {
-    if (searchAbortRef.current) searchAbortRef.current.abort();
-  };
+  const handleCancelSearch = () => searchAbortRef.current?.abort();
 
   // AI Drug Lookup (Generates comprehensive clinical report with NotebookLM-style citations)
   const handleDownloadDocument = async (docName) => {
@@ -1408,6 +1324,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
   const askAboutDocument = (src) => {
     if (!src?.doc_name) return;
     const doc = documents.find(d => d.doc_name === src.doc_name);
+    if (!doc) { showStatus('info', 'Tài liệu này chưa có trong nguồn của Hỏi đáp y khoa.'); return; }
     setExcludedSources(new Set(documents.filter(item => item.doc_name !== src.doc_name).map(item => item.doc_name)));
     setChatScope({
       doc_name: src.doc_name,
@@ -1453,6 +1370,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
       setDocumentPreview(preview => preview?.doc_name === doc_name ? null : preview);
       setActivePage(page => page?.doc_name === doc_name ? null : page);
       await clinical.refreshDocuments();
+      if (activeConversation?.storage === 'workchat') await handleSelectConversation(activeConversation.id, false);
       showStatus('success', 'Đã xóa tài liệu.');
     } catch (error) {
       setDeleteDocTarget(null);
@@ -1527,6 +1445,9 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
               <SquarePen size={17} aria-hidden="true" /> Cuộc trò chuyện mới
             </button>
           <div id="fil-chat-history" className="fil-history-panel">
+            {clinical.conversationError && <div className="fil-doc-status" role="alert">
+              {clinical.conversationError} <button type="button" onClick={clinical.refreshConversations}>Tải lại</button>
+            </div>}
             {(() => {
               const visible = conversations
                 .filter(c => !c.archived)
@@ -1561,7 +1482,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                     </button>
                     {recentsOpen && (recents.length === 0 ? (
                       <div className="sidebar-history-empty">
-                        Chưa có cuộc trò chuyện nào.
+                        {clinical.conversationsLoading ? 'Đang tải cuộc trò chuyện…' : 'Chưa có cuộc trò chuyện nào.'}
                       </div>
                     ) : (
                       <AnimatePresence initial={false}>{(showAllRecent ? recents : recents.slice(0, 4)).map(renderConvItem)}</AnimatePresence>
@@ -1705,7 +1626,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
       </Dialog.Root>
 
       <div className="fil-clinical-content">
-        {config && !config.has_api_key && !apiKey && (
+        {activeTab !== 'chat' && config && !config.has_api_key && !apiKey && (
           <div className="alert-banner warning-banner">
             <AlertCircle size={16} aria-hidden="true" />
             <span>Chưa cấu hình khóa AI: câu trả lời AI sẽ không hiển thị, chỉ hiện trang sách.</span>
@@ -1733,14 +1654,27 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                 <h1 className="sr-only">Hỏi đáp y khoa</h1>
               <div className={`chat-panel ${messages.length === 0 ? 'is-empty' : ''}`}>
                 <h2 className="sr-only">{activeConversation?.title || 'Đặt câu hỏi'}</h2>
-                {!messages.length && <div className="fil-qa-empty">
+                {!messages.length && !threadLoading && !threadError && <div className="fil-qa-empty">
                   <h2>Xin chào, bác sĩ{greetingName ? ` ${greetingName}` : ''}</h2>
                 </div>}
 
                 {/* Conversation Scroller */}
-                <div className="chat-messages-container">
-                  {messages.map((msg, index) => (
-                    <div key={index} className={`message-row ${msg.role === 'user' ? 'row-user' : 'row-assistant'}`}>
+                <div className="chat-messages-container" aria-busy={threadLoading}>
+                  {threadLoading && <WorkchatActivity message="Đang tải cuộc trò chuyện…" />}
+                  {threadError && <div className="fil-workchat-notice" role="alert">
+                    <p>{threadError}</p><button type="button" onClick={() => handleSelectConversation(activeConversationId, false)}>Thử lại</button>
+                  </div>}
+                  {archivedConversation && <div className="fil-workchat-notice">
+                    <p>Cuộc trò chuyện đã được lưu trữ.</p>
+                    <button type="button" onClick={async () => {
+                      try { await clinical.updateConversation(activeConversation.id, { archived: false }); }
+                      catch (error) { showStatus('error', error.message); }
+                    }}>Mở lại</button>
+                  </div>}
+                  {activeConversation && activeConversation.storage !== 'workchat' && !threadLoading && !threadError &&
+                    <p className="fil-workchat-history-note">Hội thoại này được lưu trên thiết bị. Câu hỏi tiếp theo sẽ bắt đầu một cuộc trò chuyện mới.</p>}
+                  {!threadLoading && !threadError && messages.map((msg, index) => (
+                    <div key={msg.turnId ? msg.turnId + '-' + msg.role : index} className={`message-row ${msg.role === 'user' ? 'row-user' : 'row-assistant'}`}>
                       <div className={`fil-message-avatar ${msg.role === 'assistant' ? 'fil-assistant-mark' : ''}`} aria-hidden="true">
                         {msg.role === 'assistant' ? <img src="/fil-mark.svg" width="26" height="26" alt="" /> : <UserRound size={19} />}
                       </div>
@@ -1767,14 +1701,16 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                             citationOf={sourceCitation}
                           />
                         )}
-                        {msg.statusNote && (
+                        {msg.pending && <WorkchatActivity message={msg.statusNote} />}
+                        {!msg.pending && msg.statusNote && (
                           <p className="bubble-status" role="status">
                             <Loader2 size={13} className="animate-spin" />
                             {msg.statusNote}
                           </p>
                         )}
-                        <div className="bubble-text">
-                          {msg.role === 'assistant'
+                        {!msg.pending && <div className="bubble-text">
+                          {msg.workchat ? <WorkchatReply reply={msg.workchat} onOpenSource={i => openMessageSource(msg, i)}
+                            onCopy={copyToClipboard} /> : msg.role === 'assistant'
                             ? renderMessageText(msg)
                             : <p className="markdown-paragraph">{msg.text}</p>
                           }
@@ -1786,7 +1722,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                               <span />
                             </div>
                           )}
-                        </div>
+                        </div>}
                         {msg.role === 'assistant' && !msg.streaming && msg.verify && (
                           <NumberCheck verify={msg.verify} />
                         )}
@@ -1817,7 +1753,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                           <p className="bubble-status bubble-status-muted">Đã dừng theo yêu cầu.</p>
                         )}
                         {/* Không ra trang nào là lúc bác sĩ dễ hiểu nhầm nhất. */}
-                        {msg.role === 'assistant' && !msg.streaming && (msg.sources || []).length === 0
+                        {msg.role === 'assistant' && !msg.workchat && !msg.pending && !msg.streaming && (msg.sources || []).length === 0
                           && !msg.errorMessage && !msg.cancelled && indexCoverage().length > 0 && (
                           <div className="coverage-notice" role="note">
                             <BookOpen size={14} />
@@ -1848,12 +1784,12 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                               Dùng lại kết quả đã lưu
                             </span>
                           )}
-                          {msg.role === 'assistant' && (
+                          {msg.role === 'assistant' && msg.text && msg.workchat?.kind !== 'outline' && (
                             <div className="bubble-actions">
                               <button onClick={() => copyToClipboard(msg.text)} title="Sao chép câu trả lời">
                                 <Copy size={13} />
                               </button>
-                              <button
+                              {msg.logId && <><button
                                 title="Hữu ích"
                                 aria-pressed={msg.rating === 'up'}
                                 className={msg.rating === 'up' ? 'is-on' : ''}
@@ -1870,7 +1806,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                                 onClick={() => rateMessage(activeConversationId, index, 'down')}
                               >
                                 <ThumbsDown size={13} />
-                              </button>
+                              </button></>}
                             </div>
                           )}
                           <span className="bubble-time">{msg.time}</span>
@@ -1896,16 +1832,35 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                     </div>
                   )}
                   <div className="fil-composer-line">
-                  <button type="button" className="composer-icon-btn fil-composer-attach"
-                    aria-label="Thêm nguồn và công cụ" title="Thêm nguồn và công cụ" onClick={() => setPickerOpen(true)}>
-                    <Plus size={23} aria-hidden="true" />
-                  </button>
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild><button type="button" className="composer-icon-btn fil-composer-attach"
+                      aria-label="Nguồn và công cụ" title="Nguồn và công cụ">
+                      <Plus size={23} aria-hidden="true" />
+                    </button></DropdownMenu.Trigger>
+                    <DropdownMenu.Portal><DropdownMenu.Content className="dropdown-menu-content fil-workchat-tools" align="start" sideOffset={8}>
+                      <DropdownMenu.Item className="dropdown-menu-item" onSelect={() => setPickerOpen(true)}>
+                        <BookOpen size={16} aria-hidden="true" /> Chọn hoặc thêm nguồn
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator className="dropdown-menu-separator" />
+                      <DropdownMenu.Item className="dropdown-menu-item" disabled={loading || threadLoading || !!threadError || archivedConversation}
+                        onSelect={() => handleSearch('Tạo khung ghi chú ca bệnh', 'case_outline')}>
+                        <ClipboardList size={16} aria-hidden="true" /> Khung ghi chú ca bệnh
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className="dropdown-menu-item" disabled={loading || threadLoading || !!threadError || archivedConversation}
+                        onSelect={() => handleSearch('Tạo khung chuẩn bị hội chẩn', 'consult_outline')}>
+                        <FileText size={16} aria-hidden="true" /> Khung chuẩn bị hội chẩn
+                      </DropdownMenu.Item>
+                    </DropdownMenu.Content></DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                   <textarea
                     ref={chatInputRef}
                     className="input-textarea composer-textarea"
                     aria-label="Câu hỏi tra cứu y văn"
+                    aria-describedby="fil-workchat-privacy"
                     placeholder={isRecording === 'chat' ? 'Đang nghe… hãy nói câu hỏi của bạn' : 'Tôi có thể giúp gì cho bạn hôm nay?'}
                     rows={1}
+                    maxLength={6000}
+                    disabled={threadLoading || !!threadError || archivedConversation}
                     value={query}
                     onChange={(e) => {
                       setQuery(e.target.value);
@@ -1922,6 +1877,7 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                   />
                   {settings.voiceInputEnabled && (
                     <button type="button" className={`composer-icon-btn ${isRecording === 'chat' ? 'recording' : ''}`}
+                      disabled={threadLoading || !!threadError || archivedConversation}
                       onClick={() => handleToggleMic('chat', setQuery, () => handleSearch())}
                       aria-label={isRecording === 'chat' ? 'Dừng ghi âm' : 'Ghi âm giọng nói'}
                       aria-pressed={isRecording === 'chat'}
@@ -1930,16 +1886,21 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                     </button>
                   )}
                   {loading ? (
-                    <button type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={handleCancelSearch}>
+                    <button key="cancel" type="button" className="composer-send" aria-label="Dừng tra cứu" onClick={event => {
+                      event.preventDefault();
+                      handleCancelSearch();
+                    }}>
                       <span className="composer-stop-square" aria-hidden="true" />
                     </button>
                   ) : (
-                    <button type="submit" className="composer-send" aria-label="Gửi câu hỏi" disabled={!query.trim()}>
+                    <button key="send" type="submit" className="composer-send" aria-label="Gửi câu hỏi"
+                      disabled={!query.trim() || threadLoading || !!threadError || archivedConversation || clinical.documentsLoading || !!clinical.documentError}>
                       <ArrowUp size={23} strokeWidth={2.25} aria-hidden="true" />
                     </button>
                   )}
                   </div>
                 </form>
+                <p id="fil-workchat-privacy" className="fil-workchat-privacy">Không nhập thông tin định danh người bệnh.</p>
 
               </div>
 
@@ -2110,7 +2071,8 @@ export default function App({ user, settings, clinical, activeTab, onOpenChat, s
                 <div className="fil-reference-list">
                   {!activeSources.length && <div className="fil-reference-empty">
                     <BookOpen size={24} aria-hidden="true" />
-                    <p>{loading ? 'Đang tìm nguồn trích dẫn…' : 'Nguồn trích dẫn sẽ xuất hiện khi có kết quả tra cứu.'}</p>
+                    <p>{!documents.length ? 'Thêm PDF để Fil đối chiếu với tài liệu của bạn.'
+                      : loading ? 'Nguồn sẽ xuất hiện cùng câu trả lời.' : 'Nguồn trích dẫn sẽ xuất hiện khi có kết quả tra cứu.'}</p>
                   </div>}
                   {activeSources.map((source, index) => {
                     const web = isWebSource(source);

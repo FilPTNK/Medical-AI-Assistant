@@ -10,7 +10,7 @@ export default function ChatDocuments({
 }) {
   const inputRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
-  const { documents, documentError, refreshDocuments, upload } = clinical;
+  const { documents, documentError, documentsLoading, refreshDocuments, upload } = clinical;
   const allSelected = documents.length > 0 && selectedNames.length === documents.length;
   const someSelected = selectedNames.length > 0 && !allSelected;
 
@@ -35,7 +35,8 @@ export default function ChatDocuments({
       {documentError && <div role="alert" className="fil-doc-status">
         {documentError} <button type="button" onClick={refreshDocuments}>Tải lại</button>
       </div>}
-      {!documentError && documents.length === 0 && <p className="fil-chat-empty">Danh sách tài liệu đang trống.</p>}
+      {documentsLoading && <p className="fil-chat-empty" role="status">Đang tải nguồn…</p>}
+      {!documentError && !documentsLoading && documents.length === 0 && <p className="fil-chat-empty">Chưa có PDF để đối chiếu.</p>}
       {documents.length > 0 && <div className="fil-source-select-all">
         <span aria-live="polite">{selectedNames.length} nguồn đã chọn</span>
         <label>Chọn tất cả <input ref={element => {
@@ -104,7 +105,7 @@ export default function ChatDocuments({
                 <span>{doc.doc_title || doc.doc_name}</span>
                 <input type="checkbox" checked={selectedNames.includes(doc.doc_name)} onChange={() => onToggleSource(doc.doc_name)} />
               </label>)}
-              {documents.length === 0 && <p>Chưa có PDF để chọn.</p>}
+              {documents.length === 0 && <p>{documentsLoading ? 'Đang tải nguồn…' : 'Chưa có PDF để chọn.'}</p>}
             </div>
             <div className="dialog-actions">
               <Dialog.Close asChild><button type="button" className="btn-dialog-secondary"><X size={15} /> Đóng</button></Dialog.Close>
